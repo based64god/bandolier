@@ -1,0 +1,425 @@
+import type { AwsCredentials } from "~/server/agents/aws";
+import { env } from "~/env";
+import { ingestToken } from "~/lib/ingest";
+import { artifactsEnabled } from "~/server/agents/artifacts";
+import { SPAWNED_BY_LABEL, spawnedByLabelValue } from "~/server/agents/labels";
+import { db } from "~/server/db";
+import { taskRun } from "~/server/db/schema";
+import {
+  getBatchV1Api,
+  getCoreV1Api,
+  getNetworkingV1Api,
+} from "~/server/k8s/client";
+
+/** Seconds a finished Job (and its pod) is retained before Kubernetes deletes it. */
+export const JOB_TTL_SECONDS = 7 * 24 * 3600; // one week
+
+/** Default cap on Claude agentic turns when the deploy form leaves it blank. */
+export const DEFAULT_MAX_TURNS = 100;
+
+// ── Kubernetes resource bootstrap ─────────────────────────────────────────────
+
+export async function ensureNamespace(
+  namespace: string,
+  kubeconfig: string,
+): Promise<boolean> {
+  let created = false;
+  try {
+    await getCoreV1Api(kubeconfig).createNamespace({
+      body: {
+        metadata: {
+          name: namespace,
+          labels: { "app.kubernetes.io/managed-by": "bandolier" },
+        },
+      },
+    });
+    created = true;
+  } catch (err) {
+    if ((err as { code?: number }).code !== 409) throw err;
+  }
+
+  // Isolate agents in the namespace (no-op if disabled or already present). Done
+  // after the namespace is guaranteed to exist so the policy has somewhere to go.
+  await ensureNetworkPolicy(namespace, kubeconfig);
+  return created;
+}
+
+/**
+ * Network isolation for agent pods: denies all inbound traffic and restricts
+ * egress to DNS + the public internet, with the cluster's own (private) ranges
+ * blocked. An agent can clone from GitHub and reach its model provider but can't
+ * reach other pods or in-cluster services. Requires a policy-enforcing CNI
+ * (Calico/Cilium) to take effect — it's a harmless no-op under kindnet.
+ */
+async function ensureNetworkPolicy(
+  namespace: string,
+  kubeconfig: string,
+): Promise<void> {
+  if (env.AGENT_NETWORK_POLICY !== "true") return;
+
+  const blocked = env.AGENT_EGRESS_BLOCKED_CIDRS.split(",")
+    .map((c) => c.trim())
+    .filter(Boolean);
+
+  try {
+    await getNetworkingV1Api(kubeconfig).createNamespacedNetworkPolicy({
+      namespace,
+      body: {
+        apiVersion: "networking.k8s.io/v1",
+        kind: "NetworkPolicy",
+        metadata: {
+          name: "claude-agent-isolation",
+          namespace,
+          labels: { "app.kubernetes.io/managed-by": "bandolier" },
+        },
+        spec: {
+          podSelector: { matchLabels: { app: "claude-agent" } },
+          policyTypes: ["Ingress", "Egress"],
+          ingress: [], // deny all inbound
+          egress: [
+            {
+              // DNS resolution via kube-dns.
+              to: [
+                {
+                  namespaceSelector: {},
+                  podSelector: { matchLabels: { "k8s-app": "kube-dns" } },
+                },
+              ],
+              ports: [
+                { protocol: "UDP", port: 53 },
+                { protocol: "TCP", port: 53 },
+              ],
+            },
+            {
+              // Public internet over HTTP(S), minus the blocked in-cluster ranges.
+              to: [{ ipBlock: { cidr: "0.0.0.0/0", except: blocked } }],
+              ports: [
+                { protocol: "TCP", port: 443 },
+                { protocol: "TCP", port: 80 },
+              ],
+            },
+          ],
+        },
+      },
+    });
+  } catch (err) {
+    if ((err as { code?: number }).code === 409) return; // already present
+    throw err;
+  }
+}
+
+export async function ensureServiceAccount(
+  namespace: string,
+  name: string,
+  kubeconfig: string,
+): Promise<boolean> {
+  try {
+    await getCoreV1Api(kubeconfig).createNamespacedServiceAccount({
+      namespace,
+      body: {
+        metadata: {
+          name,
+          namespace,
+          labels: { "app.kubernetes.io/managed-by": "bandolier" },
+        },
+        automountServiceAccountToken: false,
+      },
+    });
+    return true;
+  } catch (err) {
+    if ((err as { code?: number }).code === 409) return false;
+    throw err;
+  }
+}
+
+// ── Job creation ─────────────────────────────────────────────────────────────
+
+type EnvVar = { name: string; value?: string; valueFrom?: object };
+
+export interface JobSpec {
+  task: string;
+  /** Human-readable label shown in the dashboard (issue title or task preview). */
+  displayName: string;
+  /** Kubernetes namespace to deploy into. Falls back to K8S_NAMESPACE env var. */
+  namespace?: string;
+  repoUrl?: string;
+  branch: string;
+  model: string;
+  maxTurns?: number;
+  gitName?: string;
+  gitEmail?: string;
+  /** Set for issue tasks (dashboard or webhook). */
+  issueNumber?: string;
+  /** Link to the originating GitHub issue (issue tasks). */
+  issueUrl?: string;
+  /** The (unique) working branch the harness should use, referenced in the prompt. */
+  agentBranch?: string;
+  /** "owner/repo" — used by the harness to interact with the GitHub API. */
+  repoFullName?: string;
+  /** Human label of who/what created the task (e.g. user email, or issue opener). */
+  createdBy?: string;
+  /**
+   * Bandolier user id that owns this agent — the deploying user, or (for webhook
+   * tasks) the user linked to the GitHub account that triggered the event. Pods
+   * are labelled with it so each user's overview can list only their own agents.
+   */
+  userId: string;
+  /**
+   * The acting user's GitHub OAuth token. Stored in the per-job secret and used
+   * by the harness to clone, commit, and open the PR as that user.
+   */
+  githubToken?: string;
+  /**
+   * The acting user's AWS credentials. When provided, the agent runs on Bedrock
+   * with these. The caller must validate them (STS) before deploy.
+   */
+  awsCredentials?: AwsCredentials;
+  /** The acting user's Anthropic API key. Used when no AWS credentials are given. */
+  anthropicApiKey?: string;
+  /** The acting user's kubeconfig — the cluster the agent is deployed into. Required. */
+  kubeconfig: string;
+}
+
+/** Per-job secret holding the acting user's credentials (GitHub / AWS / Anthropic). */
+function userSecretName(jobName: string): string {
+  return `${jobName}-creds`;
+}
+
+export async function createAgentJob(spec: JobSpec): Promise<string> {
+  const ns = spec.namespace ?? env.K8S_NAMESPACE;
+  const jobName = `claude-agent-${Date.now()}`;
+
+  const useUserAws = !!spec.awsCredentials;
+  // Anthropic only applies when AWS isn't set (AWS Bedrock takes precedence).
+  const useUserAnthropic = !useUserAws && !!spec.anthropicApiKey;
+  const useUserToken = !!spec.githubToken;
+
+  // Only user-provided credentials are ever used — there is no server fallback.
+  if (!useUserAws && !useUserAnthropic) {
+    throw new Error(
+      "No model credentials available. Configure AWS or Anthropic credentials in account settings.",
+    );
+  }
+
+  const kc = spec.kubeconfig;
+  if (!kc) {
+    throw new Error("No kubeconfig available. Add one in account settings.");
+  }
+
+  // Bootstrap shared (non-secret) resources.
+  const [nsCreated, saCreated] = await Promise.all([
+    ensureNamespace(ns, kc),
+    ensureServiceAccount(ns, "claude-agent", kc),
+  ]);
+  console.log("[bandolier:deploy] resources", {
+    namespace: nsCreated ? "created" : "exists",
+    serviceAccount: saCreated ? "created" : "exists",
+  });
+
+  // The model id is chosen by the user from their provider's live model list.
+  const provider = useUserAws
+    ? { type: "bedrock" as const, model: spec.model }
+    : { type: "anthropic" as const, model: spec.model };
+  console.log("[bandolier:deploy] provider", {
+    type: provider.type,
+    model: provider.model,
+  });
+
+  // All credentials come from the per-job secret created below.
+  const userRef = (key: string, optional = false): EnvVar => ({
+    name: key,
+    valueFrom: {
+      secretKeyRef: { name: userSecretName(jobName), key, optional },
+    },
+  });
+
+  const providerEnvVars: EnvVar[] = useUserAws
+    ? [
+        { name: "CLAUDE_CODE_USE_BEDROCK", value: "1" },
+        { name: "AWS_REGION", value: spec.awsCredentials!.region },
+        userRef("AWS_ACCESS_KEY_ID"),
+        userRef("AWS_SECRET_ACCESS_KEY"),
+        userRef("AWS_SESSION_TOKEN", true),
+      ]
+    : [userRef("ANTHROPIC_API_KEY")];
+
+  const envVars: EnvVar[] = [
+    { name: "CLAUDE_TASK", value: spec.task },
+    { name: "CLAUDE_MODEL", value: provider.model },
+    { name: "AGENT_TITLE", value: spec.displayName },
+    { name: "REPO_URL", value: spec.repoUrl ?? "" },
+    { name: "BRANCH", value: spec.branch },
+    { name: "GIT_NAME", value: spec.gitName ?? "Claude Agent" },
+    {
+      name: "GIT_EMAIL",
+      value: spec.gitEmail ?? "claude-agent@bandolier.local",
+    },
+    ...providerEnvVars,
+    userRef("GITHUB_TOKEN", true),
+  ];
+
+  // Always cap turns so an agent can't run away; the form value overrides it.
+  envVars.push({
+    name: "MAX_TURNS",
+    value: String(spec.maxTurns ?? DEFAULT_MAX_TURNS),
+  });
+  if (spec.issueNumber) {
+    envVars.push({ name: "GITHUB_ISSUE_NUMBER", value: spec.issueNumber });
+  }
+  if (spec.repoFullName) {
+    envVars.push({ name: "GITHUB_REPO", value: spec.repoFullName });
+  }
+  if (spec.agentBranch) {
+    envVars.push({ name: "AGENT_BRANCH", value: spec.agentBranch });
+  }
+
+  // When artifact persistence is configured, give the harness an authenticated
+  // callback to upload its transcript after the run.
+  const persistArtifacts = artifactsEnabled();
+  if (persistArtifacts) {
+    envVars.push(
+      {
+        name: "BANDOLIER_INGEST_URL",
+        value: `${env.BETTER_AUTH_URL}/api/agent-runs`,
+      },
+      { name: "BANDOLIER_JOB", value: jobName },
+      {
+        name: "BANDOLIER_INGEST_TOKEN",
+        value: ingestToken(jobName, env.BETTER_AUTH_SECRET ?? ""),
+      },
+    );
+  }
+
+  // Annotations carried on both the Job and the pod (the dashboard reads pods).
+  // The repo is an annotation (it contains "/", invalid in a label) and is used
+  // by the overview to show which repository an agent belongs to.
+  const annotations: Record<string, string> = {
+    "bandolier.io/display-name": spec.displayName,
+    ...(spec.repoFullName && { "bandolier.io/repo": spec.repoFullName }),
+    ...(spec.issueNumber && { "bandolier.io/github-issue": spec.issueNumber }),
+    ...(spec.issueUrl && { "bandolier.io/issue-url": spec.issueUrl }),
+    ...(spec.createdBy && { "bandolier.io/created-by": spec.createdBy }),
+  };
+
+  // Scopes the cross-repo overview to the user who spawned the agent (queried via
+  // a label selector, so no cluster-wide pod scan is needed).
+  const spawnedBy = spawnedByLabelValue(spec.userId);
+
+  const job = await getBatchV1Api(kc).createNamespacedJob({
+    namespace: ns,
+    body: {
+      apiVersion: "batch/v1",
+      kind: "Job",
+      metadata: {
+        name: jobName,
+        namespace: ns,
+        labels: {
+          app: "claude-agent",
+          "app.kubernetes.io/managed-by": "bandolier",
+          [SPAWNED_BY_LABEL]: spawnedBy,
+        },
+        annotations,
+      },
+      spec: {
+        ttlSecondsAfterFinished: JOB_TTL_SECONDS,
+        backoffLimit: 0,
+        template: {
+          metadata: {
+            labels: {
+              app: "claude-agent",
+              "app.kubernetes.io/managed-by": "bandolier",
+              "bandolier.io/job": jobName,
+              [SPAWNED_BY_LABEL]: spawnedBy,
+              "bandolier.io/source": spec.issueNumber
+                ? "github-issue"
+                : "dashboard",
+            },
+            annotations,
+          },
+          spec: {
+            serviceAccountName: "claude-agent",
+            restartPolicy: "Never",
+            securityContext: {
+              runAsNonRoot: true,
+              runAsUser: 1000,
+              fsGroup: 1000,
+            },
+            containers: [
+              {
+                name: "harness",
+                image: env.HARNESS_IMAGE,
+                imagePullPolicy: env.HARNESS_IMAGE_PULL_POLICY,
+                env: envVars,
+                resources: {
+                  requests: { cpu: "500m", memory: "512Mi" },
+                  limits: { cpu: "2", memory: "2Gi" },
+                },
+                volumeMounts: [{ name: "workspace", mountPath: "/workspace" }],
+              },
+            ],
+            volumes: [{ name: "workspace", emptyDir: {} }],
+          },
+        },
+      },
+    },
+  });
+
+  // Store the acting user's credentials in a per-job secret owned by the Job, so
+  // they're garbage-collected when the Job is deleted (manually or via TTL).
+  const stringData: Record<string, string> = {};
+  if (useUserToken) stringData.GITHUB_TOKEN = spec.githubToken!;
+  if (useUserAnthropic) stringData.ANTHROPIC_API_KEY = spec.anthropicApiKey!;
+  if (useUserAws) {
+    stringData.AWS_ACCESS_KEY_ID = spec.awsCredentials!.accessKeyId;
+    stringData.AWS_SECRET_ACCESS_KEY = spec.awsCredentials!.secretAccessKey;
+    // Only include a session token for temporary credentials; an empty value
+    // would break SigV4 for permanent IAM keys.
+    if (spec.awsCredentials!.sessionToken) {
+      stringData.AWS_SESSION_TOKEN = spec.awsCredentials!.sessionToken;
+    }
+  }
+
+  await getCoreV1Api(kc).createNamespacedSecret({
+    namespace: ns,
+    body: {
+      metadata: {
+        name: userSecretName(jobName),
+        namespace: ns,
+        labels: { "app.kubernetes.io/managed-by": "bandolier" },
+        ownerReferences: [
+          {
+            apiVersion: "batch/v1",
+            kind: "Job",
+            name: jobName,
+            uid: job.metadata?.uid ?? "",
+            blockOwnerDeletion: true,
+          },
+        ],
+      },
+      type: "Opaque",
+      stringData,
+    },
+  });
+
+  // Record the run so it can be listed/inspected after the Job's TTL deletes
+  // the pod. The harness fills in transcriptKey via the ingest callback.
+  if (persistArtifacts) {
+    await db.insert(taskRun).values({
+      jobName,
+      namespace: ns,
+      displayName: spec.displayName,
+      createdBy: spec.createdBy ?? null,
+      repoFullName: spec.repoFullName ?? null,
+      issueNumber: spec.issueNumber ?? null,
+    });
+  }
+
+  console.log("[bandolier:deploy] job created", {
+    job: jobName,
+    namespace: ns,
+    github: useUserToken,
+    aws: useUserAws,
+    anthropic: useUserAnthropic,
+  });
+  return jobName;
+}

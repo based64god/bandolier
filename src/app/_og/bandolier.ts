@@ -1,0 +1,15 @@
+// The bandolier glyph as a standalone SVG string (transparent, purple), used as
+// a data-URI <img> source inside next/og ImageResponse renders.
+export const bandolierSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-2 -2 28 28">
+  <g transform="rotate(45 12 12)" fill="#d8b4fe">
+    <rect x="-1" y="10" width="26" height="4" rx="2" fill-opacity="0.5"/>
+    <rect x="0.5" y="4" width="2.5" height="8.5" rx="1.25"/>
+    <rect x="4.2" y="4" width="2.5" height="8.5" rx="1.25"/>
+    <rect x="7.9" y="4" width="2.5" height="8.5" rx="1.25"/>
+    <rect x="11.6" y="4" width="2.5" height="8.5" rx="1.25"/>
+    <rect x="15.3" y="4" width="2.5" height="8.5" rx="1.25"/>
+    <rect x="19" y="4" width="2.5" height="8.5" rx="1.25"/>
+  </g>
+</svg>`;
+
+export const bandolierDataUri = `data:image/svg+xml;utf8,${encodeURIComponent(bandolierSvg)}`;

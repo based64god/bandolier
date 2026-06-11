@@ -1,0 +1,8 @@
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -198,3 +198,5 @@
+ export * from './util/log.js';
+ export { logOnce } from './util/log-once.js';
+ export { createQueryId } from './util/query-id.js';
++
++export { DEFAULT_MIGRATION_TABLE, DEFAULT_MIGRATION_LOCK_TABLE } from './migration/migrator.js';

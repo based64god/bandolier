@@ -1,0 +1,122 @@
+# Bandolier Agent Harness — Kubernetes reference manifest
+#
+# The Bandolier server creates namespaces, the claude-agent ServiceAccount, and
+# per-job credential secrets dynamically at deploy time. There is NO shared,
+# pre-created credentials secret: every agent runs with the deploying user's own
+# credentials (GitHub via OAuth; AWS/Anthropic from their account settings),
+# stored in a short-lived per-job secret that is garbage-collected with the Job.
+#
+# This file documents the resource shapes the server produces. The Job at the
+# bottom is illustrative — to run it standalone, create your own secret and wire
+# its keys in via secretKeyRef.
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: claude-agents
+  labels:
+    app.kubernetes.io/managed-by: bandolier
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: claude-agent
+  namespace: claude-agents
+  labels:
+    app.kubernetes.io/managed-by: bandolier
+# Agents do not need to talk to the Kubernetes API.
+automountServiceAccountToken: false
+
+---
+# Example Job — the Bandolier dashboard generates Jobs with this shape.
+# You can also apply this directly to test the image.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: claude-agent-example
+  namespace: claude-agents
+  labels:
+    app: claude-agent
+    app.kubernetes.io/managed-by: bandolier
+spec:
+  # Keep the finished pod around for 1 h so you can inspect logs.
+  ttlSecondsAfterFinished: 3600
+  # Do not retry — a failed task should be retried intentionally.
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: claude-agent
+        app.kubernetes.io/managed-by: bandolier
+    spec:
+      serviceAccountName: claude-agent
+      restartPolicy: Never
+
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+
+      containers:
+        - name: harness
+          # Replace with your actual image after pushing to a registry.
+          image: ghcr.io/YOUR_ORG/bandolier-agent-harness:latest
+          # IfNotPresent: use kind-loaded or cached images (local dev).
+          # Always: force-pull on every pod start (remote registry / production).
+          imagePullPolicy: IfNotPresent
+
+          env:
+            # ── Task configuration ────────────────────────────────────────
+            - name: CLAUDE_TASK
+              value: "Describe the repository structure and suggest improvements."
+            - name: CLAUDE_MODEL
+              value: "claude-sonnet-4-6"
+            - name: MAX_TURNS
+              value: "100"
+
+            # ── Repository (optional) ─────────────────────────────────────
+            - name: REPO_URL
+              value: ""
+            - name: BRANCH
+              value: "main"
+
+            # ── Git identity for commits ──────────────────────────────────
+            - name: GIT_NAME
+              value: "Claude Agent"
+            - name: GIT_EMAIL
+              value: "claude-agent@bandolier.local"
+
+            # ── Credentials ───────────────────────────────────────────────
+            # The server injects these from a per-job secret holding the
+            # deploying user's own credentials. For a standalone test, point
+            # these at a secret you create yourself.
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: claude-agent-example-creds
+                  key: ANTHROPIC_API_KEY
+                  optional: true
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: claude-agent-example-creds
+                  key: GITHUB_TOKEN
+                  optional: true
+
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "2"
+              memory: "2Gi"
+
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+
+      volumes:
+        - name: workspace
+          emptyDir: {}

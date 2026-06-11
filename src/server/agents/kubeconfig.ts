@@ -5,7 +5,7 @@ import { eq } from "drizzle-orm";
 import { env } from "~/env";
 import { type db } from "~/server/db";
 import { userKubeconfig } from "~/server/db/schema";
-import { getVersionApi } from "~/server/k8s/client";
+import { getVersionApi, unsupportedKubeconfigAuth } from "~/server/k8s/client";
 
 export interface KubeconfigValidation {
   valid: boolean;
@@ -32,6 +32,17 @@ export async function validateKubeconfig(
         err instanceof Error
           ? `Invalid kubeconfig: ${err.message}`
           : "Invalid kubeconfig.",
+    };
+  }
+
+  // Reject auth methods the server can't satisfy (exec plugins, auth providers,
+  // on-disk cert/key files) with a clear message instead of a cryptic runtime
+  // failure like `spawn aws ENOENT` when the request is actually made.
+  const unsupported = unsupportedKubeconfigAuth(kubeconfig);
+  if (unsupported) {
+    return {
+      valid: false,
+      error: `Unsupported kubeconfig: ${unsupported}. Generate a token-based kubeconfig with scripts/create-bandolier-kubeconfig.sh.`,
     };
   }
 

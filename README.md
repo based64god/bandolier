@@ -1,29 +1,291 @@
-# Create T3 App
+# Bandolier
 
-This is a [T3 Stack](https://create.t3.gg/) project bootstrapped with `create-t3-app`.
+Bandolier is a web app for running [Claude Code](https://www.anthropic.com/claude-code) agents as Kubernetes Jobs. You sign in with GitHub, point an agent at a repository or an issue, and Bandolier spins up an isolated pod that clones the repo, runs Claude Code non-interactively, and opens a pull request with the result. You watch progress live from a dashboard.
 
-## What's next? How do I make an app with this?
+Agents can be launched two ways:
 
-We try to keep this project as simple as possible, so you can start with just the scaffolding we set up for you, and add additional things later when they become necessary.
+- **From the dashboard** — pick a repo, write a task (or select an open issue), choose a model, and deploy.
+- **From a GitHub webhook** — when an issue is opened in a configured repo, Bandolier automatically launches an agent to work on it and open a PR.
 
-If you are not familiar with the different technologies used in this project, please refer to the respective docs. If you still are in the wind, please join our [Discord](https://t3.gg/discord) and ask for help.
+Every agent runs with the **deploying user's own credentials** — their GitHub OAuth token, their AWS Bedrock or Anthropic API key, and the cluster from their kubeconfig. There are no shared, server-side provider credentials; the available models are queried live from each user's provider.
 
-- [Next.js](https://nextjs.org)
-- [NextAuth.js](https://next-auth.js.org)
-- [Prisma](https://prisma.io)
-- [Drizzle](https://orm.drizzle.team)
-- [Tailwind CSS](https://tailwindcss.com)
-- [tRPC](https://trpc.io)
+---
 
-## Learn More
+## How it works
 
-To learn more about the [T3 Stack](https://create.t3.gg/), take a look at the following resources:
+Bandolier has two deployable pieces:
 
-- [Documentation](https://create.t3.gg/)
-- [Learn the T3 Stack](https://create.t3.gg/en/faq#what-learning-resources-are-currently-available) — Check out these awesome tutorials
+1. **The web app** (this repo, `src/`) — a Next.js + tRPC application. It handles auth, stores per-user credentials, talks to the Kubernetes API, and serves the dashboard.
+2. **The agent harness** (`agent-harness/`) — a small Go binary baked into a container image alongside the Claude Code CLI, `git`, and `gh`. This is what actually runs inside each agent pod.
 
-You can check out the [create-t3-app GitHub repository](https://github.com/t3-oss/create-t3-app) — your feedback and contributions are welcome!
+When you deploy an agent, the web app:
 
-## How do I deploy this?
+1. Resolves your credentials (GitHub token, model provider, kubeconfig) from the database.
+2. Creates a namespace, a `claude-agent` ServiceAccount, and (optionally) a `NetworkPolicy` that isolates agent pods.
+3. Writes a short-lived **per-job Secret** holding only that run's credentials, owned by the Job so Kubernetes garbage-collects it when the Job is deleted.
+4. Creates a Kubernetes **Job** running the harness image, with the task wired in via environment variables.
 
-Follow our deployment guides for [Vercel](https://create.t3.gg/en/deployment/vercel), [Netlify](https://create.t3.gg/en/deployment/netlify) and [Docker](https://create.t3.gg/en/deployment/docker) for more information.
+The harness then clones the repo, runs `claude --print`, commits the work, pushes a branch, and opens a PR. The PR title and description are written out-of-band by the latest Sonnet model, regardless of which model performed the task. Logs stream back to the dashboard; if artifact storage is configured, the full transcript is uploaded to S3 so it outlives the Job's TTL.
+
+```
+Browser ──▶ Next.js app ──▶ Kubernetes API ──▶ Job (harness pod)
+                │                                   │
+                ├─ Postgres (users, creds, runs)    ├─ git clone
+                └─ S3 (transcripts, optional)       ├─ claude --print
+                                                    └─ gh pr create
+```
+
+---
+
+## Prerequisites
+
+- **Node.js 20+** and **pnpm 10** (`corepack enable` will pick up the pinned version).
+- **Docker** or **Podman** — for the local Postgres database (and for building the harness image).
+- **A PostgreSQL database** — the included script starts one in a container.
+- **A Kubernetes cluster** the web app can reach and create Jobs in. For local development, [kind](https://kind.sigs.k8s.io/), [k3d](https://k3d.io/), or minikube all work. The cluster must be able to pull the harness image (see [The agent harness image](#the-agent-harness-image)).
+- **A GitHub OAuth app** — for sign-in and repo access.
+- **A model provider** — each user supplies their own AWS Bedrock credentials or Anthropic API key in the app; nothing provider-related is needed in server config.
+
+---
+
+## Quick start
+
+### 1. Install dependencies
+
+```bash
+pnpm install
+```
+
+### 2. Create a GitHub OAuth app
+
+In GitHub → **Settings → Developer settings → OAuth Apps → New OAuth App**:
+
+- **Homepage URL**: `http://localhost:3000`
+- **Authorization callback URL**: `http://localhost:3000/api/auth/callback/github`
+
+Copy the **Client ID** and generate a **Client Secret**. The app requests the `repo` and `workflow` scopes so agents can clone private repos and open PRs (including ones that touch `.github/workflows/`).
+
+### 3. Configure environment
+
+Copy the example file and fill it in:
+
+```bash
+cp .env.example .env
+```
+
+Minimum required for local development:
+
+```bash
+# A random secret — generate one with: openssl rand -base64 32
+BETTER_AUTH_SECRET="…"
+
+# From the GitHub OAuth app you just created
+BETTER_AUTH_GITHUB_CLIENT_ID="…"
+BETTER_AUTH_GITHUB_CLIENT_SECRET="…"
+
+# Local Postgres (matches start-database.sh below)
+DATABASE_URL="postgresql://postgres:password@localhost:5432/bandolier"
+
+# Image the agent Jobs run. Use the published image, or build your own (below).
+HARNESS_IMAGE="ghcr.io/based64god/bandolier-agent-harness:latest"
+```
+
+You also need a cluster for agents to deploy into. Either:
+
+- Set **`SERVER_KUBECONFIG`** (inline YAML or a path to a kubeconfig file) so *all* agents deploy to one cluster — and the per-user kubeconfig setting is hidden, or
+- Leave it unset and have **each user paste their own kubeconfig** in the app's settings.
+
+See [Configuration reference](#configuration-reference) for every variable.
+
+### 4. Start Postgres and apply the schema
+
+```bash
+./start-database.sh     # starts a Postgres container from DATABASE_URL
+pnpm db:push            # creates the tables (no migration files are used)
+```
+
+### 5. Run the app
+
+```bash
+pnpm dev
+```
+
+Open <http://localhost:3000> and sign in with GitHub.
+
+### 6. Configure your account in the app
+
+Open **Settings** in the dashboard and add:
+
+- **A model provider** — either AWS Bedrock credentials or an Anthropic API key. Credentials are validated before they're saved, and the model picker is populated live from whichever provider you configured.
+- **A kubeconfig** — unless the server set `SERVER_KUBECONFIG` for everyone.
+
+You can now select a repo, deploy an agent, and watch it work.
+
+---
+
+## The agent harness image
+
+Agent Jobs run the image named by `HARNESS_IMAGE`. You can use the prebuilt image or build your own.
+
+**Use the published image** (built and pushed by `.github/workflows/agent-harness-image.yml` on pushes to `main` and version tags):
+
+```bash
+HARNESS_IMAGE="ghcr.io/based64god/bandolier-agent-harness:latest"
+```
+
+**Build it yourself:**
+
+```bash
+docker build -t bandolier-agent-harness:latest agent-harness
+```
+
+If you're on a local cluster, the image must be loadable by the cluster. For kind:
+
+```bash
+kind load docker-image bandolier-agent-harness:latest
+```
+
+Then set `HARNESS_IMAGE="bandolier-agent-harness:latest"` and `HARNESS_IMAGE_PULL_POLICY="IfNotPresent"`. When pulling from a remote registry instead, use `HARNESS_IMAGE_PULL_POLICY="Always"`.
+
+`agent-harness/k8s/manifest.yaml` is a standalone reference Job you can apply directly to test the image in isolation; the running app generates equivalent Jobs itself and does not use that file.
+
+---
+
+## GitHub webhooks (optional)
+
+To have agents launch automatically when issues are opened:
+
+1. In the app, open a repo you have admin on and configure its webhook (sets a per-repo secret, and optionally a trigger phrase that issue text must contain).
+2. In the GitHub repo → **Settings → Webhooks**, add a webhook pointing at `https://<your-host>/api/webhooks/github` with content type `application/json`, the **Issues** event, and the same secret.
+
+When an issue is opened, Bandolier verifies the signature, finds the Bandolier user linked to the GitHub account that opened it, and deploys an agent under that user's credentials. The resulting PR is attributed to the issue author.
+
+Optional env knobs: `GITHUB_WEBHOOK_SECRET` (a global fallback secret) and `GITHUB_TRIGGER_LABEL` (only act on issues carrying a specific label).
+
+---
+
+## REST API (optional)
+
+Besides the dashboard, agents can be listed and launched over a small REST API under `/api/v1`, authenticated with an API key (create one in the app; the token is shown once and only its hash is stored):
+
+```bash
+# List tasks for a repo
+curl -H "Authorization: Bearer bnd_…" \
+  https://<your-host>/api/v1/repos/<owner>/<repo>/tasks
+
+# Launch a task
+curl -X POST -H "Authorization: Bearer bnd_…" -H "Content-Type: application/json" \
+  -d '{"task":"Fix the flaky test in auth.spec.ts"}' \
+  https://<your-host>/api/v1/repos/<owner>/<repo>/tasks
+```
+
+---
+
+## Configuration reference
+
+All server configuration is validated in `src/env.js`.
+
+### Required
+
+| Variable | Description |
+| --- | --- |
+| `BETTER_AUTH_SECRET` | Secret for signing sessions and tokens. Required in production. |
+| `BETTER_AUTH_GITHUB_CLIENT_ID` | GitHub OAuth app client ID. |
+| `BETTER_AUTH_GITHUB_CLIENT_SECRET` | GitHub OAuth app client secret. |
+| `DATABASE_URL` | PostgreSQL connection string. |
+
+### Common
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `BETTER_AUTH_URL` | `http://localhost:3000` | Public base URL of the app. |
+| `HARNESS_IMAGE` | `ghcr.io/based64god/bandolier-agent-harness:latest` | Container image agent Jobs run. |
+| `HARNESS_IMAGE_PULL_POLICY` | `IfNotPresent` | `Always` when pulling from a remote registry. |
+| `SERVER_KUBECONFIG` | _(unset)_ | Inline YAML or path. When set, all agents use this cluster and users can't set their own. |
+| `K8S_NAMESPACE` | `claude-agents` | Default namespace when one isn't derived from the repo. |
+
+### Agent isolation
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `AGENT_NETWORK_POLICY` | `true` | Apply a `NetworkPolicy` denying inbound and limiting egress to DNS + the public internet. Needs a policy-enforcing CNI (Calico/Cilium); a no-op under kindnet. |
+| `AGENT_EGRESS_BLOCKED_CIDRS` | RFC-1918 ranges | Comma-separated CIDRs agents cannot reach (blocks lateral movement to in-cluster services). |
+
+### Webhooks
+
+| Variable | Description |
+| --- | --- |
+| `GITHUB_WEBHOOK_SECRET` | Global fallback secret for verifying webhook signatures (per-repo secrets take precedence). |
+| `GITHUB_TRIGGER_LABEL` | If set, only act on issues that carry this label. |
+
+### Access gate (optional)
+
+| Variable | Description |
+| --- | --- |
+| `APP_PASSWORD` | When set, a shared password is required before reaching any page or API (webhooks and the REST API are exempt — they authenticate on their own). |
+
+### Run artifacts (optional)
+
+Setting `ARTIFACTS_S3_BUCKET` enables uploading each run's transcript to S3 so it survives the Job's one-week TTL.
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `ARTIFACTS_S3_BUCKET` | _(unset)_ | Enables artifact persistence when set. |
+| `ARTIFACTS_S3_REGION` | `us-east-1` | Bucket region. |
+| `ARTIFACTS_S3_ENDPOINT` | _(unset)_ | Custom endpoint for MinIO / S3-compatible stores. |
+| `ARTIFACTS_AWS_ACCESS_KEY_ID` / `ARTIFACTS_AWS_SECRET_ACCESS_KEY` | _(unset)_ | Explicit S3 credentials; falls back to the default AWS provider chain. |
+
+---
+
+## Project layout
+
+```
+src/
+  app/                       Next.js App Router
+    dashboard/_components/    The agent dashboard UI (deploy, monitor, settings, webhooks)
+    api/auth/[...all]/        Better Auth handler
+    api/webhooks/github/      GitHub issue → agent webhook
+    api/agent-runs/           Transcript ingest endpoint (harness → S3)
+    api/v1/                   REST API
+  server/
+    api/routers/              tRPC routers (agents, repos, account, models, webhooks, api-keys)
+    agents/                   Job creation, kubeconfig, model listing, credentials, artifacts
+    better-auth/              Auth configuration
+    db/schema.ts              Drizzle schema (users, credentials, task runs, API keys, webhooks)
+  proxy.ts                   Middleware implementing the optional password gate
+
+agent-harness/
+  cmd/harness/main.go        The Go binary that runs inside each agent pod
+  Dockerfile                 Harness image (Go binary + Node + Claude Code CLI + git/gh)
+  k8s/manifest.yaml          Standalone reference Job for testing the image
+```
+
+---
+
+## Scripts
+
+| Command | What it does |
+| --- | --- |
+| `pnpm dev` | Run the app in development (Turbopack). |
+| `pnpm build` / `pnpm start` | Production build / serve. |
+| `pnpm db:push` | Sync the Drizzle schema to the database (used instead of migration files). |
+| `pnpm db:studio` | Open Drizzle Studio. |
+| `pnpm typecheck` | `tsc --noEmit`. |
+| `pnpm lint` / `pnpm lint:fix` | ESLint. |
+| `pnpm format:write` / `pnpm format:check` | Prettier. |
+| `pnpm check` | Lint + typecheck together. |
+
+---
+
+## Security notes
+
+- **Per-user credentials.** Agents only ever run with the deploying (or issue-opening) user's own GitHub, model-provider, and cluster credentials. There is no server-side provider identity to fall back on.
+- **Per-job secrets.** A run's credentials live in a Kubernetes Secret owned by its Job, so they're deleted when the Job is (manually or via its TTL). Finished Jobs are retained for one week.
+- **Stored credentials are not encrypted at rest.** User AWS/Anthropic keys, kubeconfigs, and webhook secrets are stored in Postgres in plaintext; API key tokens are stored only as SHA-256 hashes. Protect the database accordingly and serve the app over HTTPS.
+- **Network isolation** for agent pods is on by default but requires a policy-enforcing CNI to take effect.
+
+---
+
+## Tech stack
+
+Next.js (App Router) · React · tRPC · Better Auth (GitHub OAuth) · Drizzle ORM + PostgreSQL · Tailwind CSS · `@kubernetes/client-node` · AWS SDK (Bedrock/STS/S3) · Go (agent harness).

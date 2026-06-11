@@ -134,3 +134,31 @@ export function pickDefaultModel(models: ModelOption[]): string | undefined {
   );
   return (sonnet ?? models[0])?.id;
 }
+
+/**
+ * Picks the latest Sonnet model id from a provider's list. Used to write PR
+ * titles/descriptions out-of-band of the task model — Sonnet is a good
+ * speed/quality fit for summarizing a diff. "Latest" is decided by comparing the
+ * numeric version tokens in the id (e.g. `claude-sonnet-4-6` > `claude-3-5-...`),
+ * which works across both Anthropic ids and Bedrock inference-profile ids.
+ * Returns undefined when the list has no Sonnet model.
+ */
+export function pickLatestSonnet(models: ModelOption[]): string | undefined {
+  const sonnets = models.filter(
+    (m) => /sonnet/i.test(m.id) || /sonnet/i.test(m.label),
+  );
+  if (sonnets.length === 0) return undefined;
+
+  const version = (m: ModelOption): number[] =>
+    (m.id.match(/\d+/g) ?? []).map(Number);
+
+  return sonnets.reduce((best, m) => {
+    const a = version(m);
+    const b = version(best);
+    for (let i = 0; i < Math.max(a.length, b.length); i++) {
+      const diff = (a[i] ?? 0) - (b[i] ?? 0);
+      if (diff !== 0) return diff > 0 ? m : best;
+    }
+    return best;
+  }).id;
+}

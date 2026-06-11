@@ -61,8 +61,8 @@ spec:
 
       containers:
         - name: harness
-          # Replace with your actual image after pushing to a registry.
-          image: ghcr.io/YOUR_ORG/bandolier-agent-harness:latest
+          # Published by .github/workflows/agent-harness-image.yml.
+          image: ghcr.io/based64god/bandolier-agent-harness:latest
           # IfNotPresent: use kind-loaded or cached images (local dev).
           # Always: force-pull on every pod start (remote registry / production).
           imagePullPolicy: IfNotPresent
@@ -75,6 +75,12 @@ spec:
               value: "claude-sonnet-4-6"
             - name: MAX_TURNS
               value: "100"
+            # Optional: model used to write the PR title/description from the
+            # commits, independent of CLAUDE_MODEL. The server sets this to the
+            # latest Sonnet for PR-producing runs; unset falls back to the commit
+            # subject (repo PRs) or issue title (issue PRs).
+            - name: PR_WRITER_MODEL
+              value: ""
 
             # ── Repository (optional) ─────────────────────────────────────
             - name: REPO_URL

@@ -22,7 +22,7 @@ export const env = createEnv({
     K8S_LABEL_SELECTOR: z.string().default("app=claude-agent"),
     HARNESS_IMAGE: z
       .string()
-      .default("ghcr.io/YOUR_ORG/bandolier-agent-harness:latest"),
+      .default("ghcr.io/based64god/bandolier-agent-harness:latest"),
     HARNESS_IMAGE_PULL_POLICY: z
       .enum(["Always", "IfNotPresent", "Never"])
       .default("IfNotPresent"),

@@ -200,7 +200,7 @@ export function DeployModal({
                   value: String(i.number),
                   searchText: `#${i.number} ${i.title}`.toLowerCase(),
                   label: (
-                    <span className="truncate">
+                    <span className="min-w-0 flex-1 truncate">
                       <span className="text-white/40">#{i.number}</span>{" "}
                       <span className="text-white">{i.title}</span>
                     </span>

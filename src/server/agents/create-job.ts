@@ -146,6 +146,12 @@ export interface JobSpec {
   branch: string;
   model: string;
   maxTurns?: number;
+  /**
+   * Out-of-band model (the latest Sonnet) the harness uses to write the PR title
+   * and description from the commits, independent of `model`. Only meaningful for
+   * PR-producing runs; omit otherwise.
+   */
+  prWriterModel?: string;
   gitName?: string;
   gitEmail?: string;
   /** Set for issue tasks (dashboard or webhook). */
@@ -263,6 +269,9 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
     name: "MAX_TURNS",
     value: String(spec.maxTurns ?? DEFAULT_MAX_TURNS),
   });
+  if (spec.prWriterModel) {
+    envVars.push({ name: "PR_WRITER_MODEL", value: spec.prWriterModel });
+  }
   if (spec.issueNumber) {
     envVars.push({ name: "GITHUB_ISSUE_NUMBER", value: spec.issueNumber });
   }

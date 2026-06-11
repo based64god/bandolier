@@ -15,8 +15,14 @@ import {
   DEFAULT_MAX_TURNS,
   JOB_TTL_SECONDS,
 } from "~/server/agents/create-job";
-import { getUserGithubToken } from "~/server/agents/github-token";
+import {
+  getGithubIdentity,
+  getUserGithubToken,
+  githubGitIdentity,
+  type GitIdentity,
+} from "~/server/agents/github-token";
 import { resolveKubeconfig } from "~/server/agents/kubeconfig";
+import { listModelsForUser, pickLatestSonnet } from "~/server/agents/models";
 import { getUserAwsCredentials } from "~/server/agents/user-aws";
 import { taskRun } from "~/server/db/schema";
 import { getBatchV1Api, getCoreV1Api } from "~/server/k8s/client";
@@ -402,8 +408,6 @@ export const agentsRouter = createTRPCRouter({
           // When set, the agent works on this GitHub issue (and the task field
           // becomes additional context).
           issueNumber: z.number().int().positive().optional(),
-          gitName: z.string().optional(),
-          gitEmail: z.string().email().optional(),
         })
         .refine(
           (v) => v.task.trim().length > 0 || v.issueNumber !== undefined,
@@ -468,6 +472,24 @@ export const agentsRouter = createTRPCRouter({
           console.warn("[bandolier:deploy] user has no linked GitHub token");
         }
 
+        // Attribute commits to the deploying user. Prefer their GitHub no-reply
+        // address (guarantees GitHub links the commits to that account); fall
+        // back to the account email if there's no token or the lookup fails.
+        let gitIdentity: GitIdentity = {
+          name: ctx.session.user.name,
+          email: ctx.session.user.email,
+        };
+        if (githubToken) {
+          try {
+            const gh = await getGithubIdentity(githubToken);
+            gitIdentity = githubGitIdentity(gh.id, gh.login);
+          } catch (err) {
+            console.warn("[bandolier:deploy] GitHub identity lookup failed", {
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+        }
+
         // When an issue is selected, fetch its details for the display label and
         // wire issue mode so the harness builds context + opens a closing PR.
         let issue: {
@@ -520,6 +542,22 @@ export const agentsRouter = createTRPCRouter({
             ? buildIssuePrompt(issue, agentBranch, input.task)
             : input.task;
 
+        // PR-producing runs (repo or issue mode) get their PR title/description
+        // written by the latest Sonnet, out-of-band of the (possibly non-Sonnet)
+        // task model. Best-effort: a lookup failure falls back to the harness's
+        // commit-based title and must not block the deploy.
+        let prWriterModel: string | undefined;
+        if (repoUrl ?? issue) {
+          try {
+            const { models } = await listModelsForUser(ctx.db, userId);
+            prWriterModel = pickLatestSonnet(models);
+          } catch (err) {
+            console.warn("[bandolier:deploy] PR-writer model lookup failed", {
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+        }
+
         const jobName = await createAgentJob({
           namespace: input.namespace,
           task,
@@ -530,6 +568,7 @@ export const agentsRouter = createTRPCRouter({
           branch: input.branch,
           model: input.model,
           maxTurns: input.maxTurns,
+          prWriterModel,
           issueNumber: issue ? String(issue.number) : undefined,
           issueUrl: issue?.url,
           userId,
@@ -538,8 +577,8 @@ export const agentsRouter = createTRPCRouter({
           anthropicApiKey: anthropicApiKey ?? undefined,
           kubeconfig,
           createdBy: ctx.session.user.name ?? ctx.session.user.email,
-          gitName: input.gitName ?? ctx.session.user.name,
-          gitEmail: input.gitEmail ?? ctx.session.user.email,
+          gitName: gitIdentity.name,
+          gitEmail: gitIdentity.email,
         });
         return { jobName };
       } catch (err) {

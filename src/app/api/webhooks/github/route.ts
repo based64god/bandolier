@@ -5,9 +5,16 @@ import { env } from "~/env";
 import { getUserAnthropicKey } from "~/server/agents/anthropic";
 import { validateAwsCredentials } from "~/server/agents/aws";
 import { createAgentJob } from "~/server/agents/create-job";
-import { getGithubAccountByGithubId } from "~/server/agents/github-token";
+import {
+  getGithubAccountByGithubId,
+  githubGitIdentity,
+} from "~/server/agents/github-token";
 import { resolveKubeconfig } from "~/server/agents/kubeconfig";
-import { listModelsForUser, pickDefaultModel } from "~/server/agents/models";
+import {
+  listModelsForUser,
+  pickDefaultModel,
+  pickLatestSonnet,
+} from "~/server/agents/models";
 import { repoToNamespace } from "~/server/agents/namespace";
 import { getUserAwsCredentials } from "~/server/agents/user-aws";
 import { getRepoWebhookConfig } from "~/server/agents/webhook-config";
@@ -173,6 +180,10 @@ async function handleIssueOpened(
 
   const agentBranch = makeIssueBranch(issue.number, issue.title);
 
+  // Attribute commits to the issue author via their GitHub no-reply address, so
+  // GitHub links them to that account regardless of the sender's email privacy.
+  const gitIdentity = githubGitIdentity(sender.id, sender.login);
+
   await createAgentJob({
     namespace: repoToNamespace(repository.full_name),
     // Build the full prompt here (no operator context) so it's stored as
@@ -187,10 +198,15 @@ async function handleIssueOpened(
     repoUrl: repository.clone_url,
     branch: repository.default_branch,
     model,
+    // PR title/description are written by the latest Sonnet, out-of-band of the
+    // task model (which may be Opus/Haiku for webhook runs).
+    prWriterModel: pickLatestSonnet(models),
     issueNumber: String(issue.number),
     issueUrl: issue.html_url,
     repoFullName: repository.full_name,
     createdBy: sender.login,
+    gitName: gitIdentity.name,
+    gitEmail: gitIdentity.email,
     // Owner = the Bandolier user linked to the GitHub account that triggered the
     // event, so the agent shows up in that user's cross-repo overview.
     userId: linked.userId,

@@ -91,7 +91,7 @@ export function SearchableSelect({
         disabled={loading || disabled}
         className="flex w-full items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm transition hover:border-white/20 hover:bg-white/10 disabled:opacity-40"
       >
-        <span className="min-w-0 flex-1 truncate text-left">
+        <span className="flex min-w-0 flex-1 items-center text-left">
           {loading ? (
             <span className="text-white/40">Loading…</span>
           ) : selected ? (
@@ -164,7 +164,7 @@ export function SearchableSelect({
                           isSelected ? "bg-purple-600/40" : "hover:bg-white/5"
                         }`}
                       >
-                        <span className="min-w-0 flex-1 truncate">
+                        <span className="flex min-w-0 flex-1 items-center">
                           {o.label}
                         </span>
                       </button>

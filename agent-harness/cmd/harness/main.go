@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -258,7 +259,7 @@ The repository has been cloned. You are on branch "%s" — do not switch branche
 When you have completed the task above:
 1. Commit all your changes:
    git add -A
-   git commit -m "<concise summary of what you did>"
+   git commit -s -m "<concise summary of what you did>"
 
 Do NOT push or open a pull request — the harness will do that once you finish.
 Do not ask for clarification. Implement the best solution you can.`,
@@ -290,7 +291,7 @@ Steps:
 2. Implement a working solution for the issue
 3. Commit all changes:
    git add -A
-   git commit -m "%s"
+   git commit -s -m "%s"
 
 Do NOT push or open a pull request — the harness will do that once you finish.
 Do not ask for clarification. Implement the best solution you can.`,
@@ -422,6 +423,32 @@ func ensureCloses(body, issueNumber string) string {
 	return fmt.Sprintf("Closes #%s\n\n%s", issueNumber, body)
 }
 
+// installSignoffHook writes a global prepare-commit-msg hook that appends a
+// `Signed-off-by` trailer matching the configured git identity to every commit
+// (the same trailer `git commit -s` adds), unless one is already present. It
+// returns the hooks directory to wire in via core.hooksPath. The directory is
+// outside the cloned repo so `git add -A` never stages it.
+func installSignoffHook() (string, error) {
+	hooksDir := filepath.Join(os.TempDir(), "bandolier-githooks")
+	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
+		return "", fmt.Errorf("create hooks dir: %w", err)
+	}
+	const hook = `#!/bin/sh
+# Append a Signed-off-by trailer matching the git identity (DCO), like
+# 'git commit -s', unless the commit message already has one.
+name="$(git config user.name)"
+email="$(git config user.email)"
+[ -n "$name" ] || exit 0
+git interpret-trailers --if-exists doNothing \
+	--trailer "Signed-off-by: $name <$email>" --in-place "$1"
+`
+	path := filepath.Join(hooksDir, "prepare-commit-msg")
+	if err := os.WriteFile(path, []byte(hook), 0o755); err != nil {
+		return "", fmt.Errorf("write commit hook: %w", err)
+	}
+	return hooksDir, nil
+}
+
 // openPR pushes the branch and opens a pull request.
 func openPR(ctx context.Context, cfg config, branchName, title, body string) {
 	if !hasCommits(ctx, cfg, branchName) {
@@ -525,9 +552,19 @@ func run(ctx context.Context, cfg config) error {
 	if email == "" {
 		email = "claude-agent@bandolier.local"
 	}
+
+	// Sign off every commit (DCO) regardless of how the agent commits, via a
+	// prepare-commit-msg hook — equivalent to always passing `git commit -s`. The
+	// hooks dir lives outside the work tree so it isn't itself committed.
+	hooksDir, err := installSignoffHook()
+	if err != nil {
+		return err
+	}
+
 	for _, args := range [][]string{
 		{"config", "--global", "user.name", name},
 		{"config", "--global", "user.email", email},
+		{"config", "--global", "core.hooksPath", hooksDir},
 		// The workspace emptyDir is chowned to root:fsGroup by Kubernetes, so the
 		// repo dir isn't owned by our uid. Mark it safe to avoid git's dubious
 		// ownership check failing every git command.

@@ -10,7 +10,11 @@
 #
 # Paste the output into Bandolier → Settings → Kubeconfig.
 #
-# Usage:
+# Usage (hosted, served at /setup.sh):
+#   curl -fsSL https://<bandolier-host>/setup.sh | bash
+#   curl -fsSL https://<bandolier-host>/setup.sh | bash -s -- [options]
+#
+# Usage (local checkout):
 #   ./scripts/create-bandolier-kubeconfig.sh [options]
 #
 # Options:
@@ -26,6 +30,26 @@
 # Requires: kubectl with admin access to the target cluster, and `base64`.
 set -euo pipefail
 
+usage() {
+  cat <<'USAGE'
+Create a self-contained, token-based kubeconfig for Bandolier from your current
+cluster (no aws/gcloud exec plugins, no on-disk cert files) and print it to stdout.
+
+Usage:
+  curl -fsSL https://<bandolier-host>/setup.sh | bash
+  curl -fsSL https://<bandolier-host>/setup.sh | bash -s -- [options]
+  ./scripts/create-bandolier-kubeconfig.sh [options]
+
+Options:
+  -n, --name NAME       ServiceAccount name           (default: bandolier)
+  -s, --namespace NS    ServiceAccount namespace      (default: kube-system)
+  -c, --context CTX     kubectl context to target     (default: current context)
+  -o, --output FILE     Write kubeconfig to FILE        (default: stdout)
+      --scoped          Bind a least-privilege ClusterRole instead of cluster-admin
+  -h, --help            Show this help and exit
+USAGE
+}
+
 SA_NAME="bandolier"
 NAMESPACE="kube-system"
 CONTEXT=""
@@ -39,7 +63,7 @@ while [[ $# -gt 0 ]]; do
     -c|--context)   CONTEXT="$2"; shift 2 ;;
     -o|--output)    OUTPUT="$2"; shift 2 ;;
     --scoped)       SCOPED=1; shift ;;
-    -h|--help)      sed -n '2,/^set -euo/p' "$0" | sed 's/^# \{0,1\}//; s/^set -euo.*//'; exit 0 ;;
+    -h|--help)      usage; exit 0 ;;
     *) echo "error: unknown option '$1' (try --help)" >&2; exit 1 ;;
   esac
 done

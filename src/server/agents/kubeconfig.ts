@@ -42,7 +42,7 @@ export async function validateKubeconfig(
   if (unsupported) {
     return {
       valid: false,
-      error: `Unsupported kubeconfig: ${unsupported}. Generate a token-based kubeconfig with scripts/create-bandolier-kubeconfig.sh.`,
+      error: `Unsupported kubeconfig: ${unsupported}. Generate a token-based one by running \`curl -fsSL ${env.BETTER_AUTH_URL}/setup.sh | bash\` against your cluster.`,
     };
   }
 

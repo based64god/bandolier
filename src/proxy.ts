@@ -7,11 +7,13 @@ import { GATE_COOKIE, gateToken, timingSafeEqual } from "~/lib/gate";
 //  - the public REST API (authenticates via API key or session of its own)
 //  - the gate page + its submit endpoint
 //  - the app icon / OG image (only reveal the logo + tagline; lets unfurls work)
+//  - the kubeconfig setup script (no secrets; meant for `curl … | bash`)
 function isExempt(pathname: string): boolean {
   return (
     pathname.startsWith("/api/webhooks/") ||
     pathname.startsWith("/api/v1/") ||
     pathname === "/api/agent-runs" ||
+    pathname === "/setup.sh" ||
     pathname === "/gate" ||
     pathname === "/api/gate" ||
     pathname === "/icon.svg" ||

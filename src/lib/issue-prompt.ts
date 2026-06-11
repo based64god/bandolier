@@ -52,7 +52,7 @@ Steps:
 2. Implement a working solution for the issue
 3. Commit all changes:
    git add -A
-   git commit -m "${issue.title}"
+   git commit -s -m "${issue.title}"
 
 Do NOT push or open a pull request — the harness will do that once you finish.
 Do not ask for clarification. Implement the best solution you can.`;

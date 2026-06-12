@@ -190,6 +190,11 @@ export interface JobSpec {
   anthropicApiKey?: string;
   /** The acting user's kubeconfig — the cluster the agent is deployed into. Required. */
   kubeconfig: string;
+  /**
+   * When true the harness analyses the repo and creates a GitHub issue instead
+   * of committing code and opening a PR.
+   */
+  createGithubIssue?: boolean;
 }
 
 /** Per-job secret holding the acting user's credentials (GitHub / AWS / Anthropic). */
@@ -286,6 +291,9 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
   }
   if (spec.agentBranch) {
     envVars.push({ name: "AGENT_BRANCH", value: spec.agentBranch });
+  }
+  if (spec.createGithubIssue) {
+    envVars.push({ name: "CREATE_GITHUB_ISSUE", value: "1" });
   }
 
   // Both the artifact upload and the interactive input poll are authenticated by

@@ -189,6 +189,22 @@ export function OverviewPanel({ notify }: { notify: boolean }) {
                         </svg>
                         Pull request
                       </a>
+                    ) : agent.createdIssueUrl ? (
+                      <a
+                        href={agent.createdIssueUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 rounded-md border border-sky-500/30 bg-sky-500/10 px-2 py-1 text-xs text-sky-300 transition hover:bg-sky-500/20"
+                      >
+                        <svg
+                          viewBox="0 0 16 16"
+                          fill="currentColor"
+                          className="h-3.5 w-3.5"
+                        >
+                          <path d="M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0Zm0 4a1 1 0 0 1 1 1v3a1 1 0 0 1-2 0V5a1 1 0 0 1 1-1Zm0 7.5a1.1 1.1 0 1 1 0 2.2 1.1 1.1 0 0 1 0-2.2Z" />
+                        </svg>
+                        Issue created
+                      </a>
                     ) : (
                       <span className="text-xs text-white/20">—</span>
                     )}

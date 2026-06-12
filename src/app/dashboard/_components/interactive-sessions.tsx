@@ -55,8 +55,20 @@ function InteractiveCard({
   namespace: string;
 }) {
   const [draft, setDraft] = useState("");
+  const [collapsed, setCollapsed] = useState(false);
   const running = agent.status === "Running" || agent.status === "Pending";
   const utils = api.useUtils();
+
+  const awaiting = agent.awaitingInput;
+
+  // An agent that starts waiting for input pops back open even if the user had
+  // collapsed it — that's the moment they need to see it. We expand only on the
+  // false→true transition so the user can re-collapse while it keeps waiting.
+  const wasAwaiting = useRef(awaiting);
+  useEffect(() => {
+    if (awaiting && !wasAwaiting.current) setCollapsed(false);
+    wasAwaiting.current = awaiting;
+  }, [awaiting]);
 
   const { data: logs } = api.agents.getLogs.useQuery(
     {
@@ -84,8 +96,6 @@ function InteractiveCard({
     sendInput.mutate({ namespace, jobName: agent.jobName, content });
   }
 
-  const awaiting = agent.awaitingInput;
-
   return (
     <div
       className={`overflow-hidden rounded-xl border ${
@@ -94,9 +104,22 @@ function InteractiveCard({
           : "border-white/10 bg-white/5"
       }`}
     >
-      {/* Header */}
-      <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-2.5">
+      {/* Header — click anywhere (outside the action buttons) to collapse. */}
+      <div
+        onClick={() => setCollapsed((c) => !c)}
+        className="flex cursor-pointer items-center justify-between gap-3 border-b border-white/10 px-4 py-2.5 select-none"
+      >
         <div className="flex min-w-0 items-center gap-2">
+          <svg
+            viewBox="0 0 16 16"
+            fill="currentColor"
+            aria-hidden="true"
+            className={`h-3.5 w-3.5 shrink-0 text-white/40 transition-transform ${
+              collapsed ? "-rotate-90" : ""
+            }`}
+          >
+            <path d="M4.22 6.22a.75.75 0 0 1 1.06 0L8 8.94l2.72-2.72a.75.75 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 7.28a.75.75 0 0 1 0-1.06Z" />
+          </svg>
           <span className="truncate text-sm text-white/90">
             {agent.displayName}
           </span>
@@ -112,7 +135,10 @@ function InteractiveCard({
             </span>
           )}
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="flex shrink-0 items-center gap-2"
+        >
           {agent.pullRequestUrl && (
             <a
               href={agent.pullRequestUrl}
@@ -148,46 +174,50 @@ function InteractiveCard({
         </div>
       </div>
 
-      {/* Logs */}
-      <LogView text={logs ?? ""} />
+      {!collapsed && (
+        <>
+          {/* Logs */}
+          <LogView text={logs ?? ""} />
 
-      {/* Input */}
-      <div className="border-t border-white/10 p-3">
-        <div className="flex items-end gap-2">
-          <textarea
-            rows={2}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                send();
-              }
-            }}
-            disabled={!running}
-            placeholder={
-              running
-                ? awaiting
-                  ? "The agent is waiting — type a message and press Enter…"
-                  : "Send a message (the agent will pick it up after its current turn)…"
-                : "Session ended."
-            }
-            className="min-h-0 flex-1 resize-y rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/30 focus:outline-none disabled:opacity-40"
-          />
-          <button
-            onClick={send}
-            disabled={!running || !draft.trim() || sendInput.isPending}
-            className="rounded-lg bg-purple-600 px-3 py-2 text-sm font-medium hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {sendInput.isPending ? "Sending…" : "Send"}
-          </button>
-        </div>
-        {sendInput.error && (
-          <p className="mt-1.5 text-xs text-red-400">
-            {sendInput.error.message}
-          </p>
-        )}
-      </div>
+          {/* Input */}
+          <div className="border-t border-white/10 p-3">
+            <div className="flex items-end gap-2">
+              <textarea
+                rows={2}
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    send();
+                  }
+                }}
+                disabled={!running}
+                placeholder={
+                  running
+                    ? awaiting
+                      ? "The agent is waiting — type a message and press Enter…"
+                      : "Send a message (the agent will pick it up after its current turn)…"
+                    : "Session ended."
+                }
+                className="min-h-0 flex-1 resize-y rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/30 focus:outline-none disabled:opacity-40"
+              />
+              <button
+                onClick={send}
+                disabled={!running || !draft.trim() || sendInput.isPending}
+                className="rounded-lg bg-purple-600 px-3 py-2 text-sm font-medium hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {sendInput.isPending ? "Sending…" : "Send"}
+              </button>
+            </div>
+            {sendInput.error && (
+              <p className="mt-1.5 text-xs text-red-400">
+                {sendInput.error.message}
+              </p>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }

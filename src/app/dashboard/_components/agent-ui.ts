@@ -8,6 +8,14 @@ export const STATUS_STYLES: Record<string, string> = {
   Unknown: "border-gray-500/40 bg-gray-500/20 text-gray-400",
 };
 
+// Terminal pod phases — the agent has finished and won't change further.
+const DONE_STATUSES = new Set(["Succeeded", "Failed"]);
+
+/** Whether an agent has finished running (so it can sink to the bottom). */
+export function isAgentDone(status: string): boolean {
+  return DONE_STATUSES.has(status);
+}
+
 // Time left until the finished job is garbage-collected. Null/running → "—".
 export function expiresIn(expiresAt: string | null): string {
   if (!expiresAt) return "—";

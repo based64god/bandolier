@@ -42,6 +42,8 @@ export function DeployModal({
   const [maxTurns, setMaxTurns] = useState("");
   // "" means no issue selected.
   const [issueNumber, setIssueNumber] = useState("");
+  // Interactive agents stay alive and wait for the user's input between turns.
+  const [interactive, setInteractive] = useState(false);
 
   const { data: providerInfo } = api.agents.providerInfo.useQuery();
   const { data: deployDefaults } = api.agents.deployDefaults.useQuery();
@@ -98,6 +100,7 @@ export function DeployModal({
       model: effectiveModel,
       maxTurns: maxTurns ? parseInt(maxTurns, 10) : undefined,
       issueNumber: hasIssue ? parseInt(issueNumber, 10) : undefined,
+      interactive: interactive || undefined,
     });
   }
 
@@ -319,12 +322,33 @@ export function DeployModal({
               max={200}
               value={maxTurns}
               onChange={(e) => setMaxTurns(e.target.value)}
+              disabled={interactive}
               placeholder={
                 defaultMaxTurns !== undefined ? String(defaultMaxTurns) : ""
               }
-              className="w-32 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/30 focus:outline-none"
+              className="w-32 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/30 focus:outline-none disabled:opacity-40"
             />
           </div>
+
+          {/* Interactive */}
+          <label className="flex cursor-pointer items-start gap-2.5">
+            <input
+              type="checkbox"
+              checked={interactive}
+              onChange={(e) => setInteractive(e.target.checked)}
+              className="mt-0.5 h-4 w-4 cursor-pointer accent-purple-600"
+            />
+            <span className="text-xs text-white/60">
+              <span className="font-medium text-white/80">
+                Interactive session
+              </span>
+              <span className="mt-0.5 block text-white/40">
+                Keep the agent running and chat with it — it pauses for your
+                input between turns and alerts you when it&rsquo;s waiting. Turn
+                cap doesn&rsquo;t apply.
+              </span>
+            </span>
+          </label>
 
           {/* Deploy error */}
           {deploy.error && (

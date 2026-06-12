@@ -11,10 +11,12 @@ import { authClient } from "~/server/better-auth/client";
 import { api } from "~/trpc/react";
 import { expiresIn, STATUS_STYLES } from "./agent-ui";
 import { DeployModal } from "./deploy-modal";
+import { InteractiveSessions } from "./interactive-sessions";
 import { LogModal } from "./log-modal";
 import {
   primeAudio,
   requestNotificationPermission,
+  useAwaitingInputAlerts,
   useCompletionAlerts,
   useNotifyPref,
 } from "./notifications";
@@ -136,9 +138,17 @@ export function AgentDashboard({
     onSuccess: () => setConfirmKill(null),
   });
 
-  // Chime + system notification when an agent finishes (opt-in).
+  // Interactive agents are pinned above the table; those awaiting input come
+  // first so the user sees what needs them at the very top.
+  const interactiveAgents = agents
+    .filter((a) => a.interactive)
+    .sort((a, b) => Number(b.awaitingInput) - Number(a.awaitingInput));
+  const tableAgents = agents.filter((a) => !a.interactive);
+
+  // Chime + system notification when an agent finishes or starts awaiting input.
   const [notify, setNotify] = useNotifyPref();
   useCompletionAlerts(agents, notify);
+  useAwaitingInputAlerts(interactiveAgents, notify);
 
   async function toggleNotify() {
     if (!notify) {
@@ -330,13 +340,19 @@ export function AgentDashboard({
               </div>
             )}
 
-            {/* Agent table */}
+            {/* Interactive sessions, pinned to the top with live logs + input */}
+            <InteractiveSessions
+              agents={interactiveAgents}
+              namespace={namespace}
+            />
+
+            {/* Agent table (non-interactive agents) */}
             {!error && agents.length === 0 && !agentsLoading ? (
               <div className="rounded-xl border border-white/10 bg-white/5 py-16 text-center text-white/40">
                 No agents running in{" "}
                 <code className="text-white/60">{namespace}</code>
               </div>
-            ) : (
+            ) : tableAgents.length === 0 ? null : (
               <div className="overflow-hidden rounded-xl border border-white/10">
                 <table className="w-full text-sm">
                   <thead>
@@ -357,7 +373,7 @@ export function AgentDashboard({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-white/5">
-                    {agents.map((agent) => (
+                    {tableAgents.map((agent) => (
                       <tr
                         key={agent.name}
                         onClick={() => setLogPod(agent.name)}

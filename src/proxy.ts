@@ -13,6 +13,7 @@ function isExempt(pathname: string): boolean {
     pathname.startsWith("/api/webhooks/") ||
     pathname.startsWith("/api/v1/") ||
     pathname === "/api/agent-runs" ||
+    pathname === "/api/agent-input" ||
     pathname === "/setup.sh" ||
     pathname === "/gate" ||
     pathname === "/api/gate" ||

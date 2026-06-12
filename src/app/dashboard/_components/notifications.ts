@@ -122,3 +122,49 @@ export function useCompletionAlerts(agents: AlertAgent[], enabled: boolean) {
     }
   }, [agents, enabled]);
 }
+
+// ── Awaiting-input detection (interactive agents) ──────────────────────────────
+
+type InputAgent = { name: string; awaitingInput: boolean; displayName: string };
+
+function inputNotification(agent: InputAgent) {
+  if (
+    typeof Notification === "undefined" ||
+    Notification.permission !== "granted"
+  ) {
+    return;
+  }
+  new Notification("Agent waiting for input", {
+    body: agent.displayName,
+    icon: "/icon.svg",
+  });
+}
+
+/**
+ * Fires a chime + system notification when an interactive agent transitions into
+ * the "waiting for input" state. The first observed list seeds a baseline so an
+ * already-waiting agent doesn't alert on load.
+ */
+export function useAwaitingInputAlerts(agents: InputAgent[], enabled: boolean) {
+  const seen = useRef<Map<string, boolean>>(new Map());
+  const seeded = useRef(false);
+
+  useEffect(() => {
+    if (!seeded.current) {
+      for (const a of agents) seen.current.set(a.name, a.awaitingInput);
+      seeded.current = true;
+      return;
+    }
+
+    for (const a of agents) {
+      const prev = seen.current.get(a.name);
+      // Alert on a transition into waiting (or an agent that appears already
+      // waiting after the initial seed), once per transition.
+      if (!prev && a.awaitingInput && enabled) {
+        playChime();
+        inputNotification(a);
+      }
+      seen.current.set(a.name, a.awaitingInput);
+    }
+  }, [agents, enabled]);
+}

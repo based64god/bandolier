@@ -129,6 +129,24 @@ export const taskRun = pgTable("task_run", {
     .notNull(),
 });
 
+// Queued user input for interactive agents. The dashboard enqueues a row; the
+// harness (which can't hold a session) polls the input endpoint, drains the
+// oldest undelivered row for its job, and feeds it to Claude as the next turn.
+export const agentInput = pgTable(
+  "agent_input",
+  {
+    id: text("id").primaryKey(),
+    jobName: text("job_name").notNull(),
+    content: text("content").notNull(),
+    createdAt: timestamp("created_at")
+      .$defaultFn(() => /* @__PURE__ */ new Date())
+      .notNull(),
+    /** Set once the harness has fetched this row, so it's delivered exactly once. */
+    deliveredAt: timestamp("delivered_at"),
+  },
+  (t) => [index("agent_input_job_idx").on(t.jobName)],
+);
+
 // Per-repository incoming-webhook config (one webhook/secret per repo, shared
 // across any Bandolier user with admin on that repo).
 export const repoWebhookConfig = pgTable("repo_webhook_config", {

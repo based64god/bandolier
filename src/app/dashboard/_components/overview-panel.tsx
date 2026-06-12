@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 
 import { api } from "~/trpc/react";
 import { STATUS_STYLES } from "./agent-ui";
-import { useCompletionAlerts } from "./notifications";
+import { useAwaitingInputAlerts, useCompletionAlerts } from "./notifications";
 
 // Active agents float to the top; finished ones sort by soonest expiry.
 const STATUS_RANK: Record<string, number> = {
@@ -30,8 +30,14 @@ export function OverviewPanel({ notify }: { notify: boolean }) {
   } = api.agents.overview.useQuery(undefined, { refetchInterval: 5000 });
 
   useCompletionAlerts(agents, notify);
+  useAwaitingInputAlerts(
+    agents.filter((a) => a.interactive),
+    notify,
+  );
 
   const sorted = [...agents].sort((a, b) => {
+    // Agents waiting on the user float to the very top, wherever they live.
+    if (a.awaitingInput !== b.awaitingInput) return a.awaitingInput ? -1 : 1;
     const rank = (STATUS_RANK[a.status] ?? 9) - (STATUS_RANK[b.status] ?? 9);
     if (rank !== 0) return rank;
     return (a.repoFullName ?? "").localeCompare(b.repoFullName ?? "");
@@ -149,11 +155,19 @@ export function OverviewPanel({ notify }: { notify: boolean }) {
                     )}
                   </td>
                   <td className="px-4 py-4 align-top">
-                    <span
-                      className={`rounded-full border px-2 py-0.5 text-xs ${STATUS_STYLES[agent.status] ?? STATUS_STYLES.Unknown}`}
-                    >
-                      {agent.status}
-                    </span>
+                    <div className="flex flex-col items-start gap-1">
+                      <span
+                        className={`rounded-full border px-2 py-0.5 text-xs ${STATUS_STYLES[agent.status] ?? STATUS_STYLES.Unknown}`}
+                      >
+                        {agent.status}
+                      </span>
+                      {agent.awaitingInput && (
+                        <span className="flex items-center gap-1 rounded-full border border-amber-400/50 bg-amber-400/15 px-2 py-0.5 text-xs font-medium text-amber-200">
+                          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-300" />
+                          Waiting for input
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td
                     className="px-4 py-4 align-top"

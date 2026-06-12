@@ -1,3 +1,5 @@
+import { randomUUID } from "crypto";
+
 import { setHeaderOptions, type V1Pod } from "@kubernetes/client-node";
 import { TRPCError } from "@trpc/server";
 import { eq } from "drizzle-orm";
@@ -24,19 +26,34 @@ import {
 import { resolveKubeconfig } from "~/server/agents/kubeconfig";
 import { listModelsForUser, pickLatestSonnet } from "~/server/agents/models";
 import { getUserAwsCredentials } from "~/server/agents/user-aws";
-import { taskRun } from "~/server/db/schema";
+import { agentInput, taskRun } from "~/server/db/schema";
 import { getBatchV1Api, getCoreV1Api } from "~/server/k8s/client";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
 
 const LABEL_SELECTOR = env.K8S_LABEL_SELECTOR;
+const INTERACTIVE_LABEL = "bandolier.io/interactive";
 
 const PR_MARKER = /PR_URL=(https:\/\/\S+)/;
+// Harness log markers bracketing an interactive turn: it prints AWAIT when it
+// starts waiting for the next user message and RESUME when one arrives. The most
+// recent of the two tells us whether the agent is currently awaiting input.
+const AWAIT_MARKER = "BANDOLIER_AWAIT_INPUT";
+const RESUME_MARKER = "BANDOLIER_RESUME";
+
+/**
+ * Sentinel input message that tells the harness to end an interactive session
+ * (close Claude's stdin and run the post-run PR step). Kept in sync with the Go
+ * harness's matching constant.
+ */
+export const END_SESSION_SENTINEL = "__BANDOLIER_END_SESSION__";
 
 interface PodInspection {
   /** The most recent assistant (non-harness) line — what Claude is doing now. */
   currently: string | null;
   /** The pull-request URL the harness logged, if any. */
   pullRequestUrl: string | null;
+  /** True when an interactive agent is currently waiting for user input. */
+  awaitingInput: boolean;
 }
 
 // Terminal pods' logs are immutable, so their inspection is cached. Running pods
@@ -65,6 +82,16 @@ async function inspectPod(
     });
 
     const lines = logs.split("\n").map((l) => l.trim());
+
+    // Forward pass: the last AWAIT/RESUME marker decides the awaiting state.
+    let lastAwait = -1;
+    let lastResume = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i]!.includes(AWAIT_MARKER)) lastAwait = i;
+      if (lines[i]!.includes(RESUME_MARKER)) lastResume = i;
+    }
+
+    // Backward pass: the last non-harness line is what Claude is doing now.
     let currently: string | null = null;
     for (let i = lines.length - 1; i >= 0; i--) {
       const line = lines[i]!;
@@ -77,11 +104,13 @@ async function inspectPod(
     const result: PodInspection = {
       currently,
       pullRequestUrl: PR_MARKER.exec(logs)?.[1] ?? null,
+      awaitingInput: !terminal && lastAwait >= 0 && lastAwait > lastResume,
     };
     if (terminal) terminalInspectionCache.set(podName, result);
     return result;
   } catch {
-    return { currently: null, pullRequestUrl: null }; // transient; retry next poll
+    // transient; retry next poll
+    return { currently: null, pullRequestUrl: null, awaitingInput: false };
   }
 }
 
@@ -101,6 +130,30 @@ async function requireKubeconfig(
   return kubeconfig;
 }
 
+/**
+ * Throws unless the acting user owns an agent with the given job name (matched by
+ * the spawned-by label, so users can only send input to their own agents). The
+ * pod must still exist, which it does for a live interactive session.
+ */
+async function assertOwnsInteractiveJob(
+  db: Parameters<typeof resolveKubeconfig>[0],
+  userId: string,
+  namespace: string,
+  jobName: string,
+): Promise<void> {
+  const kubeconfig = await requireKubeconfig(db, userId);
+  const res = await getCoreV1Api(kubeconfig).listNamespacedPod({
+    namespace,
+    labelSelector: `${LABEL_SELECTOR},${SPAWNED_BY_LABEL}=${spawnedByLabelValue(userId)},bandolier.io/job=${jobName}`,
+  });
+  if (res.items.length === 0) {
+    throw new TRPCError({
+      code: "NOT_FOUND",
+      message: `Interactive agent ${jobName} not found.`,
+    });
+  }
+}
+
 /** Maps a pod into the task shape returned by `list`/`get` (reads logs once). */
 async function podToTask(pod: V1Pod, namespace: string, kubeconfig: string) {
   const annotations = pod.metadata?.annotations ?? {};
@@ -117,7 +170,7 @@ async function podToTask(pod: V1Pod, namespace: string, kubeconfig: string) {
       ).toISOString()
     : null;
 
-  const { currently, pullRequestUrl } = await inspectPod(
+  const { currently, pullRequestUrl, awaitingInput } = await inspectPod(
     name,
     namespace,
     status,
@@ -127,6 +180,7 @@ async function podToTask(pod: V1Pod, namespace: string, kubeconfig: string) {
   const containerEnv = pod.spec?.containers?.[0]?.env ?? [];
   const prompt =
     containerEnv.find((e) => e.name === "CLAUDE_TASK")?.value ?? null;
+  const interactive = pod.metadata?.labels?.[INTERACTIVE_LABEL] === "true";
 
   return {
     name,
@@ -142,6 +196,8 @@ async function podToTask(pod: V1Pod, namespace: string, kubeconfig: string) {
     currently,
     expiresAt,
     pullRequestUrl,
+    interactive,
+    awaitingInput: interactive && awaitingInput,
   };
 }
 
@@ -189,12 +245,14 @@ export const agentsRouter = createTRPCRouter({
 
           // The pull-request URL lives in the harness logs; read it per pod
           // (cheap here — only the user's own agents, and terminal pods cache).
-          const { pullRequestUrl } = await inspectPod(
+          const { pullRequestUrl, awaitingInput } = await inspectPod(
             name,
             namespace,
             status,
             kubeconfig,
           );
+          const interactive =
+            pod.metadata?.labels?.[INTERACTIVE_LABEL] === "true";
 
           return {
             name,
@@ -208,6 +266,8 @@ export const agentsRouter = createTRPCRouter({
             createdBy: annotations["bandolier.io/created-by"] ?? null,
             status,
             pullRequestUrl,
+            interactive,
+            awaitingInput: interactive && awaitingInput,
           };
         }),
       );
@@ -392,6 +452,57 @@ export const agentsRouter = createTRPCRouter({
       }
     }),
 
+  // Queue a user message for an interactive agent. The harness polls the input
+  // endpoint and feeds it to Claude as the next turn. Ownership is enforced by
+  // the spawned-by label so a user can only drive their own agents.
+  sendInput: protectedProcedure
+    .input(
+      z.object({
+        namespace: z.string().min(1),
+        jobName: z.string().min(1),
+        content: z.string().min(1).max(20000),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      await assertOwnsInteractiveJob(
+        ctx.db,
+        ctx.session.user.id,
+        input.namespace,
+        input.jobName,
+      );
+      await ctx.db.insert(agentInput).values({
+        id: randomUUID(),
+        jobName: input.jobName,
+        content: input.content,
+      });
+      return { success: true };
+    }),
+
+  // Gracefully end an interactive session: the sentinel tells the harness to
+  // close Claude's stdin and run its post-run PR step, rather than killing the
+  // pod outright (which `terminate` does).
+  endSession: protectedProcedure
+    .input(
+      z.object({
+        namespace: z.string().min(1),
+        jobName: z.string().min(1),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      await assertOwnsInteractiveJob(
+        ctx.db,
+        ctx.session.user.id,
+        input.namespace,
+        input.jobName,
+      );
+      await ctx.db.insert(agentInput).values({
+        id: randomUUID(),
+        jobName: input.jobName,
+        content: END_SESSION_SENTINEL,
+      });
+      return { success: true };
+    }),
+
   deploy: protectedProcedure
     .input(
       z
@@ -408,6 +519,9 @@ export const agentsRouter = createTRPCRouter({
           // When set, the agent works on this GitHub issue (and the task field
           // becomes additional context).
           issueNumber: z.number().int().positive().optional(),
+          // Run as a long-lived interactive session that waits for user input
+          // between turns instead of a one-shot task.
+          interactive: z.boolean().optional(),
         })
         .refine(
           (v) => v.task.trim().length > 0 || v.issueNumber !== undefined,
@@ -569,6 +683,7 @@ export const agentsRouter = createTRPCRouter({
           model: input.model,
           maxTurns: input.maxTurns,
           prWriterModel,
+          interactive: input.interactive,
           issueNumber: issue ? String(issue.number) : undefined,
           issueUrl: issue?.url,
           userId,

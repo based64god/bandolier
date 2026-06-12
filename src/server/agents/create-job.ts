@@ -152,6 +152,12 @@ export interface JobSpec {
    * PR-producing runs; omit otherwise.
    */
   prWriterModel?: string;
+  /**
+   * When true the agent runs as a long-lived interactive session: Claude is
+   * driven over streaming JSON and waits for user input between turns, which the
+   * dashboard delivers via the input-polling callback.
+   */
+  interactive?: boolean;
   gitName?: string;
   gitEmail?: string;
   /** Set for issue tasks (dashboard or webhook). */
@@ -282,19 +288,31 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
     envVars.push({ name: "AGENT_BRANCH", value: spec.agentBranch });
   }
 
-  // When artifact persistence is configured, give the harness an authenticated
-  // callback to upload its transcript after the run.
+  // Both the artifact upload and the interactive input poll are authenticated by
+  // the same per-job HMAC token; inject it (and the job name) when either is in
+  // play, then add the feature-specific callback URLs.
   const persistArtifacts = artifactsEnabled();
-  if (persistArtifacts) {
+  if (persistArtifacts || spec.interactive) {
     envVars.push(
-      {
-        name: "BANDOLIER_INGEST_URL",
-        value: `${env.BETTER_AUTH_URL}/api/agent-runs`,
-      },
       { name: "BANDOLIER_JOB", value: jobName },
       {
         name: "BANDOLIER_INGEST_TOKEN",
         value: ingestToken(jobName, env.BETTER_AUTH_SECRET ?? ""),
+      },
+    );
+  }
+  if (persistArtifacts) {
+    envVars.push({
+      name: "BANDOLIER_INGEST_URL",
+      value: `${env.BETTER_AUTH_URL}/api/agent-runs`,
+    });
+  }
+  if (spec.interactive) {
+    envVars.push(
+      { name: "INTERACTIVE", value: "1" },
+      {
+        name: "BANDOLIER_INPUT_URL",
+        value: `${env.BETTER_AUTH_URL}/api/agent-input`,
       },
     );
   }
@@ -314,6 +332,12 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
   // a label selector, so no cluster-wide pod scan is needed).
   const spawnedBy = spawnedByLabelValue(spec.userId);
 
+  // Marks interactive agents so the dashboard can surface them separately (a
+  // label, not an annotation, so it's queryable and visible on every pod).
+  const interactiveLabels: Record<string, string> = spec.interactive
+    ? { "bandolier.io/interactive": "true" }
+    : {};
+
   const job = await getBatchV1Api(kc).createNamespacedJob({
     namespace: ns,
     body: {
@@ -326,6 +350,7 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
           app: "claude-agent",
           "app.kubernetes.io/managed-by": "bandolier",
           [SPAWNED_BY_LABEL]: spawnedBy,
+          ...interactiveLabels,
         },
         annotations,
       },
@@ -339,6 +364,7 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
               "app.kubernetes.io/managed-by": "bandolier",
               "bandolier.io/job": jobName,
               [SPAWNED_BY_LABEL]: spawnedBy,
+              ...interactiveLabels,
               "bandolier.io/source": spec.issueNumber
                 ? "github-issue"
                 : "dashboard",

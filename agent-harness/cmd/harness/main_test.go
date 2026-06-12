@@ -66,59 +66,86 @@ func TestRepoBranchName(t *testing.T) {
 	}
 }
 
-func TestBuildRepoTask(t *testing.T) {
-	got := buildRepoTask("  Do the thing  ", "bandolier/do-the-thing-abc123")
-	if !strings.HasPrefix(got, "Do the thing") {
-		t.Errorf("buildRepoTask should start with trimmed task, got:\n%s", got)
-	}
+func TestBuildRepoSystemPrompt(t *testing.T) {
+	got := buildRepoSystemPrompt("bandolier/do-the-thing-abc123")
 	if !strings.Contains(got, `on branch "bandolier/do-the-thing-abc123"`) {
-		t.Error("buildRepoTask should mention the branch")
+		t.Error("buildRepoSystemPrompt should mention the branch")
 	}
 	if !strings.Contains(got, "git commit -s") {
-		t.Error("buildRepoTask should instruct a signed commit")
+		t.Error("buildRepoSystemPrompt should instruct a signed commit")
 	}
 	if !strings.Contains(got, "Do NOT push or open a pull request") {
-		t.Error("buildRepoTask should forbid pushing")
+		t.Error("buildRepoSystemPrompt should forbid pushing")
 	}
 }
 
-func TestBuildIssueTask(t *testing.T) {
+func TestBuildIssueSystemPrompt(t *testing.T) {
 	issue := &githubIssue{Number: 5, Title: "Crash on startup", Body: "It crashes."}
-	got := buildIssueTask(issue, "issue-5-crash", "")
+	got := buildIssueSystemPrompt(issue, "issue-5-crash")
 
-	if !strings.Contains(got, "GitHub issue #5") {
-		t.Error("missing issue number reference")
+	if !strings.Contains(got, `on branch "issue-5-crash"`) {
+		t.Error("missing branch instruction")
 	}
+	if !strings.Contains(got, `git commit -s -m "Crash on startup"`) {
+		t.Error("commit step should use the issue title as the subject")
+	}
+	if !strings.Contains(got, "Do NOT push or open a pull request") {
+		t.Error("missing no-push instruction")
+	}
+	// The issue body belongs in the user message, not the system prompt.
+	if strings.Contains(got, "It crashes.") {
+		t.Error("system prompt should not embed the issue body")
+	}
+}
+
+func TestBuildIssueUserMessage(t *testing.T) {
+	issue := &githubIssue{Number: 5, Title: "Crash on startup", Body: "It crashes."}
+	got := buildIssueUserMessage(issue, "")
+
 	if !strings.Contains(got, "## Issue #5: Crash on startup") {
 		t.Error("missing issue heading")
 	}
 	if !strings.Contains(got, "It crashes.") {
 		t.Error("missing issue body")
 	}
-	if !strings.Contains(got, `on branch "issue-5-crash"`) {
-		t.Error("missing branch instruction")
+	// The instructional framing belongs in the system prompt, not the message.
+	if strings.Contains(got, "Do NOT push") {
+		t.Error("user message should not embed the working agreement")
 	}
 	if strings.Contains(got, "Additional context from the operator") {
 		t.Error("should not include operator section when context is empty")
 	}
 }
 
-func TestBuildIssueTaskEmptyBody(t *testing.T) {
+func TestBuildIssueUserMessageEmptyBody(t *testing.T) {
 	issue := &githubIssue{Number: 1, Title: "T", Body: "   "}
-	got := buildIssueTask(issue, "br", "")
+	got := buildIssueUserMessage(issue, "")
 	if !strings.Contains(got, "(no description provided)") {
 		t.Error("empty body should be replaced with placeholder")
 	}
 }
 
-func TestBuildIssueTaskWithContext(t *testing.T) {
+func TestBuildIssueUserMessageWithContext(t *testing.T) {
 	issue := &githubIssue{Number: 1, Title: "T", Body: "B"}
-	got := buildIssueTask(issue, "br", "  Focus on the parser.  ")
+	got := buildIssueUserMessage(issue, "  Focus on the parser.  ")
 	if !strings.Contains(got, "## Additional context from the operator") {
 		t.Error("should include operator section when context is provided")
 	}
 	if !strings.Contains(got, "Focus on the parser.") {
 		t.Error("should include the operator context text")
+	}
+}
+
+func TestBuildInteractiveSystemPrompt(t *testing.T) {
+	got := buildInteractiveSystemPrompt("bandolier/chat-abc123")
+	if !strings.Contains(got, "interactive session") {
+		t.Error("should describe the interactive session")
+	}
+	if !strings.Contains(got, `on branch "bandolier/chat-abc123"`) {
+		t.Error("should mention the working branch")
+	}
+	if buildInteractiveSystemPrompt("") != "" {
+		t.Error("should be empty when there's no working branch")
 	}
 }
 

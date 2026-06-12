@@ -19,7 +19,11 @@ import { repoToNamespace } from "~/server/agents/namespace";
 import { getUserAwsCredentials } from "~/server/agents/user-aws";
 import { getRepoWebhookConfig } from "~/server/agents/webhook-config";
 import { db } from "~/server/db";
-import { buildIssuePrompt, makeIssueBranch } from "~/lib/issue-prompt";
+import {
+  buildIssueSystemPrompt,
+  buildIssueUserMessage,
+  makeIssueBranch,
+} from "~/lib/issue-prompt";
 
 // ── Webhook signature verification ────────────────────────────────────────────
 
@@ -186,13 +190,14 @@ async function handleIssueOpened(
 
   await createAgentJob({
     namespace: repoToNamespace(repository.full_name),
-    // Build the full prompt here (no operator context) so it's stored as
-    // CLAUDE_TASK and shown in the dashboard.
-    task: buildIssuePrompt(
+    // Build the prompt here (no operator context): the issue context is stored
+    // as CLAUDE_TASK and shown in the dashboard; the instructional framing goes
+    // in the system prompt.
+    task: buildIssueUserMessage(
       { number: issue.number, title: issue.title, body: issue.body ?? "" },
-      agentBranch,
       "",
     ),
+    systemPrompt: buildIssueSystemPrompt({ title: issue.title }, agentBranch),
     agentBranch,
     displayName: `#${issue.number}: ${issue.title}`,
     repoUrl: repository.clone_url,

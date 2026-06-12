@@ -122,23 +122,24 @@ func detectProvider() providerKind {
 // ── Config ────────────────────────────────────────────────────────────────────
 
 type config struct {
-	task        string
-	title       string // short label used for branch slug, PR title, commit message
-	workDir     string
-	model       string
-	prWriter    string // out-of-band model for writing the PR title/description
-	repoURL     string
-	branch      string
-	maxTurns    string
-	gitName     string
-	gitEmail    string
-	provider    providerKind
-	issueNumber string // GitHub issue number (issue mode)
-	issueRepo   string // "owner/repo" for gh commands
-	agentBranch string // server-provided unique working branch (issue mode)
-	baseBranch  string // base branch for the PR
-	interactive bool   // long-lived session driven by user input between turns
-	inputURL    string // Bandolier endpoint the interactive loop polls for input
+	task         string
+	systemPrompt string // instructional framing appended to Claude's system prompt
+	title        string // short label used for branch slug, PR title, commit message
+	workDir      string
+	model        string
+	prWriter     string // out-of-band model for writing the PR title/description
+	repoURL      string
+	branch       string
+	maxTurns     string
+	gitName      string
+	gitEmail     string
+	provider     providerKind
+	issueNumber  string // GitHub issue number (issue mode)
+	issueRepo    string // "owner/repo" for gh commands
+	agentBranch  string // server-provided unique working branch (issue mode)
+	baseBranch   string // base branch for the PR
+	interactive  bool   // long-lived session driven by user input between turns
+	inputURL     string // Bandolier endpoint the interactive loop polls for input
 }
 
 func loadConfig() (config, error) {
@@ -174,23 +175,24 @@ func loadConfig() (config, error) {
 	}
 
 	return config{
-		task:        task,
-		title:       os.Getenv("AGENT_TITLE"),
-		workDir:     workDir,
-		model:       model,
-		prWriter:    os.Getenv("PR_WRITER_MODEL"),
-		repoURL:     os.Getenv("REPO_URL"),
-		branch:      os.Getenv("BRANCH"),
-		maxTurns:    maxTurns,
-		gitName:     os.Getenv("GIT_NAME"),
-		gitEmail:    os.Getenv("GIT_EMAIL"),
-		provider:    detectProvider(),
-		issueNumber: issueNumber,
-		issueRepo:   os.Getenv("GITHUB_REPO"),
-		agentBranch: os.Getenv("AGENT_BRANCH"),
-		baseBranch:  baseBranch,
-		interactive: os.Getenv("INTERACTIVE") == "1",
-		inputURL:    os.Getenv("BANDOLIER_INPUT_URL"),
+		task:         task,
+		systemPrompt: strings.TrimSpace(os.Getenv("CLAUDE_SYSTEM_PROMPT")),
+		title:        os.Getenv("AGENT_TITLE"),
+		workDir:      workDir,
+		model:        model,
+		prWriter:     os.Getenv("PR_WRITER_MODEL"),
+		repoURL:      os.Getenv("REPO_URL"),
+		branch:       os.Getenv("BRANCH"),
+		maxTurns:     maxTurns,
+		gitName:      os.Getenv("GIT_NAME"),
+		gitEmail:     os.Getenv("GIT_EMAIL"),
+		provider:     detectProvider(),
+		issueNumber:  issueNumber,
+		issueRepo:    os.Getenv("GITHUB_REPO"),
+		agentBranch:  os.Getenv("AGENT_BRANCH"),
+		baseBranch:   baseBranch,
+		interactive:  os.Getenv("INTERACTIVE") == "1",
+		inputURL:     os.Getenv("BANDOLIER_INPUT_URL"),
 	}, nil
 }
 
@@ -249,44 +251,34 @@ func repoBranchName(title string) string {
 	return fmt.Sprintf("bandolier/%s-%s", slugify(title), shortUnique())
 }
 
-// buildRepoTask wraps a freeform dashboard task with instructions to implement
-// and commit, so the harness can reliably open a PR afterward.
-func buildRepoTask(task, branchName string) string {
-	return fmt.Sprintf(`%s
-
----
-
-## Working agreement
+// buildRepoSystemPrompt is the instructional framing for a freeform dashboard
+// task: the working agreement that lets the harness reliably open a PR. It is
+// appended to Claude's system prompt; the user's task stays the user message.
+func buildRepoSystemPrompt(branchName string) string {
+	return fmt.Sprintf(`## Working agreement
 
 The repository has been cloned. You are on branch "%s" — do not switch branches.
 
-When you have completed the task above:
+When you have completed the task in the user message:
 1. Commit all your changes:
    git add -A
    git commit -s -m "<concise summary of what you did>"
 
 Do NOT push or open a pull request — the harness will do that once you finish.
 Do not ask for clarification. Implement the best solution you can.`,
-		strings.TrimSpace(task), branchName)
+		branchName)
 }
 
-// buildIssueTask builds the prompt for issue mode. extraContext is optional
-// operator-supplied context from the dashboard task field; it's appended when
-// present so operators can steer the agent beyond the issue text.
-func buildIssueTask(issue *githubIssue, branchName, extraContext string) string {
-	body := strings.TrimSpace(issue.Body)
-	if body == "" {
-		body = "(no description provided)"
-	}
-	task := fmt.Sprintf(`You are an AI agent working on GitHub issue #%d.
-
-## Issue #%d: %s
-
-%s
+// buildIssueSystemPrompt is the instructional framing for issue mode: the
+// objective, branch rules, and commit steps that surround the issue context.
+// It mirrors buildIssueSystemPrompt in lib/issue-prompt.ts — keep in sync. The
+// issue itself is delivered as the user message (see buildIssueUserMessage).
+func buildIssueSystemPrompt(issue *githubIssue, branchName string) string {
+	return fmt.Sprintf(`You are an AI agent working on a GitHub issue. The issue is provided in the user message.
 
 ## Your objective
 
-Implement a complete solution for this issue.
+Implement a complete solution for the issue.
 
 The repository has been cloned. You are on branch "%s" — do not switch branches.
 
@@ -299,12 +291,25 @@ Steps:
 
 Do NOT push or open a pull request — the harness will do that once you finish.
 Do not ask for clarification. Implement the best solution you can.`,
-		issue.Number, issue.Number, issue.Title, body, branchName, issue.Title)
+		branchName, issue.Title)
+}
+
+// buildIssueUserMessage is the user message for issue mode: the issue context
+// itself plus optional operator-supplied context from the dashboard task field.
+// It mirrors buildIssueUserMessage in lib/issue-prompt.ts — keep in sync.
+func buildIssueUserMessage(issue *githubIssue, extraContext string) string {
+	body := strings.TrimSpace(issue.Body)
+	if body == "" {
+		body = "(no description provided)"
+	}
+	message := fmt.Sprintf(`## Issue #%d: %s
+
+%s`, issue.Number, issue.Title, body)
 
 	if c := strings.TrimSpace(extraContext); c != "" {
-		task += fmt.Sprintf("\n\n## Additional context from the operator\n\n%s", c)
+		message += fmt.Sprintf("\n\n## Additional context from the operator\n\n%s", c)
 	}
-	return task
+	return message
 }
 
 // hasCommits reports whether branchName has diverged from the base branch,
@@ -625,10 +630,14 @@ func run(ctx context.Context, cfg config) error {
 		}
 		prTitle = issue.Title
 		prBody = fmt.Sprintf("Closes #%d\n\nGenerated by Bandolier.", issue.Number)
-		// The server builds the full prompt and passes it as CLAUDE_TASK; only
-		// fall back to building it here if it's somehow missing.
+		// The server builds the prompt and passes the issue context as CLAUDE_TASK
+		// and the instructional framing as CLAUDE_SYSTEM_PROMPT; only fall back to
+		// building them here if they're somehow missing.
 		if strings.TrimSpace(cfg.task) == "" {
-			cfg.task = buildIssueTask(issue, prBranch, "")
+			cfg.task = buildIssueUserMessage(issue, "")
+		}
+		if cfg.systemPrompt == "" {
+			cfg.systemPrompt = buildIssueSystemPrompt(issue, prBranch)
 		}
 
 	case cfg.repoURL != "":
@@ -643,9 +652,10 @@ func run(ctx context.Context, cfg config) error {
 		prTitle = "Bandolier agent changes"
 		prBody = "Generated by Bandolier."
 		// Interactive sessions are framed below (the user drives commits over many
-		// turns); only one-shot repo tasks get the commit-and-finish wrapper.
+		// turns); only one-shot repo tasks get the commit-and-finish working
+		// agreement, kept out of the user message as a system prompt.
 		if !cfg.interactive {
-			cfg.task = buildRepoTask(cfg.task, prBranch)
+			cfg.systemPrompt = buildRepoSystemPrompt(prBranch)
 		}
 
 	default:
@@ -663,13 +673,14 @@ func run(ctx context.Context, cfg config) error {
 	// ── Run Claude ────────────────────────────────────────────────────────────
 	if cfg.interactive {
 		// Interactive session: drive Claude over streaming JSON and pause for the
-		// user's next message between turns.
-		first := cfg.task
+		// user's next message between turns. The session framing goes in the system
+		// prompt so the user's messages stay unadorned. Issue mode already set its
+		// own system prompt above.
 		if cfg.issueNumber == "" {
-			first = buildInteractiveTask(cfg.task, prBranch)
+			cfg.systemPrompt = buildInteractiveSystemPrompt(prBranch)
 		}
 		log.Printf("[harness] interactive mode (model=%s)", cfg.model)
-		if err := runClaudeInteractive(ctx, cfg, first); err != nil {
+		if err := runClaudeInteractive(ctx, cfg, cfg.task); err != nil {
 			if ctx.Err() != nil {
 				log.Printf("[harness] terminated by signal")
 				return nil
@@ -689,11 +700,22 @@ func run(ctx context.Context, cfg config) error {
 		if cfg.maxTurns != "" {
 			claudeArgs = append(claudeArgs, "--max-turns", cfg.maxTurns)
 		}
+		// The instructional framing surrounding the task goes in the system prompt
+		// so the user message stays the raw issue/form context.
+		if cfg.systemPrompt != "" {
+			claudeArgs = append(claudeArgs, "--append-system-prompt", cfg.systemPrompt)
+		}
 		claudeArgs = append(claudeArgs, cfg.task)
 
-		// Log the prompt line-by-line so each line keeps the [harness] tag (the
-		// dashboard dims harness lines; an untagged multi-line block would render
-		// as Claude output).
+		// Log the system prompt and prompt line-by-line so each line keeps the
+		// [harness] tag (the dashboard dims harness lines; an untagged multi-line
+		// block would render as Claude output).
+		if cfg.systemPrompt != "" {
+			log.Printf("[harness] system prompt:")
+			for _, line := range strings.Split(cfg.systemPrompt, "\n") {
+				log.Printf("[harness]   %s", line)
+			}
+		}
 		log.Printf("[harness] starting claude with prompt:")
 		for _, line := range strings.Split(cfg.task, "\n") {
 			log.Printf("[harness]   %s", line)
@@ -930,18 +952,15 @@ func interactiveIdleTimeout() time.Duration {
 	return 30 * time.Minute
 }
 
-// buildInteractiveTask frames the first message of an interactive session: the
-// user's prompt plus a short note about the working branch when one exists.
-func buildInteractiveTask(task, branchName string) string {
-	base := strings.TrimSpace(task)
+// buildInteractiveSystemPrompt frames an interactive session: a short note
+// about how the session works and the working branch. It is appended to
+// Claude's system prompt so the user's messages stay unadorned. Returns "" when
+// there's no working branch (plain mode), leaving the default system prompt.
+func buildInteractiveSystemPrompt(branchName string) string {
 	if branchName == "" {
-		return base
+		return ""
 	}
-	return fmt.Sprintf(`%s
-
----
-
-This is an interactive session: I'll keep sending follow-up messages, so do not assume you must finish everything in one turn. The repository is cloned and you are on branch %q — do not switch branches. Commit changes as we go (git add -A && git commit). When the session ends, the harness pushes the branch and opens a pull request if there are commits.`, base, branchName)
+	return fmt.Sprintf(`This is an interactive session: the user will keep sending follow-up messages, so do not assume you must finish everything in one turn. The repository is cloned and you are on branch %q — do not switch branches. Commit changes as we go (git add -A && git commit). When the session ends, the harness pushes the branch and opens a pull request if there are commits.`, branchName)
 }
 
 // runClaudeInteractive drives a long-lived `claude` process over streaming JSON:
@@ -956,6 +975,9 @@ func runClaudeInteractive(ctx context.Context, cfg config, first string) error {
 		"--input-format", "stream-json",
 		"--output-format", "stream-json",
 		"--verbose",
+	}
+	if cfg.systemPrompt != "" {
+		args = append(args, "--append-system-prompt", cfg.systemPrompt)
 	}
 	cmd := exec.CommandContext(ctx, "claude", args...)
 	cmd.Dir = cfg.workDir

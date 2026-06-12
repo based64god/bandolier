@@ -11,7 +11,11 @@ import { getArtifact } from "~/server/agents/artifacts";
 import { validateAwsCredentials } from "~/server/agents/aws";
 import { getIssue } from "~/server/agents/github-issues";
 import { SPAWNED_BY_LABEL, spawnedByLabelValue } from "~/server/agents/labels";
-import { buildIssuePrompt, makeIssueBranch } from "~/lib/issue-prompt";
+import {
+  buildIssueSystemPrompt,
+  buildIssueUserMessage,
+  makeIssueBranch,
+} from "~/lib/issue-prompt";
 import {
   createAgentJob,
   DEFAULT_MAX_TURNS,
@@ -645,16 +649,21 @@ export const agentsRouter = createTRPCRouter({
           ? `#${issue.number}: ${issue.title}`
           : taskPreview;
 
-        // For an issue: generate a unique working branch and build the full
-        // prompt here (with the operator's task as additional context) so it's
-        // stored as CLAUDE_TASK and visible in the dashboard.
+        // For an issue: generate a unique working branch and build the prompt
+        // here. The instructional framing goes in the system prompt; the issue
+        // context (with the operator's task as additional context) is the user
+        // message stored as CLAUDE_TASK and visible in the dashboard.
         const agentBranch = issue
           ? makeIssueBranch(issue.number, issue.title)
           : undefined;
         const task =
           issue && agentBranch
-            ? buildIssuePrompt(issue, agentBranch, input.task)
+            ? buildIssueUserMessage(issue, input.task)
             : input.task;
+        const systemPrompt =
+          issue && agentBranch
+            ? buildIssueSystemPrompt(issue, agentBranch)
+            : undefined;
 
         // PR-producing runs (repo or issue mode) get their PR title/description
         // written by the latest Sonnet, out-of-band of the (possibly non-Sonnet)
@@ -675,6 +684,7 @@ export const agentsRouter = createTRPCRouter({
         const jobName = await createAgentJob({
           namespace: input.namespace,
           task,
+          systemPrompt,
           agentBranch,
           displayName,
           repoUrl,

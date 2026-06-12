@@ -138,6 +138,14 @@ type EnvVar = { name: string; value?: string; valueFrom?: object };
 
 export interface JobSpec {
   task: string;
+  /**
+   * Instructional framing that surrounds the task/issue context — objective,
+   * branch rules, commit steps. Passed to the harness as CLAUDE_SYSTEM_PROMPT
+   * and appended to Claude's system prompt, so the user message stays the raw
+   * issue/form context. Only set for issue mode; the harness builds the
+   * repo/interactive framing itself.
+   */
+  systemPrompt?: string;
   /** Human-readable label shown in the dashboard (issue title or task preview). */
   displayName: string;
   /** Kubernetes namespace to deploy into. Falls back to K8S_NAMESPACE env var. */
@@ -286,6 +294,9 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
   }
   if (spec.agentBranch) {
     envVars.push({ name: "AGENT_BRANCH", value: spec.agentBranch });
+  }
+  if (spec.systemPrompt) {
+    envVars.push({ name: "CLAUDE_SYSTEM_PROMPT", value: spec.systemPrompt });
   }
 
   // Both the artifact upload and the interactive input poll are authenticated by

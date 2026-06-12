@@ -1019,7 +1019,13 @@ func runClaudeInteractive(ctx context.Context, cfg config, first string) error {
 		}
 	}()
 
-	log.Printf("[harness] sending initial message")
+	// Log the initial prompt line-by-line so each line keeps the [harness] tag,
+	// mirroring the non-interactive path (the dashboard dims harness lines; an
+	// untagged multi-line block would render as Claude output).
+	log.Printf("[harness] sending initial message:")
+	for _, line := range strings.Split(first, "\n") {
+		log.Printf("[harness]   %s", line)
+	}
 	if err := writeUserMessage(stdin, first); err != nil {
 		_ = stdin.Close()
 		_ = cmd.Wait()

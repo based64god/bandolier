@@ -2,7 +2,11 @@
 
 import { useEffect, useState } from "react";
 
-import { buildIssuePrompt, issuePreviewBranch } from "~/lib/issue-prompt";
+import {
+  buildIssueSystemPrompt,
+  buildIssueUserMessage,
+  issuePreviewBranch,
+} from "~/lib/issue-prompt";
 import { api } from "~/trpc/react";
 import { SearchableSelect } from "./searchable-select";
 
@@ -181,17 +185,22 @@ export function DeployModal({
                     <div className="invisible absolute top-5 left-0 z-30 w-96 opacity-0 transition-opacity group-hover:visible group-hover:opacity-100">
                       <div className="max-h-72 overflow-auto rounded-lg border border-white/10 bg-[#0d0d20] p-3 shadow-2xl">
                         <p className="mb-1.5 text-[10px] font-medium tracking-wider text-white/40 uppercase">
-                          Context sent to Claude
+                          System prompt
                         </p>
-                        <pre className="font-mono text-[11px] leading-4 whitespace-pre-wrap text-white/60">
-                          {buildIssuePrompt(
+                        <pre className="mb-3 font-mono text-[11px] leading-4 whitespace-pre-wrap text-white/60">
+                          {buildIssueSystemPrompt(
                             selectedIssue,
                             issuePreviewBranch(
                               selectedIssue.number,
                               selectedIssue.title,
                             ),
-                            task,
                           )}
+                        </pre>
+                        <p className="mb-1.5 text-[10px] font-medium tracking-wider text-white/40 uppercase">
+                          Context sent to Claude
+                        </p>
+                        <pre className="font-mono text-[11px] leading-4 whitespace-pre-wrap text-white/60">
+                          {buildIssueUserMessage(selectedIssue, task)}
                         </pre>
                       </div>
                     </div>

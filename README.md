@@ -274,6 +274,31 @@ agent-harness/
 | `pnpm lint` / `pnpm lint:fix` | ESLint. |
 | `pnpm format:write` / `pnpm format:check` | Prettier. |
 | `pnpm check` | Lint + typecheck together. |
+| `pnpm test` | Run the unit-test suite once (Vitest). |
+| `pnpm test:watch` | Run Vitest in watch mode. |
+| `pnpm test:coverage` | Run the suite and emit a coverage report under `coverage/`. |
+
+---
+
+## Tests
+
+Two suites cover the project's pure logic — fast, hermetic, and free of any
+database, network, or Kubernetes access:
+
+- **Web app (Vitest).** Unit tests live next to the code they cover as
+  `*.test.ts` files under `src/`. They exercise the parsing, validation,
+  formatting, and crypto-token helpers — AWS-credential parsing, the password
+  gate and artifact-ingest tokens, issue-prompt and branch-name building,
+  Kubernetes namespace/label derivation, model selection, and the REST
+  response mapping. Run them with `pnpm test` (or `pnpm test:coverage`).
+
+- **Agent harness (Go).** `agent-harness/cmd/harness/main_test.go` covers the
+  harness's pure helpers — slugging, branch naming, prompt building, PR-content
+  parsing, issue-closing keyword handling, provider detection, and tool-use
+  rendering. Run them with `go test ./...` from `agent-harness/`.
+
+Both suites run in CI on every push and pull request (see
+`.github/workflows/ci.yml`).
 
 ---
 

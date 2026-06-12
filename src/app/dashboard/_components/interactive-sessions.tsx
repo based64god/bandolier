@@ -55,8 +55,11 @@ function InteractiveCard({
   namespace: string;
 }) {
   const [draft, setDraft] = useState("");
-  const [collapsed, setCollapsed] = useState(false);
   const running = agent.status === "Running" || agent.status === "Pending";
+  // Default closed for sessions that are already done when first mounted —
+  // there's nothing to interact with, so keep them out of the way. Live
+  // sessions start open. The effects below handle later status transitions.
+  const [collapsed, setCollapsed] = useState(!running);
   const utils = api.useUtils();
 
   const awaiting = agent.awaitingInput;

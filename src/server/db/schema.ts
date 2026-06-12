@@ -147,14 +147,20 @@ export const agentInput = pgTable(
   (t) => [index("agent_input_job_idx").on(t.jobName)],
 );
 
-// Per-repository incoming-webhook config (one webhook/secret per repo, shared
-// across any Bandolier user with admin on that repo).
+// Per-repository configuration (one row per repo, shared across any Bandolier
+// user with admin on that repo). Holds the incoming-webhook secret/prefix plus
+// other repo-level settings such as the agent harness image.
 export const repoWebhookConfig = pgTable("repo_webhook_config", {
   repoFullName: text("repo_full_name").primaryKey(),
-  secret: text("secret").notNull(),
+  // Null when the repo has other config (e.g. an agent image) but no per-repo
+  // webhook secret — webhook verification then falls back to GITHUB_WEBHOOK_SECRET.
+  secret: text("secret"),
   // Optional trigger phrase: when set, only webhook events whose text contains
   // it are acted on. Null = act on all events.
   prefix: text("prefix"),
+  // Optional override for the agent harness container image used by agents run
+  // for this repo. Null = use the server-wide default (HARNESS_IMAGE).
+  agentImage: text("agent_image"),
   configuredBy: text("configured_by").references(() => user.id, {
     onDelete: "set null",
   }),

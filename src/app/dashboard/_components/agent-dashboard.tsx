@@ -21,7 +21,7 @@ import {
   useNotifyPref,
 } from "./notifications";
 import { OverviewPanel } from "./overview-panel";
-import { WebhooksModal } from "./webhooks-modal";
+import { RepoConfigModal } from "./repo-config-modal";
 import { SearchableSelect, type SelectOption } from "./searchable-select";
 import { SettingsModal } from "./settings-modal";
 
@@ -199,15 +199,15 @@ export function AgentDashboard({
               loading={reposLoading}
             />
 
-            {/* Webhook config — only when the user can manage this repo's
-                webhooks. Kept on the left so toggling it doesn't shift the
-                Deploy button. */}
+            {/* Repo config (webhooks + agent image) — only when the user can
+                manage this repo (admin on GitHub). Kept on the left so toggling
+                it doesn't shift the Deploy button. */}
             {selectedRepo?.canManageWebhooks && (
               <button
                 onClick={() => setShowWebhooks(true)}
                 className="rounded-lg border border-white/10 px-3 py-1.5 text-sm font-medium text-white/70 hover:bg-white/10 hover:text-white"
               >
-                Webhooks
+                Repo config
               </button>
             )}
           </div>
@@ -531,7 +531,7 @@ export function AgentDashboard({
       )}
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
       {showWebhooks && selectedRepo?.canManageWebhooks && (
-        <WebhooksModal
+        <RepoConfigModal
           repoFullName={selectedRepo.fullName}
           onClose={() => setShowWebhooks(false)}
         />

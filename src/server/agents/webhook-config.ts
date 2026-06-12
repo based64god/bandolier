@@ -4,12 +4,15 @@ import { db } from "~/server/db";
 import { repoWebhookConfig } from "~/server/db/schema";
 
 export interface RepoWebhookConfig {
-  secret: string;
+  /** Per-repo webhook secret; null means fall back to GITHUB_WEBHOOK_SECRET. */
+  secret: string | null;
   /** Trigger phrase events must contain; null means act on all events. */
   prefix: string | null;
+  /** Agent harness image override; null means use the server-wide default. */
+  agentImage: string | null;
 }
 
-/** Returns a repo's incoming-webhook config (secret + prefix), or null. */
+/** Returns a repo's config (secret + prefix + agent image), or null. */
 export async function getRepoWebhookConfig(
   database: typeof db,
   repoFullName: string,
@@ -18,12 +21,33 @@ export async function getRepoWebhookConfig(
     .select({
       secret: repoWebhookConfig.secret,
       prefix: repoWebhookConfig.prefix,
+      agentImage: repoWebhookConfig.agentImage,
     })
     .from(repoWebhookConfig)
     .where(eq(repoWebhookConfig.repoFullName, repoFullName))
     .limit(1);
   if (!row) return null;
-  return { secret: row.secret, prefix: row.prefix ?? null };
+  return {
+    secret: row.secret ?? null,
+    prefix: row.prefix ?? null,
+    agentImage: row.agentImage ?? null,
+  };
+}
+
+/**
+ * The agent harness image to use for a repo: its configured override, or null
+ * when none is set (callers fall back to the server-wide HARNESS_IMAGE).
+ */
+export async function getRepoAgentImage(
+  database: typeof db,
+  repoFullName: string,
+): Promise<string | null> {
+  const [row] = await database
+    .select({ agentImage: repoWebhookConfig.agentImage })
+    .from(repoWebhookConfig)
+    .where(eq(repoWebhookConfig.repoFullName, repoFullName))
+    .limit(1);
+  return row?.agentImage ?? null;
 }
 
 /**

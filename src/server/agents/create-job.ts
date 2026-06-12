@@ -190,6 +190,11 @@ export interface JobSpec {
   anthropicApiKey?: string;
   /** The acting user's kubeconfig — the cluster the agent is deployed into. Required. */
   kubeconfig: string;
+  /**
+   * Per-repo override for the harness container image. When unset, the
+   * server-wide default (HARNESS_IMAGE) is used.
+   */
+  agentImage?: string;
 }
 
 /** Per-job secret holding the acting user's credentials (GitHub / AWS / Anthropic). */
@@ -382,7 +387,7 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
             containers: [
               {
                 name: "harness",
-                image: env.HARNESS_IMAGE,
+                image: spec.agentImage ?? env.HARNESS_IMAGE,
                 imagePullPolicy: env.HARNESS_IMAGE_PULL_POLICY,
                 env: envVars,
                 resources: {

@@ -235,37 +235,65 @@ function InteractiveCard({
 /** Scrollable log pane that dims harness lines and auto-sticks to the bottom. */
 function LogView({ text }: { text: string }) {
   const ref = useRef<HTMLDivElement>(null);
+  // Whether the view is pinned to the bottom. Mirrored into state so the
+  // "scroll to bottom" button can show/hide as the user scrolls away.
   const stick = useRef(true);
+  const [pinned, setPinned] = useState(true);
 
   useEffect(() => {
     const el = ref.current;
     if (el && stick.current) el.scrollTop = el.scrollHeight;
   }, [text]);
 
+  function scrollToBottom() {
+    const el = ref.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+    stick.current = true;
+    setPinned(true);
+  }
+
   const lines = text ? text.split("\n") : [];
 
   return (
-    <div
-      ref={ref}
-      onScroll={(e) => {
-        const el = e.currentTarget;
-        stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-      }}
-      className="h-72 overflow-auto bg-black/30 px-4 py-3 font-mono text-[11px] leading-5"
-    >
-      {lines.length === 0 ? (
-        <span className="text-white/30">Waiting for output…</span>
-      ) : (
-        lines.map((line, i) => (
-          <div
-            key={i}
-            className={`break-words whitespace-pre-wrap ${
-              line.includes("[harness]") ? "text-white/35" : "text-white/80"
-            }`}
-          >
-            {line || " "}
-          </div>
-        ))
+    <div className="relative">
+      <div
+        ref={ref}
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          const atBottom =
+            el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+          stick.current = atBottom;
+          setPinned(atBottom);
+        }}
+        className="h-72 overflow-auto bg-black/30 px-4 py-3 font-mono text-[11px] leading-5"
+      >
+        {lines.length === 0 ? (
+          <span className="text-white/30">Waiting for output…</span>
+        ) : (
+          lines.map((line, i) => (
+            <div
+              key={i}
+              className={`break-words whitespace-pre-wrap ${
+                line.includes("[harness]") ? "text-white/35" : "text-white/80"
+              }`}
+            >
+              {line || " "}
+            </div>
+          ))
+        )}
+      </div>
+      {!pinned && (
+        <button
+          onClick={scrollToBottom}
+          aria-label="Scroll to bottom"
+          className="absolute right-3 bottom-3 flex items-center gap-1 rounded-full border border-white/15 bg-black/70 px-3 py-1.5 text-xs text-white/80 shadow-lg backdrop-blur hover:bg-black/90"
+        >
+          <svg viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5">
+            <path d="M8 1.75a.75.75 0 0 1 .75.75v8.19l2.72-2.72a.75.75 0 1 1 1.06 1.06l-4 4a.75.75 0 0 1-1.06 0l-4-4a.75.75 0 0 1 1.06-1.06l2.72 2.72V2.5A.75.75 0 0 1 8 1.75Z" />
+          </svg>
+          Scroll to bottom
+        </button>
       )}
     </div>
   );

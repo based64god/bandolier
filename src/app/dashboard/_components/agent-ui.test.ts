@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { expiresIn, STATUS_STYLES } from "~/app/dashboard/_components/agent-ui";
+import {
+  expiresIn,
+  isAgentDone,
+  STATUS_STYLES,
+} from "~/app/dashboard/_components/agent-ui";
 
 describe("expiresIn", () => {
   beforeEach(() => {
@@ -49,5 +53,32 @@ describe("STATUS_STYLES", () => {
     ]) {
       expect(STATUS_STYLES[status]).toBeTruthy();
     }
+  });
+});
+
+describe("isAgentDone", () => {
+  it("treats terminal phases as done", () => {
+    expect(isAgentDone("Succeeded")).toBe(true);
+    expect(isAgentDone("Failed")).toBe(true);
+  });
+
+  it("treats in-flight and unknown phases as not done", () => {
+    expect(isAgentDone("Running")).toBe(false);
+    expect(isAgentDone("Pending")).toBe(false);
+    expect(isAgentDone("Unknown")).toBe(false);
+  });
+
+  it("sinks completed agents to the bottom when used as a sort key", () => {
+    const agents = [
+      { name: "a", status: "Succeeded" },
+      { name: "b", status: "Running" },
+      { name: "c", status: "Failed" },
+      { name: "d", status: "Pending" },
+    ];
+    const sorted = [...agents].sort(
+      (x, y) => Number(isAgentDone(x.status)) - Number(isAgentDone(y.status)),
+    );
+    // Stable sort keeps active agents in their original order, ahead of done ones.
+    expect(sorted.map((a) => a.name)).toEqual(["b", "d", "a", "c"]);
   });
 });

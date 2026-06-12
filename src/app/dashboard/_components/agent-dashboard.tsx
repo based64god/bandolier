@@ -9,7 +9,7 @@ import { BandolierIcon } from "~/app/_components/bandolier-icon";
 import { repoToNamespace } from "~/server/agents/namespace";
 import { authClient } from "~/server/better-auth/client";
 import { api } from "~/trpc/react";
-import { expiresIn, STATUS_STYLES } from "./agent-ui";
+import { expiresIn, isAgentDone, STATUS_STYLES } from "./agent-ui";
 import { DeployModal } from "./deploy-modal";
 import { InteractiveSessions } from "./interactive-sessions";
 import { LogModal } from "./log-modal";
@@ -139,11 +139,22 @@ export function AgentDashboard({
   });
 
   // Interactive agents are pinned above the table; those awaiting input come
-  // first so the user sees what needs them at the very top.
+  // first so the user sees what needs them at the very top, and finished
+  // sessions sink to the bottom.
   const interactiveAgents = agents
     .filter((a) => a.interactive)
-    .sort((a, b) => Number(b.awaitingInput) - Number(a.awaitingInput));
-  const tableAgents = agents.filter((a) => !a.interactive);
+    .sort((a, b) => {
+      const doneDiff =
+        Number(isAgentDone(a.status)) - Number(isAgentDone(b.status));
+      if (doneDiff !== 0) return doneDiff;
+      return Number(b.awaitingInput) - Number(a.awaitingInput);
+    });
+  // Non-interactive agents fill the table; completed ones sink to the bottom.
+  const tableAgents = agents
+    .filter((a) => !a.interactive)
+    .sort(
+      (a, b) => Number(isAgentDone(a.status)) - Number(isAgentDone(b.status)),
+    );
 
   // Chime + system notification when an agent finishes or starts awaiting input.
   const [notify, setNotify] = useNotifyPref();

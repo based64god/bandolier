@@ -71,6 +71,7 @@ interface IssuePayload {
 async function handleIssueOpened(
   payload: IssuePayload,
   prefix: string | null,
+  agentImage: string | null,
 ): Promise<void> {
   const { issue, repository, sender } = payload;
 
@@ -214,6 +215,7 @@ async function handleIssueOpened(
     awsCredentials: awsCredentials ?? undefined,
     anthropicApiKey: anthropicApiKey ?? undefined,
     kubeconfig,
+    agentImage: agentImage ?? undefined,
   });
 }
 
@@ -257,6 +259,7 @@ export async function POST(req: NextRequest) {
       await handleIssueOpened(
         payload as IssuePayload,
         repoConfig?.prefix ?? null,
+        repoConfig?.agentImage ?? null,
       );
     }
     // Other event types ignored for now.

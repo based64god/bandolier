@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { api } from "~/trpc/react";
 
-export function WebhooksModal({
+export function RepoConfigModal({
   repoFullName,
   onClose,
 }: {
@@ -15,9 +15,10 @@ export function WebhooksModal({
   const [revealed, setRevealed] = useState(false);
   const [secretCopied, setSecretCopied] = useState(false);
   const [result, setResult] = useState<string | null>(null);
-  // Uncontrolled so it can pick up the saved value on load without a syncing
-  // effect; read via the ref on submit.
+  // Uncontrolled so they pick up the saved value on load without a syncing
+  // effect; read via the refs on submit.
   const prefixRef = useRef<HTMLInputElement>(null);
+  const agentImageRef = useRef<HTMLInputElement>(null);
 
   function generateSecret() {
     const bytes = new Uint8Array(24);
@@ -89,7 +90,9 @@ export function WebhooksModal({
       >
         <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
           <div className="flex items-center gap-2">
-            <h2 className="text-sm font-semibold text-white">Webhooks</h2>
+            <h2 className="text-sm font-semibold text-white">
+              Repository configuration
+            </h2>
             <code className="rounded bg-purple-500/20 px-2 py-0.5 text-xs text-purple-300">
               {repoFullName}
             </code>
@@ -105,13 +108,14 @@ export function WebhooksModal({
 
         <div className="space-y-5 px-5 py-5">
           <p className="text-xs text-white/40">
-            Configure a GitHub webhook so events in this repository can trigger
-            agents. Set a secret here, then add the webhook in GitHub using the
+            Repository-level settings for this repo: the GitHub webhook that
+            lets events trigger agents, and the agent image those agents run on.
+            Set a webhook secret here, then add the webhook in GitHub using the
             details below.
           </p>
 
           {/* Current status */}
-          {!isLoading && config?.configured && (
+          {!isLoading && config?.hasSecret && (
             <div className="flex items-center justify-between rounded-lg border border-green-500/20 bg-green-500/5 px-3 py-2.5 text-sm">
               <span className="text-green-300/90">
                 A webhook secret is configured for this repo.
@@ -134,6 +138,7 @@ export function WebhooksModal({
                 repoFullName,
                 secret: secret || undefined,
                 prefix: prefixRef.current?.value ?? "",
+                agentImage: agentImageRef.current?.value ?? "",
               });
             }}
             className="space-y-4"
@@ -149,7 +154,7 @@ export function WebhooksModal({
                   value={secret}
                   onChange={(e) => setSecret(e.target.value)}
                   placeholder={
-                    config?.configured
+                    config?.hasSecret
                       ? "Leave blank to keep current secret"
                       : "Secret"
                   }
@@ -158,9 +163,7 @@ export function WebhooksModal({
                 <button
                   type="submit"
                   disabled={
-                    save.isPending ||
-                    (secret.length > 0 && secret.length < 8) ||
-                    (!config?.configured && secret.length === 0)
+                    save.isPending || (secret.length > 0 && secret.length < 8)
                   }
                   className="rounded-lg bg-purple-600 px-3 py-2 text-sm font-medium hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-50"
                 >
@@ -221,6 +224,28 @@ export function WebhooksModal({
                 When set, only events whose title or body contains this text
                 trigger an agent. Leave blank to act on all events. Saved with
                 the button above.
+              </p>
+            </div>
+
+            {/* Agent image */}
+            <div className="space-y-1.5">
+              <label className="block text-xs font-medium text-white/60">
+                Agent image{" "}
+                <span className="font-normal text-white/30">(optional)</span>
+              </label>
+              <input
+                key={
+                  config ? `image-${String(config.updatedAt)}` : "image-loading"
+                }
+                ref={agentImageRef}
+                type="text"
+                defaultValue={config?.agentImage ?? ""}
+                placeholder="e.g. ghcr.io/acme/bandolier-agent-harness:latest"
+                className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 font-mono text-sm text-white placeholder-white/30 placeholder:font-sans focus:border-purple-500/50 focus:outline-none"
+              />
+              <p className="text-xs text-white/30">
+                Container image agents for this repo run on. Leave blank to use
+                the server default. Saved with the button above.
               </p>
             </div>
 

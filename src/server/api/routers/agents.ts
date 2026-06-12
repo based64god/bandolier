@@ -30,6 +30,7 @@ import {
 import { resolveKubeconfig } from "~/server/agents/kubeconfig";
 import { listModelsForUser, pickLatestSonnet } from "~/server/agents/models";
 import { getUserAwsCredentials } from "~/server/agents/user-aws";
+import { getRepoAgentImage } from "~/server/agents/webhook-config";
 import { agentInput, taskRun } from "~/server/db/schema";
 import { getBatchV1Api, getCoreV1Api } from "~/server/k8s/client";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
@@ -681,6 +682,21 @@ export const agentsRouter = createTRPCRouter({
           }
         }
 
+        // Per-repo harness image override (falls back to HARNESS_IMAGE when
+        // unset). Best-effort: a lookup failure must not block the deploy.
+        let agentImage: string | undefined;
+        if (input.repoFullName) {
+          try {
+            agentImage =
+              (await getRepoAgentImage(ctx.db, input.repoFullName)) ??
+              undefined;
+          } catch (err) {
+            console.warn("[bandolier:deploy] agent image lookup failed", {
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+        }
+
         const jobName = await createAgentJob({
           namespace: input.namespace,
           task,
@@ -701,6 +717,7 @@ export const agentsRouter = createTRPCRouter({
           awsCredentials: awsCredentials ?? undefined,
           anthropicApiKey: anthropicApiKey ?? undefined,
           kubeconfig,
+          agentImage: agentImage ?? undefined,
           createdBy: ctx.session.user.name ?? ctx.session.user.email,
           gitName: gitIdentity.name,
           gitEmail: gitIdentity.email,

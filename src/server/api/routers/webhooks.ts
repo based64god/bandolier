@@ -44,14 +44,20 @@ export const webhooksRouter = createTRPCRouter({
         .select({
           updatedAt: repoWebhookConfig.updatedAt,
           prefix: repoWebhookConfig.prefix,
+          secret: repoWebhookConfig.secret,
+          agentImage: repoWebhookConfig.agentImage,
         })
         .from(repoWebhookConfig)
         .where(eq(repoWebhookConfig.repoFullName, input.repoFullName))
         .limit(1);
       return {
+        // Whether a config row exists at all (any setting saved).
         configured: !!row,
+        // Whether a per-repo webhook secret is set (separate from other config).
+        hasSecret: !!row?.secret,
         updatedAt: row?.updatedAt ?? null,
         prefix: row?.prefix ?? "",
+        agentImage: row?.agentImage ?? "",
       };
     }),
 
@@ -63,6 +69,8 @@ export const webhooksRouter = createTRPCRouter({
         secret: z.string().optional(),
         // Optional trigger phrase; blank clears it (act on all events).
         prefix: z.string().optional(),
+        // Optional agent harness image override; blank clears it (use default).
+        agentImage: z.string().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -81,20 +89,18 @@ export const webhooksRouter = createTRPCRouter({
           message: "Use a secret of at least 8 characters.",
         });
       }
-      if (!existing && !secret) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "A webhook secret is required.",
-        });
-      }
 
       const prefix = input.prefix?.trim() ? input.prefix.trim() : null;
+      const agentImage = input.agentImage?.trim()
+        ? input.agentImage.trim()
+        : null;
 
       if (existing) {
         await ctx.db
           .update(repoWebhookConfig)
           .set({
             prefix,
+            agentImage,
             configuredBy: ctx.session.user.id,
             updatedAt: new Date(),
             ...(secret ? { secret } : {}),
@@ -103,21 +109,47 @@ export const webhooksRouter = createTRPCRouter({
       } else {
         await ctx.db.insert(repoWebhookConfig).values({
           repoFullName: input.repoFullName,
-          secret: secret!,
+          secret: secret ?? null,
           prefix,
+          agentImage,
           configuredBy: ctx.session.user.id,
         });
       }
       return { success: true };
     }),
 
+  // Clears the per-repo webhook secret. Preserves any other repo config (e.g. a
+  // configured agent image) by keeping the row and only nulling the secret;
+  // drops the row entirely once nothing else is set.
   deleteConfig: protectedProcedure
     .input(z.object({ repoFullName: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       await requireRepoAdmin(ctx, input.repoFullName);
-      await ctx.db
-        .delete(repoWebhookConfig)
-        .where(eq(repoWebhookConfig.repoFullName, input.repoFullName));
+
+      const [row] = await ctx.db
+        .select({
+          prefix: repoWebhookConfig.prefix,
+          agentImage: repoWebhookConfig.agentImage,
+        })
+        .from(repoWebhookConfig)
+        .where(eq(repoWebhookConfig.repoFullName, input.repoFullName))
+        .limit(1);
+
+      const hasOtherConfig = !!row && (!!row.prefix || !!row.agentImage);
+      if (hasOtherConfig) {
+        await ctx.db
+          .update(repoWebhookConfig)
+          .set({
+            secret: null,
+            configuredBy: ctx.session.user.id,
+            updatedAt: new Date(),
+          })
+          .where(eq(repoWebhookConfig.repoFullName, input.repoFullName));
+      } else {
+        await ctx.db
+          .delete(repoWebhookConfig)
+          .where(eq(repoWebhookConfig.repoFullName, input.repoFullName));
+      }
       return { success: true };
     }),
 });

@@ -70,6 +70,16 @@ function InteractiveCard({
     wasAwaiting.current = awaiting;
   }, [awaiting]);
 
+  // When a session finishes (running→done) there's nothing left to interact
+  // with, so we collapse it to get it out of the way. Mirror of the expand
+  // logic above: only on the true→false transition, so the user can re-open a
+  // completed session to read its final output.
+  const wasRunning = useRef(running);
+  useEffect(() => {
+    if (!running && wasRunning.current) setCollapsed(true);
+    wasRunning.current = running;
+  }, [running]);
+
   const { data: logs } = api.agents.getLogs.useQuery(
     {
       podName: agent.name,

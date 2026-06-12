@@ -34,6 +34,7 @@ const LABEL_SELECTOR = env.K8S_LABEL_SELECTOR;
 const INTERACTIVE_LABEL = "bandolier.io/interactive";
 
 const PR_MARKER = /PR_URL=(https:\/\/\S+)/;
+const CREATED_ISSUE_MARKER = /CREATED_ISSUE_URL=(https:\/\/\S+)/;
 // Harness log markers bracketing an interactive turn: it prints AWAIT when it
 // starts waiting for the next user message and RESUME when one arrives. The most
 // recent of the two tells us whether the agent is currently awaiting input.
@@ -52,6 +53,8 @@ interface PodInspection {
   currently: string | null;
   /** The pull-request URL the harness logged, if any. */
   pullRequestUrl: string | null;
+  /** The created-issue URL the harness logged, if any (issue-creation mode). */
+  createdIssueUrl: string | null;
   /** True when an interactive agent is currently waiting for user input. */
   awaitingInput: boolean;
 }
@@ -104,13 +107,14 @@ async function inspectPod(
     const result: PodInspection = {
       currently,
       pullRequestUrl: PR_MARKER.exec(logs)?.[1] ?? null,
+      createdIssueUrl: CREATED_ISSUE_MARKER.exec(logs)?.[1] ?? null,
       awaitingInput: !terminal && lastAwait >= 0 && lastAwait > lastResume,
     };
     if (terminal) terminalInspectionCache.set(podName, result);
     return result;
   } catch {
     // transient; retry next poll
-    return { currently: null, pullRequestUrl: null, awaitingInput: false };
+    return { currently: null, pullRequestUrl: null, createdIssueUrl: null, awaitingInput: false };
   }
 }
 
@@ -170,7 +174,7 @@ async function podToTask(pod: V1Pod, namespace: string, kubeconfig: string) {
       ).toISOString()
     : null;
 
-  const { currently, pullRequestUrl, awaitingInput } = await inspectPod(
+  const { currently, pullRequestUrl, createdIssueUrl, awaitingInput } = await inspectPod(
     name,
     namespace,
     status,
@@ -196,6 +200,7 @@ async function podToTask(pod: V1Pod, namespace: string, kubeconfig: string) {
     currently,
     expiresAt,
     pullRequestUrl,
+    createdIssueUrl,
     interactive,
     awaitingInput: interactive && awaitingInput,
   };
@@ -245,7 +250,7 @@ export const agentsRouter = createTRPCRouter({
 
           // The pull-request URL lives in the harness logs; read it per pod
           // (cheap here — only the user's own agents, and terminal pods cache).
-          const { pullRequestUrl, awaitingInput } = await inspectPod(
+          const { pullRequestUrl, createdIssueUrl, awaitingInput } = await inspectPod(
             name,
             namespace,
             status,
@@ -266,6 +271,7 @@ export const agentsRouter = createTRPCRouter({
             createdBy: annotations["bandolier.io/created-by"] ?? null,
             status,
             pullRequestUrl,
+            createdIssueUrl,
             interactive,
             awaitingInput: interactive && awaitingInput,
           };
@@ -522,6 +528,9 @@ export const agentsRouter = createTRPCRouter({
           // Run as a long-lived interactive session that waits for user input
           // between turns instead of a one-shot task.
           interactive: z.boolean().optional(),
+          // When true the agent analyses the repo and creates a GitHub issue
+          // instead of committing code and opening a PR.
+          createGithubIssue: z.boolean().optional(),
         })
         .refine(
           (v) => v.task.trim().length > 0 || v.issueNumber !== undefined,
@@ -658,10 +667,11 @@ export const agentsRouter = createTRPCRouter({
 
         // PR-producing runs (repo or issue mode) get their PR title/description
         // written by the latest Sonnet, out-of-band of the (possibly non-Sonnet)
-        // task model. Best-effort: a lookup failure falls back to the harness's
+        // task model. Not needed for issue-creation mode (no PR is opened).
+        // Best-effort: a lookup failure falls back to the harness's
         // commit-based title and must not block the deploy.
         let prWriterModel: string | undefined;
-        if (repoUrl ?? issue) {
+        if (!input.createGithubIssue && (repoUrl ?? issue)) {
           try {
             const { models } = await listModelsForUser(ctx.db, userId);
             prWriterModel = pickLatestSonnet(models);
@@ -686,6 +696,7 @@ export const agentsRouter = createTRPCRouter({
           interactive: input.interactive,
           issueNumber: issue ? String(issue.number) : undefined,
           issueUrl: issue?.url,
+          createGithubIssue: input.createGithubIssue,
           userId,
           githubToken: githubToken ?? undefined,
           awsCredentials: awsCredentials ?? undefined,

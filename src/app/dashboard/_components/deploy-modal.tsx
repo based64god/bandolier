@@ -44,6 +44,8 @@ export function DeployModal({
   const [issueNumber, setIssueNumber] = useState("");
   // Interactive agents stay alive and wait for the user's input between turns.
   const [interactive, setInteractive] = useState(false);
+  // When true the agent creates a GitHub issue instead of committing code and opening a PR.
+  const [createGithubIssue, setCreateGithubIssue] = useState(false);
 
   const { data: providerInfo } = api.agents.providerInfo.useQuery();
   const { data: deployDefaults } = api.agents.deployDefaults.useQuery();
@@ -101,6 +103,7 @@ export function DeployModal({
       maxTurns: maxTurns ? parseInt(maxTurns, 10) : undefined,
       issueNumber: hasIssue ? parseInt(issueNumber, 10) : undefined,
       interactive: interactive || undefined,
+      createGithubIssue: createGithubIssue || undefined,
     });
   }
 
@@ -349,6 +352,28 @@ export function DeployModal({
               </span>
             </span>
           </label>
+
+          {/* Create GitHub issue */}
+          {repoFullName && (
+            <label className="flex cursor-pointer items-start gap-2.5">
+              <input
+                type="checkbox"
+                checked={createGithubIssue}
+                onChange={(e) => setCreateGithubIssue(e.target.checked)}
+                className="mt-0.5 h-4 w-4 cursor-pointer accent-sky-600"
+              />
+              <span className="text-xs text-white/60">
+                <span className="font-medium text-white/80">
+                  Create GitHub issue
+                </span>
+                <span className="mt-0.5 block text-white/40">
+                  Instead of opening a pull request, the agent analyses the
+                  repository and creates a GitHub issue capturing its findings
+                  and relevant context.
+                </span>
+              </span>
+            </label>
+          )}
 
           {/* Deploy error */}
           {deploy.error && (

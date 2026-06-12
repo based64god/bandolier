@@ -7,6 +7,14 @@
 //   - It fetches the issue via `gh issue view` to build a structured task prompt
 //   - It creates a dedicated git branch (issue-N/title-slug)
 //   - After Claude finishes it pushes the branch and opens a PR that closes the issue
+//
+// When CREATE_GITHUB_ISSUE=1 is set (and REPO_URL is provided), the harness
+// enters "issue-creation mode":
+//   - It clones the repo for Claude to analyse
+//   - It does NOT create a branch, commit, or open a PR
+//   - After Claude finishes it creates a GitHub issue whose body is Claude's
+//     output plus collected repository context (recent commits, README excerpt)
+//   - The created issue URL is logged as CREATED_ISSUE_URL= for the dashboard
 package main
 
 import (
@@ -122,23 +130,24 @@ func detectProvider() providerKind {
 // ── Config ────────────────────────────────────────────────────────────────────
 
 type config struct {
-	task        string
-	title       string // short label used for branch slug, PR title, commit message
-	workDir     string
-	model       string
-	prWriter    string // out-of-band model for writing the PR title/description
-	repoURL     string
-	branch      string
-	maxTurns    string
-	gitName     string
-	gitEmail    string
-	provider    providerKind
-	issueNumber string // GitHub issue number (issue mode)
-	issueRepo   string // "owner/repo" for gh commands
-	agentBranch string // server-provided unique working branch (issue mode)
-	baseBranch  string // base branch for the PR
-	interactive bool   // long-lived session driven by user input between turns
-	inputURL    string // Bandolier endpoint the interactive loop polls for input
+	task             string
+	title            string // short label used for branch slug, PR title, commit message
+	workDir          string
+	model            string
+	prWriter         string // out-of-band model for writing the PR title/description
+	repoURL          string
+	branch           string
+	maxTurns         string
+	gitName          string
+	gitEmail         string
+	provider         providerKind
+	issueNumber      string // GitHub issue number (issue mode)
+	issueRepo        string // "owner/repo" for gh commands
+	agentBranch      string // server-provided unique working branch (issue mode)
+	baseBranch       string // base branch for the PR
+	interactive      bool   // long-lived session driven by user input between turns
+	inputURL         string // Bandolier endpoint the interactive loop polls for input
+	createGithubIssue bool   // create a GitHub issue instead of a PR after the run
 }
 
 func loadConfig() (config, error) {
@@ -174,23 +183,24 @@ func loadConfig() (config, error) {
 	}
 
 	return config{
-		task:        task,
-		title:       os.Getenv("AGENT_TITLE"),
-		workDir:     workDir,
-		model:       model,
-		prWriter:    os.Getenv("PR_WRITER_MODEL"),
-		repoURL:     os.Getenv("REPO_URL"),
-		branch:      os.Getenv("BRANCH"),
-		maxTurns:    maxTurns,
-		gitName:     os.Getenv("GIT_NAME"),
-		gitEmail:    os.Getenv("GIT_EMAIL"),
-		provider:    detectProvider(),
-		issueNumber: issueNumber,
-		issueRepo:   os.Getenv("GITHUB_REPO"),
-		agentBranch: os.Getenv("AGENT_BRANCH"),
-		baseBranch:  baseBranch,
-		interactive: os.Getenv("INTERACTIVE") == "1",
-		inputURL:    os.Getenv("BANDOLIER_INPUT_URL"),
+		task:              task,
+		title:             os.Getenv("AGENT_TITLE"),
+		workDir:           workDir,
+		model:             model,
+		prWriter:          os.Getenv("PR_WRITER_MODEL"),
+		repoURL:           os.Getenv("REPO_URL"),
+		branch:            os.Getenv("BRANCH"),
+		maxTurns:          maxTurns,
+		gitName:           os.Getenv("GIT_NAME"),
+		gitEmail:          os.Getenv("GIT_EMAIL"),
+		provider:          detectProvider(),
+		issueNumber:       issueNumber,
+		issueRepo:         os.Getenv("GITHUB_REPO"),
+		agentBranch:       os.Getenv("AGENT_BRANCH"),
+		baseBranch:        baseBranch,
+		interactive:       os.Getenv("INTERACTIVE") == "1",
+		inputURL:          os.Getenv("BANDOLIER_INPUT_URL"),
+		createGithubIssue: os.Getenv("CREATE_GITHUB_ISSUE") == "1",
 	}, nil
 }
 
@@ -489,6 +499,81 @@ func openPR(ctx context.Context, cfg config, branchName, title, body string) {
 
 var prURLRe = regexp.MustCompile(`https://github\.com/\S+/pull/\d+`)
 
+var createdIssueURLRe = regexp.MustCompile(`https://github\.com/\S+/issues/\d+`)
+
+// repoContext gathers lightweight context from the cloned repository: the
+// first 100 lines of README (if any) and the last 10 commit subjects. This is
+// appended to the created GitHub issue body so readers have immediate context.
+func repoContext(ctx context.Context, workDir string) string {
+	var parts []string
+
+	// Recent commits.
+	if out, err := captureCmd(ctx, workDir, "git", "log", "--oneline", "-10"); err == nil {
+		if s := strings.TrimSpace(out); s != "" {
+			parts = append(parts, "## Recent commits\n\n```\n"+s+"\n```")
+		}
+	}
+
+	// README excerpt (first 100 lines of the first README we find).
+	for _, name := range []string{"README.md", "README.rst", "README.txt", "README"} {
+		data, err := os.ReadFile(filepath.Join(workDir, name))
+		if err != nil {
+			continue
+		}
+		lines := strings.Split(string(data), "\n")
+		if len(lines) > 100 {
+			lines = append(lines[:100], "…(truncated)")
+		}
+		parts = append(parts, "## README excerpt\n\n"+strings.Join(lines, "\n"))
+		break
+	}
+
+	if len(parts) == 0 {
+		return ""
+	}
+	return "\n\n---\n\n" + strings.Join(parts, "\n\n")
+}
+
+// buildIssueCreationTask builds the Claude prompt for issue-creation mode.
+// Claude is asked to analyse the repository and produce a well-structured
+// GitHub issue body; the harness then creates the actual issue via gh.
+func buildIssueCreationTask(task string) string {
+	return fmt.Sprintf(`You are an AI agent tasked with analysing a repository and drafting a GitHub issue.
+
+## Your task
+
+%s
+
+## Instructions
+
+1. Explore the repository to understand its structure, purpose, and relevant code.
+2. Write a clear, well-structured GitHub issue body in Markdown that:
+   - Summarises the problem or feature request
+   - Provides relevant context from the codebase (file paths, function names, etc.)
+   - Includes reproduction steps or acceptance criteria where applicable
+   - Is actionable for a developer picking it up
+
+Output ONLY the issue body in Markdown — no preamble, no code fences around the whole thing, no "Here is the issue:" prefix. Your entire output becomes the issue body.`, strings.TrimSpace(task))
+}
+
+// createIssue creates a GitHub issue using the gh CLI and logs the URL.
+func createIssue(ctx context.Context, cfg config, title, body string) {
+	log.Printf("[harness] creating GitHub issue: %s", title)
+	args := []string{"issue", "create", "--title", title, "--body", body}
+	if cfg.issueRepo != "" {
+		args = append(args, "--repo", cfg.issueRepo)
+	}
+	out, err := captureCmd(ctx, cfg.workDir, "gh", args...)
+	if err != nil {
+		log.Printf("[harness] warn: gh issue create: %v", err)
+	}
+	if url := createdIssueURLRe.FindString(out); url != "" {
+		log.Printf("[harness] CREATED_ISSUE_URL=%s", url)
+	} else {
+		log.Printf("[harness] issue created (no URL parsed)")
+	}
+}
+
 // captureCmd runs a command capturing stdout (returned), while streaming stderr
 // into the tagged harness logs.
 func captureCmd(ctx context.Context, dir, name string, args ...string) (string, error) {
@@ -605,9 +690,17 @@ func run(ctx context.Context, cfg config) error {
 	}
 
 	// Determine the working mode. A PR is opened when prBranch is non-empty.
+	// In issue-creation mode neither a branch nor a PR is created.
 	var prBranch, prTitle, prBody string
 
 	switch {
+	case cfg.createGithubIssue:
+		// ── Issue-creation mode ──────────────────────────────────────────────────
+		// Claude analyses the repo and produces an issue body; the harness creates
+		// the actual GitHub issue afterward. No branch, no commit, no PR.
+		log.Printf("[harness] issue-creation mode")
+		cfg.task = buildIssueCreationTask(cfg.task)
+
 	case cfg.issueNumber != "":
 		// ── Issue mode ──────────────────────────────────────────────────────────
 		log.Printf("[harness] issue mode: #%s", cfg.issueNumber)
@@ -707,8 +800,50 @@ func run(ctx context.Context, cfg config) error {
 		}
 	}
 
-	// ── Post-run: push branch and open PR ──────────────────────────────────────
-	if prBranch != "" {
+	// ── Post-run ──────────────────────────────────────────────────────────────
+
+	if cfg.createGithubIssue {
+		// Issue-creation mode: Claude's stdout output is the issue body.
+		// Collect Claude's assistant output from the transcript and append repo context.
+		issueTitle := strings.TrimSpace(cfg.title)
+		if issueTitle == "" {
+			// Fall back to first non-empty line of the task as the title.
+			for _, l := range strings.Split(cfg.task, "\n") {
+				if l = strings.TrimSpace(l); l != "" {
+					if len(l) > 80 {
+						l = l[:80] + "…"
+					}
+					issueTitle = l
+					break
+				}
+			}
+		}
+		if issueTitle == "" {
+			issueTitle = "Bandolier agent report"
+		}
+
+		// Extract Claude's assistant output from the transcript (non-harness lines).
+		var outputLines []string
+		for _, l := range strings.Split(transcript.String(), "\n") {
+			if !strings.Contains(l, "[harness]") {
+				outputLines = append(outputLines, l)
+			}
+		}
+		issueBody := strings.TrimSpace(strings.Join(outputLines, "\n"))
+		if issueBody == "" {
+			issueBody = "(no output from agent)"
+		}
+
+		// Append lightweight repo context (commits, README excerpt).
+		if cfg.repoURL != "" {
+			issueBody += repoContext(ctx, cfg.workDir)
+		}
+
+		issueBody += "\n\n---\n_Generated by [Bandolier](https://github.com/bandolier)._"
+
+		createIssue(ctx, cfg, issueTitle, issueBody)
+	} else if prBranch != "" {
+		// ── Push branch and open PR ─────────────────────────────────────────────
 		// Baseline title: for dashboard (non-issue) PRs use Claude's commit summary
 		// rather than the prompt; issue PRs keep the issue title.
 		if cfg.issueNumber == "" {

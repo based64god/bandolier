@@ -120,8 +120,13 @@ export function AgentDashboard({
   const selectedRepo = repoSlug
     ? (repos.find((r) => r.fullName === repoSlug) ?? null)
     : null;
+  // Pass the selected repo so a repo's own (preferred) kubeconfig counts as
+  // configured — the "Configure kubeconfig" prompt shouldn't render when the
+  // repo already resolves a cluster, even if the user hasn't set one.
   const { data: kubeStatus, isLoading: kubeLoading } =
-    api.account.kubeconfigStatus.useQuery();
+    api.account.kubeconfigStatus.useQuery({
+      repoFullName: repoSlug ?? undefined,
+    });
   const kubeConfigured = kubeStatus?.configured ?? false;
 
   const {

@@ -4,9 +4,11 @@ import {
   ListFoundationModelsCommand,
 } from "@aws-sdk/client-bedrock";
 
-import { getUserAnthropicKey } from "~/server/agents/anthropic";
 import { cleanSessionToken, type AwsCredentials } from "~/server/agents/aws";
-import { getUserAwsCredentials } from "~/server/agents/user-aws";
+import {
+  pickProvider,
+  resolveModelCredentials,
+} from "~/server/agents/resolve-credentials";
 import type { db } from "~/server/db";
 
 export interface ModelOption {
@@ -107,21 +109,24 @@ function friendlyAwsError(err: unknown): string {
 
 /**
  * Lists the models available to a user from their configured provider's API.
- * AWS Bedrock takes precedence over an Anthropic key, mirroring deploy.
+ * AWS Bedrock takes precedence over an Anthropic key, mirroring deploy. When a
+ * repo is given, repo-scoped credentials are considered alongside the user's own
+ * per the repo's prefer-credentials flag.
  */
 export async function listModelsForUser(
   database: typeof db,
   userId: string,
+  repoFullName?: string,
 ): Promise<ModelList> {
-  const aws = await getUserAwsCredentials(database, userId);
+  const creds = await resolveModelCredentials(database, userId, repoFullName);
+  const { aws, anthropicApiKey } = pickProvider(creds);
   if (aws) {
     return { provider: "bedrock", models: await listBedrockModels(aws) };
   }
-  const anthropic = await getUserAnthropicKey(database, userId);
-  if (anthropic) {
+  if (anthropicApiKey) {
     return {
       provider: "anthropic",
-      models: await listAnthropicModels(anthropic),
+      models: await listAnthropicModels(anthropicApiKey),
     };
   }
   return { provider: "none", models: [] };

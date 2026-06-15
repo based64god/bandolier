@@ -130,8 +130,14 @@ export function AgentDashboard({
     error,
     dataUpdatedAt,
   } = api.agents.list.useQuery(
-    { namespace: namespace! },
-    { enabled: !!namespace && kubeConfigured, refetchInterval: 5000 },
+    { namespace: namespace!, repoFullName: repoSlug ?? undefined },
+    {
+      // A repo may provide its own kubeconfig even when the user hasn't, so
+      // allow the query whenever a repo is selected; the server returns a clear
+      // error if no cluster resolves at all.
+      enabled: !!namespace && (kubeConfigured || !!repoSlug),
+      refetchInterval: 5000,
+    },
   );
 
   const terminate = api.agents.terminate.useMutation({
@@ -355,6 +361,7 @@ export function AgentDashboard({
             <InteractiveSessions
               agents={interactiveAgents}
               namespace={namespace}
+              repoFullName={repoSlug ?? undefined}
             />
 
             {/* Agent table (non-interactive agents) */}
@@ -471,6 +478,7 @@ export function AgentDashboard({
                                   terminate.mutate({
                                     podName: agent.name,
                                     namespace: namespace,
+                                    repoFullName: repoSlug ?? undefined,
                                   })
                                 }
                                 disabled={terminate.isPending}
@@ -516,6 +524,7 @@ export function AgentDashboard({
           podName={logPod}
           namespace={namespace}
           jobName={agents.find((a) => a.name === logPod)?.jobName}
+          repoFullName={repoSlug ?? undefined}
           prompt={agents.find((a) => a.name === logPod)?.prompt ?? null}
           onClose={() => setLogPod(null)}
         />

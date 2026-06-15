@@ -89,3 +89,41 @@ jobs:
 
       - name: Test
         run: go test -race -count=1 ./...
+
+  db-migrate:
+    name: Apply migrations (drizzle)
+    # Only apply migrations once changes have actually landed on the default
+    # branch — never on pull requests, where DATABASE_URL is unavailable and a
+    # migration would be premature.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: web
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.10.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # drizzle-kit migrate must use a DIRECT (unpooled) Neon connection — the
+      # transaction pooler can apply the DDL but die before recording the
+      # migration, leaving the bookkeeping table out of sync. Dropping the
+      # "-pooler" host suffix yields the direct endpoint; it's a no-op if the
+      # secret is already a direct URL.
+      - name: Apply migrations
+        run: |
+          export DATABASE_URL="${POOLED_DATABASE_URL/-pooler/}"
+          pnpm db:migrate
+        env:
+          POOLED_DATABASE_URL: ${{ secrets.DATABASE_URL }}

@@ -6,7 +6,6 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { env } from "~/env";
-import { getUserAnthropicKey } from "~/server/agents/anthropic";
 import { getArtifact } from "~/server/agents/artifacts";
 import { validateAwsCredentials } from "~/server/agents/aws";
 import { getIssue } from "~/server/agents/github-issues";
@@ -29,7 +28,10 @@ import {
 } from "~/server/agents/github-token";
 import { resolveKubeconfig } from "~/server/agents/kubeconfig";
 import { listModelsForUser, pickLatestSonnet } from "~/server/agents/models";
-import { getUserAwsCredentials } from "~/server/agents/user-aws";
+import {
+  pickProvider,
+  resolveModelCredentials,
+} from "~/server/agents/resolve-credentials";
 import { getRepoAgentImage } from "~/server/agents/webhook-config";
 import { agentInput, taskRun } from "~/server/db/schema";
 import { getBatchV1Api, getCoreV1Api } from "~/server/k8s/client";
@@ -119,12 +121,17 @@ async function inspectPod(
   }
 }
 
-/** Resolves the server-wide or user kubeconfig, throwing if neither is set. */
+/**
+ * Resolves the kubeconfig to use (server-wide, repo-scoped, or the user's own —
+ * see resolveKubeconfig), throwing if none is set. Pass `repoFullName` so a
+ * repo's shared cluster is considered for repo-scoped views.
+ */
 async function requireKubeconfig(
   db: Parameters<typeof resolveKubeconfig>[0],
   userId: string,
+  repoFullName?: string,
 ): Promise<string> {
-  const kubeconfig = await resolveKubeconfig(db, userId);
+  const kubeconfig = await resolveKubeconfig(db, userId, repoFullName);
   if (!kubeconfig) {
     throw new TRPCError({
       code: "BAD_REQUEST",
@@ -145,8 +152,9 @@ async function assertOwnsInteractiveJob(
   userId: string,
   namespace: string,
   jobName: string,
+  repoFullName?: string,
 ): Promise<void> {
-  const kubeconfig = await requireKubeconfig(db, userId);
+  const kubeconfig = await requireKubeconfig(db, userId, repoFullName);
   const res = await getCoreV1Api(kubeconfig).listNamespacedPod({
     namespace,
     labelSelector: `${LABEL_SELECTOR},${SPAWNED_BY_LABEL}=${spawnedByLabelValue(userId)},bandolier.io/job=${jobName}`,
@@ -207,19 +215,39 @@ async function podToTask(pod: V1Pod, namespace: string, kubeconfig: string) {
 }
 
 export const agentsRouter = createTRPCRouter({
-  // Reports the acting user's own configured provider (AWS Bedrock takes
-  // precedence over an Anthropic key). Only user credentials are ever used.
-  providerInfo: protectedProcedure.query(async ({ ctx }) => {
-    const aws = await getUserAwsCredentials(ctx.db, ctx.session.user.id);
-    if (aws) {
-      return { provider: "bedrock" as const, region: aws.region };
-    }
-    const anthropic = await getUserAnthropicKey(ctx.db, ctx.session.user.id);
-    if (anthropic) {
-      return { provider: "anthropic" as const, region: null };
-    }
-    return { provider: "none" as const, region: null };
-  }),
+  // Reports the configured model provider for a deploy (AWS Bedrock takes
+  // precedence over an Anthropic key). When a repo is given, repo-scoped
+  // credentials are considered alongside the user's own per the repo's
+  // prefer-credentials flag; `source` says which set won.
+  providerInfo: protectedProcedure
+    .input(z.object({ repoFullName: z.string().optional() }).optional())
+    .query(async ({ ctx, input }) => {
+      const creds = await resolveModelCredentials(
+        ctx.db,
+        ctx.session.user.id,
+        input?.repoFullName,
+      );
+      const { aws, anthropicApiKey } = pickProvider(creds);
+      if (aws) {
+        return {
+          provider: "bedrock" as const,
+          region: aws.region,
+          source: creds.source,
+        };
+      }
+      if (anthropicApiKey) {
+        return {
+          provider: "anthropic" as const,
+          region: null,
+          source: creds.source,
+        };
+      }
+      return {
+        provider: "none" as const,
+        region: null,
+        source: "none" as const,
+      };
+    }),
 
   // Deploy-form defaults sourced from the server so the UI stays in sync.
   deployDefaults: protectedProcedure.query(() => ({
@@ -286,9 +314,19 @@ export const agentsRouter = createTRPCRouter({
   }),
 
   list: protectedProcedure
-    .input(z.object({ namespace: z.string().min(1) }))
+    .input(
+      z.object({
+        namespace: z.string().min(1),
+        // The repo this view is scoped to, so a repo's shared cluster is used.
+        repoFullName: z.string().optional(),
+      }),
+    )
     .query(async ({ input, ctx }) => {
-      const kubeconfig = await requireKubeconfig(ctx.db, ctx.session.user.id);
+      const kubeconfig = await requireKubeconfig(
+        ctx.db,
+        ctx.session.user.id,
+        input.repoFullName,
+      );
       try {
         const res = await getCoreV1Api(kubeconfig).listNamespacedPod({
           namespace: input.namespace,
@@ -312,10 +350,15 @@ export const agentsRouter = createTRPCRouter({
       z.object({
         namespace: z.string().min(1),
         jobName: z.string().min(1),
+        repoFullName: z.string().optional(),
       }),
     )
     .query(async ({ input, ctx }) => {
-      const kubeconfig = await requireKubeconfig(ctx.db, ctx.session.user.id);
+      const kubeconfig = await requireKubeconfig(
+        ctx.db,
+        ctx.session.user.id,
+        input.repoFullName,
+      );
       try {
         const res = await getCoreV1Api(kubeconfig).listNamespacedPod({
           namespace: input.namespace,
@@ -347,10 +390,15 @@ export const agentsRouter = createTRPCRouter({
         namespace: z.string().min(1),
         jobName: z.string().min(1),
         displayName: z.string().min(1).max(300),
+        repoFullName: z.string().optional(),
       }),
     )
     .mutation(async ({ input, ctx }) => {
-      const kubeconfig = await requireKubeconfig(ctx.db, ctx.session.user.id);
+      const kubeconfig = await requireKubeconfig(
+        ctx.db,
+        ctx.session.user.id,
+        input.repoFullName,
+      );
       const core = getCoreV1Api(kubeconfig);
       const merge = setHeaderOptions(
         "Content-Type",
@@ -396,12 +444,17 @@ export const agentsRouter = createTRPCRouter({
         // Used to fall back to the persisted transcript once the pod is gone.
         jobName: z.string().optional(),
         container: z.string().optional(),
+        repoFullName: z.string().optional(),
         // The modal grows this as the user scrolls up to load older lines.
         tailLines: z.number().int().min(10).max(10000).default(200),
       }),
     )
     .query(async ({ input, ctx }) => {
-      const kubeconfig = await requireKubeconfig(ctx.db, ctx.session.user.id);
+      const kubeconfig = await requireKubeconfig(
+        ctx.db,
+        ctx.session.user.id,
+        input.repoFullName,
+      );
       try {
         return await getCoreV1Api(kubeconfig).readNamespacedPodLog({
           name: input.podName,
@@ -437,10 +490,15 @@ export const agentsRouter = createTRPCRouter({
       z.object({
         podName: z.string().min(1),
         namespace: z.string().min(1),
+        repoFullName: z.string().optional(),
       }),
     )
     .mutation(async ({ input, ctx }) => {
-      const kubeconfig = await requireKubeconfig(ctx.db, ctx.session.user.id);
+      const kubeconfig = await requireKubeconfig(
+        ctx.db,
+        ctx.session.user.id,
+        input.repoFullName,
+      );
       try {
         await getCoreV1Api(kubeconfig).deleteNamespacedPod({
           name: input.podName,
@@ -466,6 +524,7 @@ export const agentsRouter = createTRPCRouter({
         namespace: z.string().min(1),
         jobName: z.string().min(1),
         content: z.string().min(1).max(20000),
+        repoFullName: z.string().optional(),
       }),
     )
     .mutation(async ({ input, ctx }) => {
@@ -474,6 +533,7 @@ export const agentsRouter = createTRPCRouter({
         ctx.session.user.id,
         input.namespace,
         input.jobName,
+        input.repoFullName,
       );
       await ctx.db.insert(agentInput).values({
         id: randomUUID(),
@@ -491,6 +551,7 @@ export const agentsRouter = createTRPCRouter({
       z.object({
         namespace: z.string().min(1),
         jobName: z.string().min(1),
+        repoFullName: z.string().optional(),
       }),
     )
     .mutation(async ({ input, ctx }) => {
@@ -499,6 +560,7 @@ export const agentsRouter = createTRPCRouter({
         ctx.session.user.id,
         input.namespace,
         input.jobName,
+        input.repoFullName,
       );
       await ctx.db.insert(agentInput).values({
         id: randomUUID(),
@@ -551,20 +613,28 @@ export const agentsRouter = createTRPCRouter({
 
       const userId = ctx.session.user.id;
 
-      // Agents run in the user's own cluster — no server fallback.
-      const kubeconfig = await requireKubeconfig(ctx.db, userId);
+      // Resolve the cluster: server-wide, then repo-scoped vs. the user's own
+      // per the repo's prefer-credentials flag.
+      const kubeconfig = await requireKubeconfig(
+        ctx.db,
+        userId,
+        input.repoFullName,
+      );
 
-      // Resolve the user's own model credentials — there is no server fallback.
-      const awsCredentials = await getUserAwsCredentials(ctx.db, userId);
-      const anthropicApiKey = awsCredentials
-        ? null
-        : await getUserAnthropicKey(ctx.db, userId);
+      // Resolve model credentials the same way, then collapse to a single
+      // provider (AWS Bedrock beats an Anthropic key).
+      const resolved = await resolveModelCredentials(
+        ctx.db,
+        userId,
+        input.repoFullName,
+      );
+      const { aws: awsCredentials, anthropicApiKey } = pickProvider(resolved);
 
       if (!awsCredentials && !anthropicApiKey) {
         throw new TRPCError({
           code: "BAD_REQUEST",
           message:
-            "No model credentials configured. Add AWS Bedrock or an Anthropic API key in settings before deploying.",
+            "No model credentials configured. Add AWS Bedrock or an Anthropic API key in settings (or repo configuration) before deploying.",
         });
       }
 
@@ -673,7 +743,11 @@ export const agentsRouter = createTRPCRouter({
         let prWriterModel: string | undefined;
         if (repoUrl ?? issue) {
           try {
-            const { models } = await listModelsForUser(ctx.db, userId);
+            const { models } = await listModelsForUser(
+              ctx.db,
+              userId,
+              input.repoFullName,
+            );
             prWriterModel = pickLatestSonnet(models);
           } catch (err) {
             console.warn("[bandolier:deploy] PR-writer model lookup failed", {

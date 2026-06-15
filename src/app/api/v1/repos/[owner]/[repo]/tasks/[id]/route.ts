@@ -41,7 +41,12 @@ async function resolve(req: NextRequest, params: Params["params"]) {
     } as const;
   }
 
-  return { caller, namespace: repoToNamespace(fullName), jobName: id } as const;
+  return {
+    caller,
+    namespace: repoToNamespace(fullName),
+    jobName: id,
+    repoFullName: fullName,
+  } as const;
 }
 
 // GET /api/v1/repos/{owner}/{repo}/tasks/{id} — read one task.
@@ -53,6 +58,7 @@ export async function GET(req: NextRequest, { params }: Params) {
     const task = await ctx.caller.agents.get({
       namespace: ctx.namespace,
       jobName: ctx.jobName,
+      repoFullName: ctx.repoFullName,
     });
     return NextResponse.json(toTaskResource(task));
   } catch (err) {
@@ -87,10 +93,12 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       namespace: ctx.namespace,
       jobName: ctx.jobName,
       displayName,
+      repoFullName: ctx.repoFullName,
     });
     const task = await ctx.caller.agents.get({
       namespace: ctx.namespace,
       jobName: ctx.jobName,
+      repoFullName: ctx.repoFullName,
     });
     return NextResponse.json(toTaskResource(task));
   } catch (err) {
@@ -110,10 +118,12 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     const task = await ctx.caller.agents.get({
       namespace: ctx.namespace,
       jobName: ctx.jobName,
+      repoFullName: ctx.repoFullName,
     });
     await ctx.caller.agents.terminate({
       podName: task.name,
       namespace: ctx.namespace,
+      repoFullName: ctx.repoFullName,
     });
     return NextResponse.json({ success: true });
   } catch (err) {

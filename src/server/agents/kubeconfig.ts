@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { eq } from "drizzle-orm";
 
 import { env } from "~/env";
+import { getRepoCredentials } from "~/server/agents/webhook-config";
 import { type db } from "~/server/db";
 import { userKubeconfig } from "~/server/db/schema";
 import { getVersionApi, unsupportedKubeconfigAuth } from "~/server/k8s/client";
@@ -90,12 +91,29 @@ export function getServerKubeconfig(): string | null {
 }
 
 /**
- * Resolves the kubeconfig to use: the server-wide one when configured, otherwise
- * the user's own. Returns null when neither is set.
+ * Resolves the kubeconfig to use. Precedence:
+ *  1. the server-wide kubeconfig, when configured (always overrides);
+ *  2. otherwise the repo-scoped one vs. the user's own, ordered by the repo's
+ *     `preferRepoCredentials` flag (repo first when set, user first otherwise),
+ *     falling back to whichever is present;
+ *  3. null when none is set.
+ * `repoFullName` is optional — omit it for contexts with no repo (e.g. the
+ * cross-repo overview), which then only considers the server/user configs.
  */
 export async function resolveKubeconfig(
   database: typeof db,
   userId: string,
+  repoFullName?: string,
 ): Promise<string | null> {
-  return getServerKubeconfig() ?? (await getUserKubeconfig(database, userId));
+  const server = getServerKubeconfig();
+  if (server) return server;
+
+  const userKc = await getUserKubeconfig(database, userId);
+  const repo = repoFullName
+    ? await getRepoCredentials(database, repoFullName)
+    : null;
+  const repoKc = repo?.kubeconfig ?? null;
+
+  if (repo?.preferRepoCredentials) return repoKc ?? userKc;
+  return userKc ?? repoKc;
 }

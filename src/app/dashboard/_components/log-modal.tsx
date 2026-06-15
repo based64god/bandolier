@@ -81,12 +81,14 @@ export function LogModal({
   podName,
   namespace,
   jobName,
+  repoFullName,
   prompt,
   onClose,
 }: {
   podName: string;
   namespace: string;
   jobName?: string;
+  repoFullName?: string;
   prompt: string | null;
   onClose: () => void;
 }) {
@@ -114,7 +116,7 @@ export function LogModal({
     isLoading,
     error,
   } = api.agents.getLogs.useQuery(
-    { podName, namespace, jobName, tailLines: limit },
+    { podName, namespace, jobName, repoFullName, tailLines: limit },
     // Live-follow only while pinned to the bottom; pausing while scrolled up
     // keeps the history stable instead of the tail window sliding underneath.
     { refetchInterval: pinned ? 5000 : false },

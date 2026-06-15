@@ -49,7 +49,9 @@ export function DeployModal({
   // Interactive agents stay alive and wait for the user's input between turns.
   const [interactive, setInteractive] = useState(false);
 
-  const { data: providerInfo } = api.agents.providerInfo.useQuery();
+  const { data: providerInfo } = api.agents.providerInfo.useQuery({
+    repoFullName,
+  });
   const { data: deployDefaults } = api.agents.deployDefaults.useQuery();
   const defaultMaxTurns = deployDefaults?.maxTurns;
   const { data: issues = [], isLoading: issuesLoading } =
@@ -61,7 +63,7 @@ export function DeployModal({
     data: modelData,
     isLoading: modelsLoading,
     error: modelsError,
-  } = api.models.list.useQuery();
+  } = api.models.list.useQuery({ repoFullName });
   const models = modelData?.models ?? [];
 
   const hasIssue = issueNumber !== "";

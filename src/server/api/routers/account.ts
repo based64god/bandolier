@@ -10,6 +10,7 @@ import { cleanSessionToken, validateAwsCredentials } from "~/server/agents/aws";
 import {
   getUserKubeconfig,
   isServerKubeconfigSet,
+  resolveKubeconfig,
   validateKubeconfig,
 } from "~/server/agents/kubeconfig";
 import { getUserAwsCredentials } from "~/server/agents/user-aws";
@@ -151,14 +152,25 @@ export const accountRouter = createTRPCRouter({
 
   // ── Kubeconfig ────────────────────────────────────────────────────────────
 
-  kubeconfigStatus: protectedProcedure.query(async ({ ctx }) => {
-    const managedByServer = isServerKubeconfigSet();
-    if (managedByServer) {
-      return { managedByServer: true as const, configured: true };
-    }
-    const kc = await getUserKubeconfig(ctx.db, ctx.session.user.id);
-    return { managedByServer: false as const, configured: !!kc };
-  }),
+  kubeconfigStatus: protectedProcedure
+    // `repoFullName` lets the status account for a repo's own kubeconfig: a repo
+    // may provide (and prefer) its own cluster even when the user hasn't set one,
+    // in which case the "Configure kubeconfig" prompt shouldn't render.
+    .input(
+      z.object({ repoFullName: z.string().optional() }).optional(),
+    )
+    .query(async ({ ctx, input }) => {
+      const managedByServer = isServerKubeconfigSet();
+      if (managedByServer) {
+        return { managedByServer: true as const, configured: true };
+      }
+      const kc = await resolveKubeconfig(
+        ctx.db,
+        ctx.session.user.id,
+        input?.repoFullName,
+      );
+      return { managedByServer: false as const, configured: !!kc };
+    }),
 
   testKubeconfig: protectedProcedure.mutation(async ({ ctx }) => {
     const kc = await getUserKubeconfig(ctx.db, ctx.session.user.id);

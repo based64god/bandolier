@@ -161,6 +161,25 @@ export const repoWebhookConfig = pgTable("repo_webhook_config", {
   // Optional override for the agent harness container image used by agents run
   // for this repo. Null = use the server-wide default (HARNESS_IMAGE).
   agentImage: text("agent_image"),
+  // ── Repo-scoped credentials (admin-only) ──────────────────────────────────
+  // Shared infrastructure for everyone working on this repo: a kubeconfig the
+  // repo's agents run on and model credentials they authenticate with. Only a
+  // repo admin can set these. A server-wide kubeconfig still overrides the
+  // repo's. SECURITY: these are shared across every Bandolier user with access
+  // to the repo, so the cluster/keys must be scoped to what that group should
+  // be trusted with — see the warning surfaced in the repo config UI.
+  kubeconfig: text("kubeconfig"),
+  anthropicApiKey: text("anthropic_api_key"),
+  awsAccessKeyId: text("aws_access_key_id"),
+  awsSecretAccessKey: text("aws_secret_access_key"),
+  awsSessionToken: text("aws_session_token"),
+  awsRegion: text("aws_region"),
+  // When both a user and this repo have credentials of the same kind, this
+  // decides which wins. False (default) prefers the user's own; true prefers
+  // the repo's shared credentials.
+  preferRepoCredentials: boolean("prefer_repo_credentials")
+    .notNull()
+    .default(false),
   configuredBy: text("configured_by").references(() => user.id, {
     onDelete: "set null",
   }),

@@ -2,7 +2,6 @@ import crypto from "crypto";
 import { type NextRequest, NextResponse } from "next/server";
 
 import { env } from "~/env";
-import { getUserAnthropicKey } from "~/server/agents/anthropic";
 import { validateAwsCredentials } from "~/server/agents/aws";
 import { createAgentJob } from "~/server/agents/create-job";
 import {
@@ -16,7 +15,10 @@ import {
   pickLatestSonnet,
 } from "~/server/agents/models";
 import { repoToNamespace } from "~/server/agents/namespace";
-import { getUserAwsCredentials } from "~/server/agents/user-aws";
+import {
+  pickProvider,
+  resolveModelCredentials,
+} from "~/server/agents/resolve-credentials";
 import { getRepoWebhookConfig } from "~/server/agents/webhook-config";
 import { db } from "~/server/db";
 import {
@@ -120,10 +122,15 @@ async function handleIssueOpened(
     return;
   }
 
-  const awsCredentials = await getUserAwsCredentials(db, linked.userId);
-  const anthropicApiKey = awsCredentials
-    ? null
-    : await getUserAnthropicKey(db, linked.userId);
+  // Resolve model credentials for the issue author, considering this repo's
+  // shared credentials per its prefer-credentials flag, then collapse to a
+  // single provider (AWS Bedrock beats an Anthropic key).
+  const resolved = await resolveModelCredentials(
+    db,
+    linked.userId,
+    repository.full_name,
+  );
+  const { aws: awsCredentials, anthropicApiKey } = pickProvider(resolved);
 
   if (!awsCredentials && !anthropicApiKey) {
     console.log(
@@ -159,7 +166,11 @@ async function handleIssueOpened(
     sender: sender.login,
   });
 
-  const kubeconfig = await resolveKubeconfig(db, linked.userId);
+  const kubeconfig = await resolveKubeconfig(
+    db,
+    linked.userId,
+    repository.full_name,
+  );
   if (!kubeconfig) {
     console.log(
       "[bandolier:webhook] issue skipped — no server or sender kubeconfig",
@@ -171,9 +182,13 @@ async function handleIssueOpened(
     return;
   }
 
-  // Pick a default model from the sender's provider (prefers Sonnet) — there is
+  // Pick a default model from the resolved provider (prefers Sonnet) — there is
   // no UI to choose one for webhook-triggered agents.
-  const { models } = await listModelsForUser(db, linked.userId);
+  const { models } = await listModelsForUser(
+    db,
+    linked.userId,
+    repository.full_name,
+  );
   const model = pickDefaultModel(models);
   if (!model) {
     console.log("[bandolier:webhook] issue skipped — no models available", {

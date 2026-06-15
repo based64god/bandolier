@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 
-import { db } from "~/server/db";
+import { type AwsCredentials } from "~/server/agents/aws";
+import { type db } from "~/server/db";
 import { repoWebhookConfig } from "~/server/db/schema";
 
 export interface RepoWebhookConfig {
@@ -10,6 +11,58 @@ export interface RepoWebhookConfig {
   prefix: string | null;
   /** Agent harness image override; null means use the server-wide default. */
   agentImage: string | null;
+}
+
+/**
+ * Repo-scoped credentials (admin-only): shared infrastructure that agents for
+ * this repo can run on. Each field is null when not configured. The
+ * `preferRepoCredentials` flag decides whether these or a user's own
+ * credentials win when both are set.
+ */
+export interface RepoCredentials {
+  kubeconfig: string | null;
+  anthropicApiKey: string | null;
+  aws: AwsCredentials | null;
+  preferRepoCredentials: boolean;
+}
+
+/** Loads a repo's shared credentials, or null when no config row exists. */
+export async function getRepoCredentials(
+  database: typeof db,
+  repoFullName: string,
+): Promise<RepoCredentials | null> {
+  const [row] = await database
+    .select({
+      kubeconfig: repoWebhookConfig.kubeconfig,
+      anthropicApiKey: repoWebhookConfig.anthropicApiKey,
+      awsAccessKeyId: repoWebhookConfig.awsAccessKeyId,
+      awsSecretAccessKey: repoWebhookConfig.awsSecretAccessKey,
+      awsSessionToken: repoWebhookConfig.awsSessionToken,
+      awsRegion: repoWebhookConfig.awsRegion,
+      preferRepoCredentials: repoWebhookConfig.preferRepoCredentials,
+    })
+    .from(repoWebhookConfig)
+    .where(eq(repoWebhookConfig.repoFullName, repoFullName))
+    .limit(1);
+  if (!row) return null;
+
+  // AWS creds are only usable as a set — require at least the key id + secret.
+  const aws: AwsCredentials | null =
+    row.awsAccessKeyId && row.awsSecretAccessKey
+      ? {
+          accessKeyId: row.awsAccessKeyId,
+          secretAccessKey: row.awsSecretAccessKey,
+          sessionToken: row.awsSessionToken,
+          region: row.awsRegion ?? "us-east-1",
+        }
+      : null;
+
+  return {
+    kubeconfig: row.kubeconfig ?? null,
+    anthropicApiKey: row.anthropicApiKey ?? null,
+    aws,
+    preferRepoCredentials: row.preferRepoCredentials,
+  };
 }
 
 /** Returns a repo's config (secret + prefix + agent image), or null. */

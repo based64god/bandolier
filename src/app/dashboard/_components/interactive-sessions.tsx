@@ -21,9 +21,11 @@ export interface InteractiveAgent {
 export function InteractiveSessions({
   agents,
   namespace,
+  repoFullName,
 }: {
   agents: InteractiveAgent[];
   namespace: string;
+  repoFullName?: string;
 }) {
   if (agents.length === 0) return null;
   return (
@@ -40,6 +42,7 @@ export function InteractiveSessions({
             key={agent.name}
             agent={agent}
             namespace={namespace}
+            repoFullName={repoFullName}
           />
         ))}
       </div>
@@ -50,13 +53,18 @@ export function InteractiveSessions({
 function InteractiveCard({
   agent,
   namespace,
+  repoFullName,
 }: {
   agent: InteractiveAgent;
   namespace: string;
+  repoFullName?: string;
 }) {
   const [draft, setDraft] = useState("");
-  const [collapsed, setCollapsed] = useState(false);
   const running = agent.status === "Running" || agent.status === "Pending";
+  // Default closed for sessions that are already done when first mounted —
+  // there's nothing to interact with, so keep them out of the way. Live
+  // sessions start open. The effects below handle later status transitions.
+  const [collapsed, setCollapsed] = useState(!running);
   const utils = api.useUtils();
 
   const awaiting = agent.awaitingInput;
@@ -85,6 +93,7 @@ function InteractiveCard({
       podName: agent.name,
       namespace,
       jobName: agent.jobName,
+      repoFullName,
       tailLines: 400,
     },
     { refetchInterval: running ? 2500 : false },
@@ -103,7 +112,12 @@ function InteractiveCard({
   function send() {
     const content = draft.trim();
     if (!content || sendInput.isPending) return;
-    sendInput.mutate({ namespace, jobName: agent.jobName, content });
+    sendInput.mutate({
+      namespace,
+      jobName: agent.jobName,
+      content,
+      repoFullName,
+    });
   }
 
   return (
@@ -162,7 +176,11 @@ function InteractiveCard({
           {running && (
             <button
               onClick={() =>
-                endSession.mutate({ namespace, jobName: agent.jobName })
+                endSession.mutate({
+                  namespace,
+                  jobName: agent.jobName,
+                  repoFullName,
+                })
               }
               disabled={endSession.isPending || endSession.isSuccess}
               className="rounded-md border border-white/10 px-2 py-1 text-xs text-white/60 hover:bg-white/10 disabled:opacity-40"
@@ -172,7 +190,9 @@ function InteractiveCard({
             </button>
           )}
           <button
-            onClick={() => terminate.mutate({ podName: agent.name, namespace })}
+            onClick={() =>
+              terminate.mutate({ podName: agent.name, namespace, repoFullName })
+            }
             disabled={terminate.isPending}
             aria-label="Terminate agent"
             className="rounded p-1 text-red-500/50 hover:bg-red-500/10 hover:text-red-400 disabled:opacity-40"

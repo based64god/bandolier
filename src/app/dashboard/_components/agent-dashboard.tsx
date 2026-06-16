@@ -21,7 +21,7 @@ import {
   useNotifyPref,
 } from "./notifications";
 import { OverviewPanel } from "./overview-panel";
-import { WebhooksModal } from "./webhooks-modal";
+import { RepoConfigModal } from "./repo-config-modal";
 import { SearchableSelect, type SelectOption } from "./searchable-select";
 import { SettingsModal } from "./settings-modal";
 
@@ -120,8 +120,13 @@ export function AgentDashboard({
   const selectedRepo = repoSlug
     ? (repos.find((r) => r.fullName === repoSlug) ?? null)
     : null;
+  // Pass the selected repo so a repo's own (preferred) kubeconfig counts as
+  // configured — the "Configure kubeconfig" prompt shouldn't render when the
+  // repo already resolves a cluster, even if the user hasn't set one.
   const { data: kubeStatus, isLoading: kubeLoading } =
-    api.account.kubeconfigStatus.useQuery();
+    api.account.kubeconfigStatus.useQuery({
+      repoFullName: repoSlug ?? undefined,
+    });
   const kubeConfigured = kubeStatus?.configured ?? false;
 
   const {
@@ -130,8 +135,14 @@ export function AgentDashboard({
     error,
     dataUpdatedAt,
   } = api.agents.list.useQuery(
-    { namespace: namespace! },
-    { enabled: !!namespace && kubeConfigured, refetchInterval: 5000 },
+    { namespace: namespace!, repoFullName: repoSlug ?? undefined },
+    {
+      // A repo may provide its own kubeconfig even when the user hasn't, so
+      // allow the query whenever a repo is selected; the server returns a clear
+      // error if no cluster resolves at all.
+      enabled: !!namespace && (kubeConfigured || !!repoSlug),
+      refetchInterval: 5000,
+    },
   );
 
   const terminate = api.agents.terminate.useMutation({
@@ -199,15 +210,15 @@ export function AgentDashboard({
               loading={reposLoading}
             />
 
-            {/* Webhook config — only when the user can manage this repo's
-                webhooks. Kept on the left so toggling it doesn't shift the
-                Deploy button. */}
+            {/* Repo config (webhooks + agent image) — only when the user can
+                manage this repo (admin on GitHub). Kept on the left so toggling
+                it doesn't shift the Deploy button. */}
             {selectedRepo?.canManageWebhooks && (
               <button
                 onClick={() => setShowWebhooks(true)}
                 className="rounded-lg border border-white/10 px-3 py-1.5 text-sm font-medium text-white/70 hover:bg-white/10 hover:text-white"
               >
-                Webhooks
+                Repo config
               </button>
             )}
           </div>
@@ -355,6 +366,7 @@ export function AgentDashboard({
             <InteractiveSessions
               agents={interactiveAgents}
               namespace={namespace}
+              repoFullName={repoSlug ?? undefined}
             />
 
             {/* Agent table (non-interactive agents) */}
@@ -487,6 +499,7 @@ export function AgentDashboard({
                                   terminate.mutate({
                                     podName: agent.name,
                                     namespace: namespace,
+                                    repoFullName: repoSlug ?? undefined,
                                   })
                                 }
                                 disabled={terminate.isPending}
@@ -532,6 +545,7 @@ export function AgentDashboard({
           podName={logPod}
           namespace={namespace}
           jobName={agents.find((a) => a.name === logPod)?.jobName}
+          repoFullName={repoSlug ?? undefined}
           prompt={agents.find((a) => a.name === logPod)?.prompt ?? null}
           onClose={() => setLogPod(null)}
         />
@@ -547,7 +561,7 @@ export function AgentDashboard({
       )}
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
       {showWebhooks && selectedRepo?.canManageWebhooks && (
-        <WebhooksModal
+        <RepoConfigModal
           repoFullName={selectedRepo.fullName}
           onClose={() => setShowWebhooks(false)}
         />

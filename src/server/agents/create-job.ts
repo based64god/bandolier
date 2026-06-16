@@ -138,6 +138,14 @@ type EnvVar = { name: string; value?: string; valueFrom?: object };
 
 export interface JobSpec {
   task: string;
+  /**
+   * Instructional framing that surrounds the task/issue context — objective,
+   * branch rules, commit steps. Passed to the harness as CLAUDE_SYSTEM_PROMPT
+   * and appended to Claude's system prompt, so the user message stays the raw
+   * issue/form context. Only set for issue mode; the harness builds the
+   * repo/interactive framing itself.
+   */
+  systemPrompt?: string;
   /** Human-readable label shown in the dashboard (issue title or task preview). */
   displayName: string;
   /** Kubernetes namespace to deploy into. Falls back to K8S_NAMESPACE env var. */
@@ -195,6 +203,11 @@ export interface JobSpec {
    * of committing code and opening a PR.
    */
   createGithubIssue?: boolean;
+  /**
+   * Per-repo override for the harness container image. When unset, the
+   * server-wide default (HARNESS_IMAGE) is used.
+   */
+  agentImage?: string;
 }
 
 /** Per-job secret holding the acting user's credentials (GitHub / AWS / Anthropic). */
@@ -294,6 +307,8 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
   }
   if (spec.createGithubIssue) {
     envVars.push({ name: "CREATE_GITHUB_ISSUE", value: "1" });
+  if (spec.systemPrompt) {
+    envVars.push({ name: "CLAUDE_SYSTEM_PROMPT", value: spec.systemPrompt });
   }
 
   // Both the artifact upload and the interactive input poll are authenticated by
@@ -390,7 +405,7 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
             containers: [
               {
                 name: "harness",
-                image: env.HARNESS_IMAGE,
+                image: spec.agentImage ?? env.HARNESS_IMAGE,
                 imagePullPolicy: env.HARNESS_IMAGE_PULL_POLICY,
                 env: envVars,
                 resources: {

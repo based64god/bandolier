@@ -10,9 +10,11 @@ import { cleanSessionToken, validateAwsCredentials } from "~/server/agents/aws";
 import {
   getUserKubeconfig,
   isServerKubeconfigSet,
+  resolveKubeconfig,
   validateKubeconfig,
 } from "~/server/agents/kubeconfig";
 import { getUserAwsCredentials } from "~/server/agents/user-aws";
+import { getRepoCredentials } from "~/server/agents/webhook-config";
 import {
   userAnthropicCredentials,
   userAwsCredentials,
@@ -151,14 +153,50 @@ export const accountRouter = createTRPCRouter({
 
   // ── Kubeconfig ────────────────────────────────────────────────────────────
 
-  kubeconfigStatus: protectedProcedure.query(async ({ ctx }) => {
-    const managedByServer = isServerKubeconfigSet();
-    if (managedByServer) {
-      return { managedByServer: true as const, configured: true };
-    }
-    const kc = await getUserKubeconfig(ctx.db, ctx.session.user.id);
-    return { managedByServer: false as const, configured: !!kc };
-  }),
+  kubeconfigStatus: protectedProcedure
+    // `repoFullName` lets the status account for a repo's own kubeconfig: a repo
+    // may provide (and prefer) its own cluster even when the user hasn't set one,
+    // in which case the "Configure kubeconfig" prompt shouldn't render.
+    .input(z.object({ repoFullName: z.string().optional() }).optional())
+    .query(async ({ ctx, input }) => {
+      const managedByServer = isServerKubeconfigSet();
+      if (managedByServer) {
+        return {
+          managedByServer: true as const,
+          managedByRepo: false as const,
+          configured: true,
+        };
+      }
+
+      // When the selected repo prefers its own shared credentials and has a set
+      // configured, cluster access is the repo admin's responsibility — the
+      // user must never be prompted to configure their own kubeconfig. Mirrors
+      // `managedByServer`.
+      const repo = input?.repoFullName
+        ? await getRepoCredentials(ctx.db, input.repoFullName)
+        : null;
+      const managedByRepo =
+        !!repo?.preferRepoCredentials &&
+        (!!repo.kubeconfig || !!repo.anthropicApiKey || !!repo.aws);
+      if (managedByRepo) {
+        return {
+          managedByServer: false as const,
+          managedByRepo: true as const,
+          configured: true,
+        };
+      }
+
+      const kc = await resolveKubeconfig(
+        ctx.db,
+        ctx.session.user.id,
+        input?.repoFullName,
+      );
+      return {
+        managedByServer: false as const,
+        managedByRepo: false as const,
+        configured: !!kc,
+      };
+    }),
 
   testKubeconfig: protectedProcedure.mutation(async ({ ctx }) => {
     const kc = await getUserKubeconfig(ctx.db, ctx.session.user.id);

@@ -147,14 +147,39 @@ export const agentInput = pgTable(
   (t) => [index("agent_input_job_idx").on(t.jobName)],
 );
 
-// Per-repository incoming-webhook config (one webhook/secret per repo, shared
-// across any Bandolier user with admin on that repo).
+// Per-repository configuration (one row per repo, shared across any Bandolier
+// user with admin on that repo). Holds the incoming-webhook secret/prefix plus
+// other repo-level settings such as the agent harness image.
 export const repoWebhookConfig = pgTable("repo_webhook_config", {
   repoFullName: text("repo_full_name").primaryKey(),
-  secret: text("secret").notNull(),
+  // Null when the repo has other config (e.g. an agent image) but no per-repo
+  // webhook secret — webhook verification then falls back to GITHUB_WEBHOOK_SECRET.
+  secret: text("secret"),
   // Optional trigger phrase: when set, only webhook events whose text contains
   // it are acted on. Null = act on all events.
   prefix: text("prefix"),
+  // Optional override for the agent harness container image used by agents run
+  // for this repo. Null = use the server-wide default (HARNESS_IMAGE).
+  agentImage: text("agent_image"),
+  // ── Repo-scoped credentials (admin-only) ──────────────────────────────────
+  // Shared infrastructure for everyone working on this repo: a kubeconfig the
+  // repo's agents run on and model credentials they authenticate with. Only a
+  // repo admin can set these. A server-wide kubeconfig still overrides the
+  // repo's. SECURITY: these are shared across every Bandolier user with access
+  // to the repo, so the cluster/keys must be scoped to what that group should
+  // be trusted with — see the warning surfaced in the repo config UI.
+  kubeconfig: text("kubeconfig"),
+  anthropicApiKey: text("anthropic_api_key"),
+  awsAccessKeyId: text("aws_access_key_id"),
+  awsSecretAccessKey: text("aws_secret_access_key"),
+  awsSessionToken: text("aws_session_token"),
+  awsRegion: text("aws_region"),
+  // When both a user and this repo have credentials of the same kind, this
+  // decides which wins. False (default) prefers the user's own; true prefers
+  // the repo's shared credentials.
+  preferRepoCredentials: boolean("prefer_repo_credentials")
+    .notNull()
+    .default(false),
   configuredBy: text("configured_by").references(() => user.id, {
     onDelete: "set null",
   }),

@@ -38,6 +38,7 @@ export async function GET(req: NextRequest, { params }: Params) {
   try {
     const tasks = await caller.agents.list({
       namespace: repoToNamespace(fullName),
+      repoFullName: fullName,
     });
     return NextResponse.json({ tasks: tasks.map(toTaskResource) });
   } catch (err) {
@@ -83,7 +84,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   // model, matching how webhook-triggered agents pick one.
   let model = body.model;
   if (!model) {
-    const { models } = await listModelsForUser(db, userId);
+    const { models } = await listModelsForUser(db, userId, fullName);
     model = pickDefaultModel(models) ?? undefined;
   }
   if (!model) {

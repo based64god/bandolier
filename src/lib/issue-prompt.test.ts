@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  buildIssuePrompt,
+  buildIssueSystemPrompt,
+  buildIssueUserMessage,
   issuePreviewBranch,
   makeIssueBranch,
 } from "~/lib/issue-prompt";
@@ -51,34 +52,43 @@ describe("makeIssueBranch", () => {
   });
 });
 
-describe("buildIssuePrompt", () => {
+describe("buildIssueSystemPrompt", () => {
   const issue = { number: 5, title: "Crash on startup", body: "It crashes." };
 
-  it("embeds the issue number, title, body, and branch", () => {
-    const prompt = buildIssuePrompt(issue, "issue-5-crash", "");
-    expect(prompt).toContain("GitHub issue #5");
-    expect(prompt).toContain("## Issue #5: Crash on startup");
-    expect(prompt).toContain("It crashes.");
+  it("embeds the branch and the commit subject, but not the issue body", () => {
+    const prompt = buildIssueSystemPrompt(issue, "issue-5-crash");
     expect(prompt).toContain('on branch "issue-5-crash"');
+    expect(prompt).toContain('git commit -s -m "Crash on startup"');
+    expect(prompt).toContain("Do NOT push or open a pull request");
+    // The issue body belongs in the user message, not the system prompt.
+    expect(prompt).not.toContain("It crashes.");
+  });
+});
+
+describe("buildIssueUserMessage", () => {
+  const issue = { number: 5, title: "Crash on startup", body: "It crashes." };
+
+  it("embeds the issue number, title, and body", () => {
+    const message = buildIssueUserMessage(issue, "");
+    expect(message).toContain("## Issue #5: Crash on startup");
+    expect(message).toContain("It crashes.");
+    // The instructional framing belongs in the system prompt.
+    expect(message).not.toContain("Do NOT push");
   });
 
   it("uses a placeholder when the body is empty", () => {
-    const prompt = buildIssuePrompt(
-      { ...issue, body: "   " },
-      "issue-5-crash",
-      "",
-    );
-    expect(prompt).toContain("(no description provided)");
+    const message = buildIssueUserMessage({ ...issue, body: "   " }, "");
+    expect(message).toContain("(no description provided)");
   });
 
   it("appends operator context when provided", () => {
-    const prompt = buildIssuePrompt(issue, "br", "Focus on the parser.");
-    expect(prompt).toContain("## Additional context from the operator");
-    expect(prompt).toContain("Focus on the parser.");
+    const message = buildIssueUserMessage(issue, "Focus on the parser.");
+    expect(message).toContain("## Additional context from the operator");
+    expect(message).toContain("Focus on the parser.");
   });
 
   it("omits the operator-context section when context is blank", () => {
-    const prompt = buildIssuePrompt(issue, "br", "   ");
-    expect(prompt).not.toContain("Additional context from the operator");
+    const message = buildIssueUserMessage(issue, "   ");
+    expect(message).not.toContain("Additional context from the operator");
   });
 });

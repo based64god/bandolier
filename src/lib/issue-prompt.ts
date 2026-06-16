@@ -1,6 +1,7 @@
 // Single source of truth for the issue-mode prompt, shared by the server (which
-// sets it as the agent's CLAUDE_TASK) and the deploy modal's preview tooltip.
-// The harness keeps a Go copy of buildIssueTask as a fallback — keep in sync.
+// sets the system prompt as CLAUDE_SYSTEM_PROMPT and the issue context as
+// CLAUDE_TASK) and the deploy modal's preview tooltip. The harness keeps a Go
+// copy of these builders as a fallback — keep in sync.
 
 function slugify(s: string): string {
   let slug = s
@@ -27,23 +28,22 @@ export function makeIssueBranch(issueNumber: number, title: string): string {
   return `${issuePreviewBranch(issueNumber, title)}-${suffix}`;
 }
 
-/** Builds the full prompt sent to Claude for a GitHub issue task. */
-export function buildIssuePrompt(
-  issue: { number: number; title: string; body: string },
+/**
+ * Builds the system prompt for a GitHub issue task: the instructional framing
+ * that surrounds the issue context (objective, branch rules, commit steps). The
+ * issue itself is delivered separately as the user message (see
+ * buildIssueUserMessage) and is referenced here only where an instruction needs
+ * it (the working branch and the commit subject).
+ */
+export function buildIssueSystemPrompt(
+  issue: { title: string },
   branch: string,
-  extraContext: string,
 ): string {
-  const body = issue.body.trim() || "(no description provided)";
-
-  let task = `You are an AI agent working on GitHub issue #${issue.number}.
-
-## Issue #${issue.number}: ${issue.title}
-
-${body}
+  return `You are an AI agent working on a GitHub issue. The issue is provided in the user message.
 
 ## Your objective
 
-Implement a complete solution for this issue.
+Implement a complete solution for the issue.
 
 The repository has been cloned. You are on branch "${branch}" — do not switch branches.
 
@@ -56,10 +56,27 @@ Steps:
 
 Do NOT push or open a pull request — the harness will do that once you finish.
 Do not ask for clarification. Implement the best solution you can.`;
+}
+
+/**
+ * Builds the user message for a GitHub issue task: the issue context itself
+ * (number, title, body) plus any operator-supplied context from the dashboard
+ * task field. The surrounding instructions live in the system prompt (see
+ * buildIssueSystemPrompt).
+ */
+export function buildIssueUserMessage(
+  issue: { number: number; title: string; body: string },
+  extraContext: string,
+): string {
+  const body = issue.body.trim() || "(no description provided)";
+
+  let message = `## Issue #${issue.number}: ${issue.title}
+
+${body}`;
 
   const ctx = extraContext.trim();
   if (ctx) {
-    task += `\n\n## Additional context from the operator\n\n${ctx}`;
+    message += `\n\n## Additional context from the operator\n\n${ctx}`;
   }
-  return task;
+  return message;
 }

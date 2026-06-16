@@ -2,7 +2,6 @@ import crypto from "crypto";
 import { type NextRequest, NextResponse } from "next/server";
 
 import { env } from "~/env";
-import { getUserAnthropicKey } from "~/server/agents/anthropic";
 import { validateAwsCredentials } from "~/server/agents/aws";
 import { createAgentJob } from "~/server/agents/create-job";
 import {
@@ -16,10 +15,17 @@ import {
   pickLatestSonnet,
 } from "~/server/agents/models";
 import { repoToNamespace } from "~/server/agents/namespace";
-import { getUserAwsCredentials } from "~/server/agents/user-aws";
+import {
+  pickProvider,
+  resolveModelCredentials,
+} from "~/server/agents/resolve-credentials";
 import { getRepoWebhookConfig } from "~/server/agents/webhook-config";
 import { db } from "~/server/db";
-import { buildIssuePrompt, makeIssueBranch } from "~/lib/issue-prompt";
+import {
+  buildIssueSystemPrompt,
+  buildIssueUserMessage,
+  makeIssueBranch,
+} from "~/lib/issue-prompt";
 
 // ── Webhook signature verification ────────────────────────────────────────────
 
@@ -71,6 +77,7 @@ interface IssuePayload {
 async function handleIssueOpened(
   payload: IssuePayload,
   prefix: string | null,
+  agentImage: string | null,
 ): Promise<void> {
   const { issue, repository, sender } = payload;
 
@@ -115,10 +122,15 @@ async function handleIssueOpened(
     return;
   }
 
-  const awsCredentials = await getUserAwsCredentials(db, linked.userId);
-  const anthropicApiKey = awsCredentials
-    ? null
-    : await getUserAnthropicKey(db, linked.userId);
+  // Resolve model credentials for the issue author, considering this repo's
+  // shared credentials per its prefer-credentials flag, then collapse to a
+  // single provider (AWS Bedrock beats an Anthropic key).
+  const resolved = await resolveModelCredentials(
+    db,
+    linked.userId,
+    repository.full_name,
+  );
+  const { aws: awsCredentials, anthropicApiKey } = pickProvider(resolved);
 
   if (!awsCredentials && !anthropicApiKey) {
     console.log(
@@ -154,7 +166,11 @@ async function handleIssueOpened(
     sender: sender.login,
   });
 
-  const kubeconfig = await resolveKubeconfig(db, linked.userId);
+  const kubeconfig = await resolveKubeconfig(
+    db,
+    linked.userId,
+    repository.full_name,
+  );
   if (!kubeconfig) {
     console.log(
       "[bandolier:webhook] issue skipped — no server or sender kubeconfig",
@@ -166,9 +182,13 @@ async function handleIssueOpened(
     return;
   }
 
-  // Pick a default model from the sender's provider (prefers Sonnet) — there is
+  // Pick a default model from the resolved provider (prefers Sonnet) — there is
   // no UI to choose one for webhook-triggered agents.
-  const { models } = await listModelsForUser(db, linked.userId);
+  const { models } = await listModelsForUser(
+    db,
+    linked.userId,
+    repository.full_name,
+  );
   const model = pickDefaultModel(models);
   if (!model) {
     console.log("[bandolier:webhook] issue skipped — no models available", {
@@ -186,13 +206,14 @@ async function handleIssueOpened(
 
   await createAgentJob({
     namespace: repoToNamespace(repository.full_name),
-    // Build the full prompt here (no operator context) so it's stored as
-    // CLAUDE_TASK and shown in the dashboard.
-    task: buildIssuePrompt(
+    // Build the prompt here (no operator context): the issue context is stored
+    // as CLAUDE_TASK and shown in the dashboard; the instructional framing goes
+    // in the system prompt.
+    task: buildIssueUserMessage(
       { number: issue.number, title: issue.title, body: issue.body ?? "" },
-      agentBranch,
       "",
     ),
+    systemPrompt: buildIssueSystemPrompt({ title: issue.title }, agentBranch),
     agentBranch,
     displayName: `#${issue.number}: ${issue.title}`,
     repoUrl: repository.clone_url,
@@ -214,6 +235,7 @@ async function handleIssueOpened(
     awsCredentials: awsCredentials ?? undefined,
     anthropicApiKey: anthropicApiKey ?? undefined,
     kubeconfig,
+    agentImage: agentImage ?? undefined,
   });
 }
 
@@ -257,6 +279,7 @@ export async function POST(req: NextRequest) {
       await handleIssueOpened(
         payload as IssuePayload,
         repoConfig?.prefix ?? null,
+        repoConfig?.agentImage ?? null,
       );
     }
     // Other event types ignored for now.

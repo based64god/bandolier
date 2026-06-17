@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "~/trpc/react";
 import type { RouterOutputs } from "~/trpc/react";
 import { expiresAtLocal } from "./agent-ui";
+import { HarnessSegment, parseSegments } from "./log-modal";
 import { OutputBadge, SourceBadge } from "./output-badge";
 import { StatusBadge } from "./status-badge";
 import { MOBILE_TASK_COLUMNS, TASK_COLUMNS } from "./task-row";
@@ -386,7 +387,9 @@ function LogView({ text }: { text: string }) {
     setPinned(true);
   }
 
-  const lines = text ? text.split("\n") : [];
+  // Group lines so runs of [harness] diagnostics collapse the same way they do
+  // in the non-interactive LogModal, keeping Claude's output front and center.
+  const segments = text ? parseSegments(text) : [];
 
   return (
     <div className="relative">
@@ -401,19 +404,23 @@ function LogView({ text }: { text: string }) {
         }}
         className="h-72 overflow-auto bg-black/30 px-4 py-3 font-mono text-[11px] leading-5"
       >
-        {lines.length === 0 ? (
+        {segments.length === 0 ? (
           <span className="text-white/30">Waiting for output…</span>
         ) : (
-          lines.map((line, i) => (
-            <div
-              key={i}
-              className={`break-words whitespace-pre-wrap ${
-                line.includes("[harness]") ? "text-white/35" : "text-white/80"
-              }`}
-            >
-              {line || " "}
-            </div>
-          ))
+          segments.map((seg, i) =>
+            seg.kind === "harness" ? (
+              <HarnessSegment key={i} lines={seg.lines} />
+            ) : (
+              seg.lines.map((line, j) => (
+                <div
+                  key={`${i}-${j}`}
+                  className="break-words whitespace-pre-wrap text-white/80"
+                >
+                  {line || " "}
+                </div>
+              ))
+            ),
+          )
         )}
       </div>
       {!pinned && (

@@ -58,6 +58,9 @@ const ISSUE_MARKER = /ISSUE_URL=(https:\/\/\S+)/;
 // recent of the two tells us whether the agent is currently awaiting input.
 const AWAIT_MARKER = "BANDOLIER_AWAIT_INPUT";
 const RESUME_MARKER = "BANDOLIER_RESUME";
+// Tags transcript lines carrying a user's interactive message. Kept in sync with
+// the harness (userInputMarker) and the dashboard's log renderer.
+const USER_MARKER = "[user]";
 
 /**
  * Sentinel input message that tells the harness to end an interactive session
@@ -112,11 +115,12 @@ async function inspectPod(
       if (lines[i]!.includes(RESUME_MARKER)) lastResume = i;
     }
 
-    // Backward pass: the last non-harness line is what Claude is doing now.
+    // Backward pass: the last assistant line is what Claude is doing now. Skip
+    // both harness diagnostics and the user's own messages — neither is Claude.
     let currently: string | null = null;
     for (let i = lines.length - 1; i >= 0; i--) {
       const line = lines[i]!;
-      if (line && !line.includes("[harness]")) {
+      if (line && !line.includes("[harness]") && !line.includes(USER_MARKER)) {
         currently = line;
         break;
       }
@@ -438,10 +442,7 @@ export const agentsRouter = createTRPCRouter({
         ctx.session.user.id,
         input.repoFullName,
       );
-      const githubToken = await getUserGithubToken(
-        ctx.db,
-        ctx.session.user.id,
-      );
+      const githubToken = await getUserGithubToken(ctx.db, ctx.session.user.id);
       try {
         const res = await getCoreV1Api(kubeconfig).listNamespacedPod({
           namespace: input.namespace,

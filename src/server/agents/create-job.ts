@@ -28,7 +28,7 @@ export const DEFAULT_HARNESS_IMAGE =
  * Namespace used when a job spec doesn't carry one. In practice every caller
  * passes a namespace derived from the repo, so this is just a safety default.
  */
-const DEFAULT_NAMESPACE = "claude-agents";
+const DEFAULT_NAMESPACE = "bandolier-agents";
 
 // ── Kubernetes resource bootstrap ─────────────────────────────────────────────
 
@@ -81,12 +81,12 @@ async function ensureNetworkPolicy(
         apiVersion: "networking.k8s.io/v1",
         kind: "NetworkPolicy",
         metadata: {
-          name: "claude-agent-isolation",
+          name: "bandolier-agent-isolation",
           namespace,
           labels: { "app.kubernetes.io/managed-by": "bandolier" },
         },
         spec: {
-          podSelector: { matchLabels: { app: "claude-agent" } },
+          podSelector: { matchLabels: { app: "bandolier-agent" } },
           policyTypes: ["Ingress", "Egress"],
           ingress: [], // deny all inbound
           egress: [
@@ -245,7 +245,7 @@ function userSecretName(jobName: string): string {
 
 export async function createAgentJob(spec: JobSpec): Promise<string> {
   const ns = spec.namespace ?? DEFAULT_NAMESPACE;
-  const jobName = `claude-agent-${Date.now()}`;
+  const jobName = `bandolier-agent-${Date.now()}`;
 
   const useUserAws = !!spec.awsCredentials;
   // Anthropic only applies when AWS isn't set (AWS Bedrock takes precedence).
@@ -271,7 +271,7 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
   // Bootstrap shared (non-secret) resources.
   const [nsCreated, saCreated] = await Promise.all([
     ensureNamespace(ns, kc),
-    ensureServiceAccount(ns, "claude-agent", kc),
+    ensureServiceAccount(ns, "bandolier-agent", kc),
   ]);
   console.log("[bandolier:deploy] resources", {
     namespace: nsCreated ? "created" : "exists",
@@ -319,10 +319,10 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
     { name: "AGENT_TITLE", value: spec.displayName },
     { name: "REPO_URL", value: spec.repoUrl ?? "" },
     { name: "BRANCH", value: spec.branch },
-    { name: "GIT_NAME", value: spec.gitName ?? "Claude Agent" },
+    { name: "GIT_NAME", value: spec.gitName ?? "Bandolier Agent" },
     {
       name: "GIT_EMAIL",
-      value: spec.gitEmail ?? "claude-agent@bandolier.local",
+      value: spec.gitEmail ?? "bandolier-agent@bandolier.local",
     },
     ...providerEnvVars,
     userRef("GITHUB_TOKEN", true),
@@ -414,7 +414,7 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
         name: jobName,
         namespace: ns,
         labels: {
-          app: "claude-agent",
+          app: "bandolier-agent",
           "app.kubernetes.io/managed-by": "bandolier",
           [SPAWNED_BY_LABEL]: spawnedBy,
           ...interactiveLabels,
@@ -427,7 +427,7 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
         template: {
           metadata: {
             labels: {
-              app: "claude-agent",
+              app: "bandolier-agent",
               "app.kubernetes.io/managed-by": "bandolier",
               "bandolier.io/job": jobName,
               [SPAWNED_BY_LABEL]: spawnedBy,
@@ -439,7 +439,7 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
             annotations,
           },
           spec: {
-            serviceAccountName: "claude-agent",
+            serviceAccountName: "bandolier-agent",
             restartPolicy: "Never",
             // Run as root: the harness image is built around HOME=/root with the
             // agent CLIs in /root/.local/bin (see agent-harness/Dockerfile), so a

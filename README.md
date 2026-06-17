@@ -21,7 +21,7 @@ Bandolier has two deployable pieces:
 When you deploy an agent, the web app:
 
 1. Resolves your credentials (GitHub token, model provider, kubeconfig) from the database.
-2. Creates a namespace, a `claude-agent` ServiceAccount, and (optionally) a `NetworkPolicy` that isolates agent pods.
+2. Creates a namespace, a `bandolier-agent` ServiceAccount, and (optionally) a `NetworkPolicy` that isolates agent pods.
 3. Writes a short-lived **per-job Secret** holding only that run's credentials, owned by the Job so Kubernetes garbage-collects it when the Job is deleted.
 4. Creates a Kubernetes **Job** running the harness image, with the task wired in via environment variables.
 
@@ -180,9 +180,9 @@ All server configuration is validated in `src/env.js`.
 | Variable | Default | Description |
 | --- | --- | --- |
 | `BETTER_AUTH_URL` | `http://localhost:3000` | Public base URL of the app. |
-| `K8S_LABEL_SELECTOR` | `app=claude-agent` | Label selector identifying Bandolier-managed agent pods. |
+| `K8S_LABEL_SELECTOR` | `app=bandolier-agent` | Label selector identifying Bandolier-managed agent pods. |
 
-The harness image (`ghcr.io/based64god/bandolier-agent-harness:latest`, always pulled) is a built-in default, overridable per repo in repo settings. The agent namespace is derived from the repo (default `claude-agents`). Neither is configured via environment variables.
+The harness image (`ghcr.io/based64god/bandolier-agent-harness:latest`, always pulled) is a built-in default, overridable per repo in repo settings. The agent namespace is derived from the repo (default `bandolier-agents`). Neither is configured via environment variables.
 
 ### Agent isolation
 

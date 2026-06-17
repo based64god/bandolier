@@ -13,7 +13,7 @@ type Segment = { kind: "harness" | "claude"; lines: string[] };
 
 // Groups consecutive log lines by source so runs of [harness] diagnostics can be
 // collapsed away from Claude's output.
-function parseSegments(raw: string): Segment[] {
+export function parseSegments(raw: string): Segment[] {
   const segments: Segment[] = [];
   for (const line of raw.split("\n")) {
     const kind: Segment["kind"] = line.includes("[harness]")
@@ -29,7 +29,7 @@ function parseSegments(raw: string): Segment[] {
   return segments;
 }
 
-function HarnessSegment({ lines }: { lines: string[] }) {
+export function HarnessSegment({ lines }: { lines: string[] }) {
   return (
     <details className="group my-1">
       <summary className="flex cursor-pointer list-none items-center gap-1.5 text-white/30 hover:text-white/50 [&::-webkit-details-marker]:hidden">

@@ -120,9 +120,10 @@ export function InteractiveRow({
         onClick={() => setCollapsed((c) => !c)}
         className={`cursor-pointer select-none ${rowTint}`}
       >
-        {/* Status (+ awaiting pill) */}
-        <td className="px-3 py-2 align-middle md:px-4 md:py-3">
-          <div className="flex flex-wrap items-center gap-1">
+        {/* Status (+ awaiting pill) — centered to match the centered "Status"
+            header and the non-interactive TaskRow. */}
+        <td className="px-3 py-2 text-center align-middle md:px-4 md:py-3">
+          <div className="flex flex-wrap items-center justify-center gap-1">
             <StatusBadge status={agent.status} />
             {awaiting && (
               <span

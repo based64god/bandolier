@@ -14,6 +14,16 @@ type Task = RouterOutputs["agents"]["list"][number];
 export const TASK_COLUMNS = 7;
 
 /**
+ * Columns that remain on narrow viewports — the three secondary columns
+ * ("Created by", "Currently", "Expires") are dropped below the `md` breakpoint
+ * via `hidden md:table-cell`. An interactive row's expanded body must span only
+ * the columns that actually exist at the current breakpoint: a `colSpan` larger
+ * than the live column count would conjure phantom columns and re-balance the
+ * whole table, shifting every row horizontally when it expands on mobile.
+ */
+export const MOBILE_TASK_COLUMNS = 4;
+
+/**
  * A non-interactive task as a compact row in the task table (matching the
  * overview table's density). Clicking the row opens its logs; cells surface the
  * source (issue link or creator), status, the live "currently" line, expiry, and

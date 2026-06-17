@@ -1,6 +1,6 @@
 # Bandolier Agent Harness — Kubernetes reference manifest
 #
-# The Bandolier server creates namespaces, the claude-agent ServiceAccount, and
+# The Bandolier server creates namespaces, the bandolier-agent ServiceAccount, and
 # per-job credential secrets dynamically at deploy time. There is NO shared,
 # pre-created credentials secret: every agent runs with the deploying user's own
 # credentials (GitHub via OAuth; AWS/Anthropic/OpenAI from their account settings),
@@ -14,7 +14,7 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: claude-agents
+  name: bandolier-agents
   labels:
     app.kubernetes.io/managed-by: bandolier
 
@@ -22,8 +22,8 @@ metadata:
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: claude-agent
-  namespace: claude-agents
+  name: bandolier-agent
+  namespace: bandolier-agents
   labels:
     app.kubernetes.io/managed-by: bandolier
 # Agents do not need to talk to the Kubernetes API.
@@ -35,10 +35,10 @@ automountServiceAccountToken: false
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: claude-agent-example
-  namespace: claude-agents
+  name: bandolier-agent-example
+  namespace: bandolier-agents
   labels:
-    app: claude-agent
+    app: bandolier-agent
     app.kubernetes.io/managed-by: bandolier
 spec:
   # Keep the finished pod around for 1 h so you can inspect logs.
@@ -48,10 +48,10 @@ spec:
   template:
     metadata:
       labels:
-        app: claude-agent
+        app: bandolier-agent
         app.kubernetes.io/managed-by: bandolier
     spec:
-      serviceAccountName: claude-agent
+      serviceAccountName: bandolier-agent
       restartPolicy: Never
 
       containers:
@@ -85,9 +85,9 @@ spec:
 
             # ── Git identity for commits ──────────────────────────────────
             - name: GIT_NAME
-              value: "Claude Agent"
+              value: "Bandolier Agent"
             - name: GIT_EMAIL
-              value: "claude-agent@bandolier.local"
+              value: "bandolier-agent@bandolier.local"
 
             # ── Credentials ───────────────────────────────────────────────
             # The server injects these from a per-job secret holding the
@@ -96,7 +96,7 @@ spec:
             - name: ANTHROPIC_API_KEY
               valueFrom:
                 secretKeyRef:
-                  name: claude-agent-example-creds
+                  name: bandolier-agent-example-creds
                   key: ANTHROPIC_API_KEY
                   optional: true
             # OpenAI models run via the Codex CLI instead of claude; the server
@@ -105,7 +105,7 @@ spec:
             - name: OPENAI_API_KEY
               valueFrom:
                 secretKeyRef:
-                  name: claude-agent-example-creds
+                  name: bandolier-agent-example-creds
                   key: OPENAI_API_KEY
                   optional: true
             # Gemini models run via the Antigravity CLI (agy), which authenticates
@@ -116,13 +116,13 @@ spec:
             - name: GOOGLE_PROJECT_CREDENTIALS
               valueFrom:
                 secretKeyRef:
-                  name: claude-agent-example-creds
+                  name: bandolier-agent-example-creds
                   key: GOOGLE_PROJECT_CREDENTIALS
                   optional: true
             - name: GITHUB_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: claude-agent-example-creds
+                  name: bandolier-agent-example-creds
                   key: GITHUB_TOKEN
                   optional: true
 

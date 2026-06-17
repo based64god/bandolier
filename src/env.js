@@ -18,7 +18,7 @@ export const env = createEnv({
     NODE_ENV: z
       .enum(["development", "test", "production"])
       .default("development"),
-    K8S_LABEL_SELECTOR: z.string().default("app=claude-agent"),
+    K8S_LABEL_SELECTOR: z.string().default("app=bandolier-agent"),
     // Network isolation for agent pods. When enabled, each agent namespace gets a
     // NetworkPolicy that denies all inbound traffic and restricts egress to DNS +
     // the public internet — blocking lateral movement to other pods/services.

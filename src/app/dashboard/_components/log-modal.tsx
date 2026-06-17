@@ -167,6 +167,15 @@ export function LogModal({
     return () => window.removeEventListener("keydown", handler);
   }, [onClose]);
 
+  // Lock background scrolling while the modal is open so only the logs scroll.
+  useEffect(() => {
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prevOverflow;
+    };
+  }, []);
+
   const segments = logs ? parseSegments(logs) : [];
 
   return (

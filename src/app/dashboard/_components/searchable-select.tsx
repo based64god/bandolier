@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { createPortal } from "react-dom";
 
 export interface SelectOption {
   /** Unique value submitted on selection. */
@@ -11,9 +18,31 @@ export interface SelectOption {
   searchText: string;
 }
 
+// Minimum panel width, matching the old `min-w-72` (18rem). The panel otherwise
+// tracks the trigger's width.
+const MIN_PANEL_WIDTH = 288;
+// Gap between the trigger and the panel, and the panel and the viewport edge.
+const GAP = 6;
+const VIEWPORT_MARGIN = 8;
+
+interface PanelCoords {
+  left: number;
+  width: number;
+  /** Set when opening downward. */
+  top?: number;
+  /** Set when opening upward (distance from viewport bottom). */
+  bottom?: number;
+  maxHeight: number;
+}
+
 /**
  * Dark-styled dropdown with a search box, matching the repo selector. Generic so
  * it can back any picker (repos, issues, …) instead of a native <select>.
+ *
+ * The open panel renders in a portal with fixed positioning so it escapes any
+ * `overflow-hidden`/scrolling ancestor (e.g. a modal body): it opens downward,
+ * flips upward when there isn't room below, and caps its height to the available
+ * viewport space so a long list never spills out of view.
  */
 export function SearchableSelect({
   options,
@@ -45,15 +74,63 @@ export function SearchableSelect({
   const [search, setSearch] = useState("");
   // Index into `navValues` (below) of the arrow-key-highlighted row.
   const [highlight, setHighlight] = useState(0);
+  const [coords, setCoords] = useState<PanelCoords | null>(null);
   const ref = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
 
+  // Position the panel relative to the trigger, flipping up and clamping height
+  // when there isn't enough room below. Recomputed on open, scroll, and resize.
+  useLayoutEffect(() => {
+    if (!open) return;
+
+    function updatePosition() {
+      const trigger = ref.current;
+      if (!trigger) return;
+      const r = trigger.getBoundingClientRect();
+
+      const spaceBelow = window.innerHeight - r.bottom - GAP - VIEWPORT_MARGIN;
+      const spaceAbove = r.top - GAP - VIEWPORT_MARGIN;
+      const openUp = spaceBelow < 240 && spaceAbove > spaceBelow;
+      const maxHeight = Math.max(
+        160,
+        Math.min(360, openUp ? spaceAbove : spaceBelow),
+      );
+
+      const width = Math.max(r.width, MIN_PANEL_WIDTH);
+      let left = r.left;
+      if (left + width > window.innerWidth - VIEWPORT_MARGIN) {
+        left = window.innerWidth - width - VIEWPORT_MARGIN;
+      }
+      if (left < VIEWPORT_MARGIN) left = VIEWPORT_MARGIN;
+
+      setCoords({
+        left,
+        width,
+        top: openUp ? undefined : r.bottom + GAP,
+        bottom: openUp ? window.innerHeight - r.top + GAP : undefined,
+        maxHeight,
+      });
+    }
+
+    updatePosition();
+    // Capture scrolls on any ancestor (modal bodies scroll) plus resizes.
+    window.addEventListener("scroll", updatePosition, true);
+    window.addEventListener("resize", updatePosition);
+    return () => {
+      window.removeEventListener("scroll", updatePosition, true);
+      window.removeEventListener("resize", updatePosition);
+    };
+  }, [open]);
+
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
+      const target = e.target as Node;
+      // The panel lives in a portal outside `ref`, so check both.
+      if (ref.current?.contains(target)) return;
+      if (panelRef.current?.contains(target)) return;
+      setOpen(false);
     }
     if (open) document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
@@ -151,82 +228,96 @@ export function SearchableSelect({
         </svg>
       </button>
 
-      {open && (
-        <div className="absolute top-full left-0 z-20 mt-1.5 w-full min-w-72 overflow-hidden rounded-xl border border-white/10 bg-[#0d0d20] shadow-2xl">
-          <div className="border-b border-white/10 p-2">
-            <input
-              ref={searchRef}
-              type="text"
-              value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
-                setHighlight(0);
-              }}
-              onKeyDown={handleNavKey}
-              placeholder={searchPlaceholder}
-              className="w-full rounded-md border border-white/10 bg-white/5 px-2.5 py-1.5 text-sm text-white placeholder-white/30 focus:border-purple-500/50 focus:outline-none"
-            />
-          </div>
+      {open &&
+        coords &&
+        createPortal(
+          <div
+            ref={panelRef}
+            style={{
+              position: "fixed",
+              left: coords.left,
+              width: coords.width,
+              top: coords.top,
+              bottom: coords.bottom,
+              maxHeight: coords.maxHeight,
+            }}
+            className="z-50 flex flex-col overflow-hidden rounded-xl border border-white/10 bg-[#0d0d20] shadow-2xl"
+          >
+            <div className="border-b border-white/10 p-2">
+              <input
+                ref={searchRef}
+                type="text"
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  setHighlight(0);
+                }}
+                onKeyDown={handleNavKey}
+                placeholder={searchPlaceholder}
+                className="w-full rounded-md border border-white/10 bg-white/5 px-2.5 py-1.5 text-sm text-white placeholder-white/30 focus:border-purple-500/50 focus:outline-none"
+              />
+            </div>
 
-          {options.length === 0 ? (
-            <p className="px-4 py-3 text-xs text-white/30">{emptyText}</p>
-          ) : (
-            <ul ref={listRef} className="max-h-72 overflow-y-auto py-1">
-              {showClear && (
-                <li>
-                  <button
-                    type="button"
-                    data-nav={0}
-                    onClick={() => choose(null)}
-                    onMouseEnter={() => setHighlight(0)}
-                    className={`flex w-full items-center gap-1.5 px-4 py-2 text-left text-sm transition ${
-                      value === null
-                        ? "bg-purple-600/40 text-white"
-                        : highlight === 0
-                          ? "bg-white/10 text-white/80"
-                          : "text-white/50"
-                    }`}
-                  >
-                    <span className="flex-1 truncate">{clearLabel}</span>
-                  </button>
-                </li>
-              )}
-              {filtered.length === 0 ? (
-                <li className="px-4 py-3 text-xs text-white/30">
-                  No matches for &ldquo;{search}&rdquo;.
-                </li>
-              ) : (
-                filtered.map((o, i) => {
-                  const isSelected = o.value === value;
-                  const navIndex = i + (showClear ? 1 : 0);
-                  const isHighlighted = highlight === navIndex;
-                  return (
-                    <li key={o.value}>
-                      <button
-                        type="button"
-                        data-nav={navIndex}
-                        onClick={() => choose(o.value)}
-                        onMouseEnter={() => setHighlight(navIndex)}
-                        className={`flex w-full items-center gap-1.5 px-4 py-2 text-left text-sm transition ${
-                          isSelected
-                            ? "bg-purple-600/40"
-                            : isHighlighted
-                              ? "bg-white/10"
-                              : ""
-                        }`}
-                      >
-                        <span className="flex min-w-0 flex-1 items-center">
-                          {o.label}
-                        </span>
-                      </button>
-                    </li>
-                  );
-                })
-              )}
-            </ul>
-          )}
-        </div>
-      )}
+            {options.length === 0 ? (
+              <p className="px-4 py-3 text-xs text-white/30">{emptyText}</p>
+            ) : (
+              <ul ref={listRef} className="flex-1 overflow-y-auto py-1">
+                {showClear && (
+                  <li>
+                    <button
+                      type="button"
+                      data-nav={0}
+                      onClick={() => choose(null)}
+                      onMouseEnter={() => setHighlight(0)}
+                      className={`flex w-full items-center gap-1.5 px-4 py-2 text-left text-sm transition ${
+                        value === null
+                          ? "bg-purple-600/40 text-white"
+                          : highlight === 0
+                            ? "bg-white/10 text-white/80"
+                            : "text-white/50"
+                      }`}
+                    >
+                      <span className="flex-1 truncate">{clearLabel}</span>
+                    </button>
+                  </li>
+                )}
+                {filtered.length === 0 ? (
+                  <li className="px-4 py-3 text-xs text-white/30">
+                    No matches for &ldquo;{search}&rdquo;.
+                  </li>
+                ) : (
+                  filtered.map((o, i) => {
+                    const isSelected = o.value === value;
+                    const navIndex = i + (showClear ? 1 : 0);
+                    const isHighlighted = highlight === navIndex;
+                    return (
+                      <li key={o.value}>
+                        <button
+                          type="button"
+                          data-nav={navIndex}
+                          onClick={() => choose(o.value)}
+                          onMouseEnter={() => setHighlight(navIndex)}
+                          className={`flex w-full items-center gap-1.5 px-4 py-2 text-left text-sm transition ${
+                            isSelected
+                              ? "bg-purple-600/40"
+                              : isHighlighted
+                                ? "bg-white/10"
+                                : ""
+                          }`}
+                        >
+                          <span className="flex min-w-0 flex-1 items-center">
+                            {o.label}
+                          </span>
+                        </button>
+                      </li>
+                    );
+                  })
+                )}
+              </ul>
+            )}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

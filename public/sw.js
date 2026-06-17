@@ -7,7 +7,7 @@
  *    and the cache stays warm.
  * Bump CACHE_VERSION to invalidate old caches on deploy.
  */
-const CACHE_VERSION = "v1";
+const CACHE_VERSION = "v2";
 const CACHE_NAME = `bandolier-${CACHE_VERSION}`;
 const OFFLINE_URL = "/";
 
@@ -15,7 +15,9 @@ self.addEventListener("install", (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => cache.add(OFFLINE_URL)),
   );
-  self.skipWaiting();
+  // Note: intentionally NOT calling skipWaiting() here. A freshly installed
+  // worker waits so the UI can surface an "update available" prompt; it only
+  // takes over when the user clicks Refresh (which posts SKIP_WAITING below).
 });
 
 self.addEventListener("activate", (event) => {
@@ -31,6 +33,13 @@ self.addEventListener("activate", (event) => {
       )
       .then(() => self.clients.claim()),
   );
+});
+
+// Lets the page activate a waiting worker on demand: when the update prompt's
+// "Refresh" button is clicked, the page posts { type: "SKIP_WAITING" } so the
+// new worker takes over immediately instead of waiting for all tabs to close.
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "SKIP_WAITING") self.skipWaiting();
 });
 
 // Clicking a task notification focuses an existing app window (or opens one).

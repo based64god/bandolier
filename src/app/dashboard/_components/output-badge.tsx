@@ -1,37 +1,52 @@
 // Shared PR/issue badges for the agent tables. Each badge links out to GitHub
 // and carries a small state indicator (open / closed / merged) when the state is
-// known. On mobile the indicator stacks beneath the label to use the row's
-// vertical space rather than widening it; on wider viewports it sits inline.
+// known. The indicator is a compact glyph so it adds state without widening the
+// row; it always sits inline next to the label.
 
 type ItemState = "open" | "closed" | "merged";
 
-// Indicator colours follow GitHub's conventions (open = green, closed = red,
-// merged = purple) and stand on their own tint/border so they stay legible even
-// inside a same-hued badge (e.g. a merged "PR" pill).
-const STATE_CONFIG: Record<ItemState, { label: string; className: string }> = {
+// Indicators are icon-only to stay small. Colours follow GitHub's conventions
+// (open = green, closed = red, merged = purple) and the glyph distinguishes the
+// state so it reads even against a same-hued badge (e.g. a merged "PR" pill).
+// Paths are 16×16 GitHub Octicons: a filled dot (open), x-circle (closed) and
+// git-merge (merged).
+const STATE_CONFIG: Record<
+  ItemState,
+  { label: string; className: string; iconPath: string }
+> = {
   open: {
     label: "Open",
-    className: "border-green-400/40 bg-green-400/15 text-green-200",
+    className: "text-green-300",
+    iconPath: "M8 4a4 4 0 1 1 0 8 4 4 0 0 1 0-8Z",
   },
   closed: {
     label: "Closed",
-    className: "border-red-400/40 bg-red-400/15 text-red-200",
+    className: "text-red-300",
+    iconPath:
+      "M2.343 13.657A8 8 0 1 1 13.657 2.343 8 8 0 0 1 2.343 13.657ZM6.03 4.97a.75.75 0 0 0-1.06 1.06L6.94 8 4.97 9.97a.75.75 0 1 0 1.06 1.06L8 9.06l1.97 1.97a.75.75 0 1 0 1.06-1.06L9.06 8l1.97-1.97a.75.75 0 1 0-1.06-1.06L8 6.94 6.03 4.97Z",
   },
   merged: {
     label: "Merged",
-    className: "border-purple-300/50 bg-purple-300/20 text-purple-100",
+    className: "text-purple-300",
+    iconPath:
+      "M5.45 5.154A4.25 4.25 0 0 0 9.25 7.5h1.378a2.251 2.251 0 1 1 0 1.5H9.25A5.734 5.734 0 0 1 5 7.123v3.505a2.25 2.25 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.95-.218ZM4.25 13.5a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5Zm8.5-4.5a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5ZM5 3.25a.75.75 0 1 0-1.5 0 .75.75 0 0 0 1.5 0Z",
   },
 };
 
-/** Small open/closed/merged pill shown alongside a PR or issue badge. */
+/** Small open/closed/merged glyph shown alongside a PR or issue badge. */
 function StateIndicator({ state }: { state: ItemState }) {
   const cfg = STATE_CONFIG[state];
   return (
-    <span
-      className={`inline-flex items-center rounded border px-1.5 text-[10px] font-semibold tracking-wide uppercase ${cfg.className}`}
+    <svg
+      viewBox="0 0 16 16"
+      fill="currentColor"
+      role="img"
+      aria-label={cfg.label}
+      className={`h-3.5 w-3.5 shrink-0 ${cfg.className}`}
     >
-      {cfg.label}
-    </span>
+      <title>{cfg.label}</title>
+      <path d={cfg.iconPath} />
+    </svg>
   );
 }
 
@@ -43,8 +58,8 @@ const PR_ICON =
 /**
  * A PR/issue badge that links to GitHub and shows its open/closed/merged state.
  * `showIcon` adds the kind glyph (used in the roomier overview table); the
- * compact task rows omit it. The badge is a column on mobile so the state
- * indicator drops onto its own line (vertical space) and a row on `md+`.
+ * compact task rows omit it. The state indicator is a small inline glyph that
+ * trails the label.
  */
 function LinkedBadge({
   href,
@@ -67,21 +82,19 @@ function LinkedBadge({
       target="_blank"
       rel="noopener noreferrer"
       onClick={onClick}
-      className={`inline-flex flex-col items-start gap-1 rounded-md border px-2 py-1 text-xs whitespace-nowrap transition md:flex-row md:items-center md:gap-1.5 ${className}`}
+      className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs whitespace-nowrap transition ${className}`}
     >
-      <span className="inline-flex items-center gap-1.5">
-        {iconPath && (
-          <svg
-            viewBox="0 0 16 16"
-            fill="currentColor"
-            aria-hidden="true"
-            className="h-3.5 w-3.5"
-          >
-            <path d={iconPath} />
-          </svg>
-        )}
-        {label}
-      </span>
+      {iconPath && (
+        <svg
+          viewBox="0 0 16 16"
+          fill="currentColor"
+          aria-hidden="true"
+          className="h-3.5 w-3.5 shrink-0"
+        >
+          <path d={iconPath} />
+        </svg>
+      )}
+      {label}
       {state && <StateIndicator state={state} />}
     </a>
   );

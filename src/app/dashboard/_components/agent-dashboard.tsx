@@ -203,6 +203,20 @@ export function AgentDashboard({
     router.push(`/repo/${fullName}`);
   }
 
+  // Deploy is the primary action. It renders in the right-hand group on small
+  // screens (thumb-friendly for phones) but moves to the horizontal centre of
+  // the bar on large viewports, where a centred target better matches how
+  // people drive a desktop. The button markup is shared between both slots.
+  const deployButton = (
+    <button
+      onClick={() => setShowDeploy(true)}
+      disabled={!selectedRepo || !kubeConfigured}
+      className="rounded-lg bg-purple-600 px-3 py-1.5 text-sm font-medium hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-40"
+    >
+      +<span className="hidden sm:inline"> Deploy Agent</span>
+    </button>
+  );
+
   return (
     <div className="flex min-h-screen flex-col bg-gradient-to-b from-[#2e026d] to-[#15162c] text-white">
       {/* Header */}
@@ -210,10 +224,20 @@ export function AgentDashboard({
         {/* A single row at every width. The hamburger sits far left. The
             branding + repo selector take the middle and give up space first
             (the branding text hides at sm:, then the repo selector shrinks and
-            truncates). The right-hand group is protected (shrink-0) with the
-            Deploy button last, so Deploy is the final component to lose space
-            and never wraps to a new row. */}
-        <div className="flex items-center gap-2 sm:gap-3">
+            truncates). The right-hand group is protected (shrink-0).
+
+            Deploy lives in the right-hand group up to lg:, then jumps to the
+            centre of the bar on large viewports (see the centred overlay
+            below). It always renders and never wraps to a new row. */}
+        <div className="relative flex items-center gap-2 sm:gap-3">
+          {/* Centred Deploy — large viewports only. Absolutely centred over the
+              bar so it stays put regardless of how wide the side groups grow.
+              pointer-events are disabled on the wrapper so the empty space
+              either side never swallows clicks meant for the controls beneath. */}
+          <div className="pointer-events-none absolute inset-x-0 z-10 hidden justify-center lg:flex">
+            <div className="pointer-events-auto">{deployButton}</div>
+          </div>
+
           {/* Hamburger — far left, mobile only. Holds the secondary controls so
               the bar never overflows on narrow screens. */}
           <div className="relative shrink-0 sm:hidden">
@@ -437,16 +461,10 @@ export function AgentDashboard({
               </div>
             </div>
 
-            {/* Deploy is the most important action and the last component in
-                the bar to give up space — it always renders, even on mobile,
-                and never wraps to a new row. */}
-            <button
-              onClick={() => setShowDeploy(true)}
-              disabled={!selectedRepo || !kubeConfigured}
-              className="rounded-lg bg-purple-600 px-3 py-1.5 text-sm font-medium hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              +<span className="hidden sm:inline"> Deploy Agent</span>
-            </button>
+            {/* Deploy lives here up to lg:, where it moves to the centred
+                overlay above. It's the last component in this group to give up
+                space and never wraps to a new row. */}
+            <div className="lg:hidden">{deployButton}</div>
           </div>
         </div>
       </header>

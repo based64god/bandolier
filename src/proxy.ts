@@ -7,6 +7,9 @@ import { GATE_COOKIE, gateToken, timingSafeEqual } from "~/lib/gate";
 //  - the public REST API (authenticates via API key or session of its own)
 //  - the gate page + its submit endpoint
 //  - the app icon / OG image (only reveal the logo + tagline; lets unfurls work)
+//  - the PWA manifest, service worker, and install icons — the browser must be
+//    able to fetch these (as JSON/JS/PNG, not the gate's HTML) for the app to be
+//    installable, even before the user passes the gate. They expose no secrets.
 //  - the kubeconfig setup script (no secrets; meant for `curl … | bash`)
 function isExempt(pathname: string): boolean {
   return (
@@ -20,7 +23,11 @@ function isExempt(pathname: string): boolean {
     pathname === "/icon.svg" ||
     pathname === "/apple-icon" ||
     pathname === "/opengraph-image" ||
-    pathname === "/favicon.ico"
+    pathname === "/favicon.ico" ||
+    pathname === "/manifest.webmanifest" ||
+    pathname === "/sw.js" ||
+    pathname === "/icon-192.png" ||
+    pathname === "/icon-512.png"
   );
 }
 

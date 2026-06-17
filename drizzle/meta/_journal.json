@@ -43,6 +43,13 @@
       "when": 1781590438830,
       "tag": "0005_bumpy_nova",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1781739991090,
+      "tag": "0006_large_mesmero",
+      "breakpoints": true
     }
   ]
 }

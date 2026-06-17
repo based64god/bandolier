@@ -179,11 +179,11 @@ export function LogModal({
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
-          <code className="rounded bg-purple-500/20 px-2 py-0.5 text-sm text-purple-300">
+        <div className="flex items-center justify-between gap-4 border-b border-white/10 px-4 py-3">
+          <code className="truncate rounded bg-purple-500/20 px-2 py-0.5 text-sm text-purple-300">
             {podName}
           </code>
-          <div className="flex items-center gap-3">
+          <div className="flex shrink-0 items-center gap-3 pl-2">
             <span className="flex items-center gap-1.5 text-xs text-white/40">
               <span
                 className={`h-1.5 w-1.5 rounded-full ${pinned ? "bg-green-400" : "bg-white/30"}`}

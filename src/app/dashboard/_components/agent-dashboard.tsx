@@ -207,12 +207,111 @@ export function AgentDashboard({
     <div className="flex min-h-screen flex-col bg-gradient-to-b from-[#2e026d] to-[#15162c] text-white">
       {/* Header */}
       <header className="border-b border-white/10 px-4 py-3 sm:px-6 sm:py-4">
-        {/* A single row at every width. Space is given up from the left: the
-            branding text hides first (sm:), then the repo selector shrinks and
-            truncates, and only the right-hand group is protected (shrink-0) so
-            the Deploy button is the last thing to lose space — it never wraps
-            to a new row. */}
+        {/* A single row at every width. The hamburger sits far left. The
+            branding + repo selector take the middle and give up space first
+            (the branding text hides at sm:, then the repo selector shrinks and
+            truncates). The right-hand group is protected (shrink-0) with the
+            Deploy button last, so Deploy is the final component to lose space
+            and never wraps to a new row. */}
         <div className="flex items-center gap-2 sm:gap-3">
+          {/* Hamburger — far left, mobile only. Holds the secondary controls so
+              the bar never overflows on narrow screens. */}
+          <div className="relative shrink-0 sm:hidden">
+            <button
+              onClick={() => setMenuOpen((o) => !o)}
+              aria-label="Menu"
+              aria-expanded={menuOpen}
+              aria-haspopup="menu"
+              className="rounded-lg p-1.5 text-white/60 hover:bg-white/10 hover:text-white"
+            >
+              <svg
+                viewBox="0 0 20 20"
+                fill="currentColor"
+                className="h-5 w-5"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M3 5.75A.75.75 0 0 1 3.75 5h12.5a.75.75 0 0 1 0 1.5H3.75A.75.75 0 0 1 3 5.75Zm0 4.25A.75.75 0 0 1 3.75 9.25h12.5a.75.75 0 0 1 0 1.5H3.75A.75.75 0 0 1 3 10Zm.75 3.5a.75.75 0 0 0 0 1.5h12.5a.75.75 0 0 0 0-1.5H3.75Z"
+                  clipRule="evenodd"
+                />
+              </svg>
+            </button>
+            {menuOpen && (
+              <>
+                {/* Click-away backdrop. */}
+                <button
+                  aria-hidden="true"
+                  tabIndex={-1}
+                  onClick={() => setMenuOpen(false)}
+                  className="fixed inset-0 z-10 cursor-default"
+                />
+                <div
+                  role="menu"
+                  className="absolute left-0 z-20 mt-2 w-56 origin-top-left rounded-xl border border-white/10 bg-[#1b1340] p-2 shadow-xl"
+                >
+                  <div className="flex items-center gap-2 border-b border-white/10 px-2 pb-2">
+                    {user.image && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={user.image}
+                        alt={user.name}
+                        className="h-7 w-7 rounded-full"
+                      />
+                    )}
+                    <span className="truncate text-sm text-white/70">
+                      {user.name}
+                    </span>
+                  </div>
+                  {selectedRepo?.canManageWebhooks && (
+                    <button
+                      role="menuitem"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        setShowWebhooks(true);
+                      }}
+                      className="mt-1 block w-full rounded-lg px-2 py-2 text-left text-sm text-white/70 hover:bg-white/10 hover:text-white"
+                    >
+                      Repo config
+                    </button>
+                  )}
+                  <button
+                    role="menuitem"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      void toggleNotify();
+                    }}
+                    className="block w-full rounded-lg px-2 py-2 text-left text-sm text-white/70 hover:bg-white/10 hover:text-white"
+                  >
+                    {notify
+                      ? "Disable notifications"
+                      : "Enable notifications"}
+                  </button>
+                  <button
+                    role="menuitem"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      setShowSettings(true);
+                    }}
+                    className="block w-full rounded-lg px-2 py-2 text-left text-sm text-white/70 hover:bg-white/10 hover:text-white"
+                  >
+                    Settings
+                  </button>
+                  <button
+                    role="menuitem"
+                    onClick={async () => {
+                      setMenuOpen(false);
+                      await authClient.signOut();
+                      router.refresh();
+                    }}
+                    className="block w-full rounded-lg px-2 py-2 text-left text-sm text-white/70 hover:bg-white/10 hover:text-white"
+                  >
+                    Sign out
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+
           <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
             <h1 className="shrink-0 text-2xl font-bold tracking-tight">
               <Link
@@ -252,17 +351,9 @@ export function AgentDashboard({
                   : `Updated ${new Date(dataUpdatedAt).toLocaleTimeString()}`}
               </span>
             )}
-            {/* Deploy is important enough to always render, even on mobile. */}
-            <button
-              onClick={() => setShowDeploy(true)}
-              disabled={!selectedRepo || !kubeConfigured}
-              className="rounded-lg bg-purple-600 px-3 py-1.5 text-sm font-medium hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              +<span className="hidden sm:inline"> Deploy Agent</span>
-            </button>
 
             {/* Secondary controls — inline from sm: up, collapsed into the
-                hamburger menu below on narrow screens. */}
+                hamburger menu on narrow screens. */}
             <div className="hidden items-center gap-2 sm:flex sm:gap-3">
               <button
                 onClick={toggleNotify}
@@ -346,103 +437,16 @@ export function AgentDashboard({
               </div>
             </div>
 
-            {/* Hamburger — mobile only. Holds the secondary controls so the bar
-                never overflows on narrow screens. */}
-            <div className="relative sm:hidden">
-              <button
-                onClick={() => setMenuOpen((o) => !o)}
-                aria-label="Menu"
-                aria-expanded={menuOpen}
-                aria-haspopup="menu"
-                className="rounded-lg p-1.5 text-white/60 hover:bg-white/10 hover:text-white"
-              >
-                <svg
-                  viewBox="0 0 20 20"
-                  fill="currentColor"
-                  className="h-5 w-5"
-                >
-                  <path
-                    fillRule="evenodd"
-                    d="M3 5.75A.75.75 0 0 1 3.75 5h12.5a.75.75 0 0 1 0 1.5H3.75A.75.75 0 0 1 3 5.75Zm0 4.25A.75.75 0 0 1 3.75 9.25h12.5a.75.75 0 0 1 0 1.5H3.75A.75.75 0 0 1 3 10Zm.75 3.5a.75.75 0 0 0 0 1.5h12.5a.75.75 0 0 0 0-1.5H3.75Z"
-                    clipRule="evenodd"
-                  />
-                </svg>
-              </button>
-              {menuOpen && (
-                <>
-                  {/* Click-away backdrop. */}
-                  <button
-                    aria-hidden="true"
-                    tabIndex={-1}
-                    onClick={() => setMenuOpen(false)}
-                    className="fixed inset-0 z-10 cursor-default"
-                  />
-                  <div
-                    role="menu"
-                    className="absolute right-0 z-20 mt-2 w-56 origin-top-right rounded-xl border border-white/10 bg-[#1b1340] p-2 shadow-xl"
-                  >
-                    <div className="flex items-center gap-2 border-b border-white/10 px-2 pb-2">
-                      {user.image && (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={user.image}
-                          alt={user.name}
-                          className="h-7 w-7 rounded-full"
-                        />
-                      )}
-                      <span className="truncate text-sm text-white/70">
-                        {user.name}
-                      </span>
-                    </div>
-                    {selectedRepo?.canManageWebhooks && (
-                      <button
-                        role="menuitem"
-                        onClick={() => {
-                          setMenuOpen(false);
-                          setShowWebhooks(true);
-                        }}
-                        className="mt-1 block w-full rounded-lg px-2 py-2 text-left text-sm text-white/70 hover:bg-white/10 hover:text-white"
-                      >
-                        Repo config
-                      </button>
-                    )}
-                    <button
-                      role="menuitem"
-                      onClick={() => {
-                        setMenuOpen(false);
-                        void toggleNotify();
-                      }}
-                      className="block w-full rounded-lg px-2 py-2 text-left text-sm text-white/70 hover:bg-white/10 hover:text-white"
-                    >
-                      {notify
-                        ? "Disable notifications"
-                        : "Enable notifications"}
-                    </button>
-                    <button
-                      role="menuitem"
-                      onClick={() => {
-                        setMenuOpen(false);
-                        setShowSettings(true);
-                      }}
-                      className="block w-full rounded-lg px-2 py-2 text-left text-sm text-white/70 hover:bg-white/10 hover:text-white"
-                    >
-                      Settings
-                    </button>
-                    <button
-                      role="menuitem"
-                      onClick={async () => {
-                        setMenuOpen(false);
-                        await authClient.signOut();
-                        router.refresh();
-                      }}
-                      className="block w-full rounded-lg px-2 py-2 text-left text-sm text-white/70 hover:bg-white/10 hover:text-white"
-                    >
-                      Sign out
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
+            {/* Deploy is the most important action and the last component in
+                the bar to give up space — it always renders, even on mobile,
+                and never wraps to a new row. */}
+            <button
+              onClick={() => setShowDeploy(true)}
+              disabled={!selectedRepo || !kubeConfigured}
+              className="rounded-lg bg-purple-600 px-3 py-1.5 text-sm font-medium hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              +<span className="hidden sm:inline"> Deploy Agent</span>
+            </button>
           </div>
         </div>
       </header>

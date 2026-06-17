@@ -48,8 +48,14 @@ export async function listOpenIssues(
     }));
 }
 
-/** Whether a GitHub PR or issue is open, closed, or (PRs only) merged. */
-export type GithubItemState = "open" | "closed" | "merged";
+/**
+ * Whether a GitHub PR or issue is open, closed, or (PRs only) merged.
+ * "completed" is a closed issue that was resolved as done (e.g. closed by a
+ * pull request); it's distinct from "closed", which means closed as not
+ * planned. Surfacing the distinction lets the UI show success iconography for
+ * issues that were actually completed rather than a failure-style red x.
+ */
+export type GithubItemState = "open" | "closed" | "completed" | "merged";
 
 interface GithubRef {
   owner: string;
@@ -82,6 +88,9 @@ interface RawPull {
 
 interface RawIssueState {
   state: string;
+  // GitHub sets this to "completed" when an issue is closed as done (including
+  // when closed by a linked pull request) and "not_planned" otherwise.
+  state_reason?: string | null;
 }
 
 /**
@@ -125,7 +134,12 @@ export async function getGithubItemState(
           : "open";
     } else {
       const data = (await res.json()) as RawIssueState;
-      state = data.state === "closed" ? "closed" : "open";
+      state =
+        data.state === "closed"
+          ? data.state_reason === "completed"
+            ? "completed"
+            : "closed"
+          : "open";
     }
     stateCache.set(url, { state, at: Date.now() });
     return state;

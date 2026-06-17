@@ -51,11 +51,18 @@ describe("getGithubItemState", () => {
     ).toBe("open");
   });
 
-  it("reports a closed issue as closed", async () => {
-    mockFetchOnce({ state: "closed" });
+  it("reports an issue closed as not planned as closed", async () => {
+    mockFetchOnce({ state: "closed", state_reason: "not_planned" });
     expect(
       await getGithubItemState("tok", "https://github.com/o/r/issues/4"),
     ).toBe("closed");
+  });
+
+  it("reports an issue completed (e.g. by a PR) as completed", async () => {
+    mockFetchOnce({ state: "closed", state_reason: "completed" });
+    expect(
+      await getGithubItemState("tok", "https://github.com/o/r/issues/7"),
+    ).toBe("completed");
   });
 
   it("reports an open issue as open", async () => {

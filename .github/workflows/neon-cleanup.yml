@@ -4,10 +4,35 @@ on:
     types: [closed]
 jobs:
   delete-branch:
+    environment: production
     runs-on: ubuntu-latest
+    # Secrets are NOT exposed to pull_request runs triggered from forks. When
+    # such a PR is closed, secrets.NEON_API_KEY is empty and neonctl (which the
+    # delete-branch action wraps) falls back to interactive auth, failing with
+    # "Cannot run interactive auth in CI". Only run for PRs from branches in
+    # this repository, where the secret is available.
+    if: github.event.pull_request.head.repo.full_name == github.repository
     steps:
-      - uses: neondatabase/delete-branch-action@v3
+      # Even within the repo the Neon credentials may not be configured (e.g.
+      # forks of this project that never set them up). Detect that and skip the
+      # delete rather than letting neonctl drop into interactive auth and fail.
+      - name: Check Neon credentials are configured
+        id: creds
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
+        run: |
+          if [ -z "$NEON_API_KEY" ] || [ -z "$NEON_PROJECT_ID" ]; then
+            echo "Neon credentials (NEON_API_KEY / NEON_PROJECT_ID) are not configured; skipping preview-branch cleanup." >&2
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Delete preview branch
+        if: steps.creds.outputs.configured == 'true'
+        uses: neondatabase/delete-branch-action@v3
         with:
-          project_id: ${{ vars.NEON_PROJECT_ID }}
+          project_id: ${{ secrets.NEON_PROJECT_ID }}
           branch: preview/pr-${{ github.event.number }}-${{ github.head_ref }}
           api_key: ${{ secrets.NEON_API_KEY }}

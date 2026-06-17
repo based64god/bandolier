@@ -3,7 +3,9 @@ import "~/styles/globals.css";
 import { type Metadata, type Viewport } from "next";
 import { Geist } from "next/font/google";
 
+import { PullToRefresh } from "~/app/_components/pull-to-refresh";
 import { PwaRegister } from "~/app/_components/pwa-register";
+import { UpdatePrompt } from "~/app/_components/update-prompt";
 import { env } from "~/env";
 import { TRPCReactProvider } from "~/trpc/react";
 
@@ -57,6 +59,8 @@ export default function RootLayout({
       <body>
         <TRPCReactProvider>{children}</TRPCReactProvider>
         <PwaRegister />
+        <PullToRefresh />
+        <UpdatePrompt />
       </body>
     </html>
   );

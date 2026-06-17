@@ -7,15 +7,6 @@ import { useAwaitingInputAlerts, useCompletionAlerts } from "./notifications";
 import { OutputBadge, SourceBadge } from "./output-badge";
 import { StatusBadge } from "./status-badge";
 
-// Active agents float to the top; finished ones sort by soonest expiry.
-const STATUS_RANK: Record<string, number> = {
-  Running: 0,
-  Pending: 1,
-  Unknown: 2,
-  Failed: 3,
-  Succeeded: 4,
-};
-
 /**
  * Home-screen panel listing agents across every repository the user can access.
  * The server enforces permissions; this just renders and links each agent to its
@@ -39,9 +30,8 @@ export function OverviewPanel({ notify }: { notify: boolean }) {
   const sorted = [...agents].sort((a, b) => {
     // Agents waiting on the user float to the very top, wherever they live.
     if (a.awaitingInput !== b.awaitingInput) return a.awaitingInput ? -1 : 1;
-    const rank = (STATUS_RANK[a.status] ?? 9) - (STATUS_RANK[b.status] ?? 9);
-    if (rank !== 0) return rank;
-    return (a.repoFullName ?? "").localeCompare(b.repoFullName ?? "");
+    // Then newest-first, matching the per-repo task view.
+    return (b.createdAt ?? "").localeCompare(a.createdAt ?? "");
   });
 
   const activeCount = agents.filter(

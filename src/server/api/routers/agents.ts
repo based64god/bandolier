@@ -390,6 +390,10 @@ export const agentsRouter = createTRPCRouter({
             namespace,
             repoFullName: annotations["bandolier.io/repo"] ?? null,
             displayName: annotations["bandolier.io/display-name"] ?? name,
+            // Pod creation time, used to sort the overview reverse-chronologically.
+            createdAt: pod.metadata?.creationTimestamp
+              ? new Date(pod.metadata.creationTimestamp).toISOString()
+              : null,
             source:
               pod.metadata?.labels?.["bandolier.io/source"] ?? "dashboard",
             issueNumber: annotations["bandolier.io/github-issue"] ?? null,

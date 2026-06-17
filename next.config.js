@@ -4,8 +4,24 @@
  */
 import "./src/env.js";
 
+// A unique identifier for this build. Prefer a deploy-provided commit SHA so the
+// value is stable across replicas of the same deployment; fall back to a
+// build-time timestamp, which still differs between separate builds. Baked into
+// both the client bundle and the server (via `env` below) so a running client
+// can poll /api/version and notice when a newer build has been deployed.
+const buildId =
+  process.env.BANDOLIER_BUILD_ID ??
+  process.env.SOURCE_COMMIT ??
+  process.env.GIT_COMMIT_SHA ??
+  String(Date.now());
+
 /** @type {import("next").NextConfig} */
 const config = {
+  env: {
+    NEXT_PUBLIC_BUILD_ID: buildId,
+  },
+  // Keep asset URLs aligned with the build id so a deploy busts stale chunks.
+  generateBuildId: () => buildId,
   serverExternalPackages: [
     "postgres",
     "better-auth",

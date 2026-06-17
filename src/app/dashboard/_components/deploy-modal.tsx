@@ -127,9 +127,9 @@ export function DeployModal({
   const preferredAvailable = models.some((m) => m.id === preferredModel);
   const defaultModel =
     (preferredAvailable ? preferredModel : "") ||
-    models.find((m) => /sonnet/i.test(m.id) || /sonnet/i.test(m.label))?.id ||
-    models[0]?.id ||
-    "";
+    (models.find((m) => /sonnet/i.test(m.id) || /sonnet/i.test(m.label))?.id ??
+      models[0]?.id ??
+      "");
   const effectiveModel = model || defaultModel;
   const selectedModel = models.find((m) => m.id === effectiveModel) ?? null;
   const isPreferred = !!effectiveModel && effectiveModel === preferredModel;

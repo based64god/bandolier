@@ -121,9 +121,14 @@ jobs:
       # migration, leaving the bookkeeping table out of sync. Dropping the
       # "-pooler" host suffix yields the direct endpoint; it's a no-op if the
       # secret is already a direct URL.
+      # drizzle.config.ts imports ~/env, which validates the full app schema
+      # (GitHub OAuth, auth secrets, …) at load time. Migrations only need
+      # DATABASE_URL, so skip validation — env.DATABASE_URL still resolves from
+      # process.env when skipped.
       - name: Apply migrations
         run: |
           export DATABASE_URL="${POOLED_DATABASE_URL/-pooler/}"
           pnpm db:migrate
         env:
           POOLED_DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SKIP_ENV_VALIDATION: "1"

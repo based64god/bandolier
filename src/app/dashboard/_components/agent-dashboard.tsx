@@ -71,12 +71,16 @@ function RepoSelector({
       value: r.fullName,
       searchText: r.fullName.toLowerCase(),
       label: (
-        <span className="flex w-full items-center gap-1.5">
+        // `@container` makes the children respond to the dropdown's own width.
+        // As it narrows we drop the owner first (`@max-[220px]`), then the
+        // visibility badge (`@max-[150px]`); the repo name always stays (it
+        // truncates rather than disappearing).
+        <span className="@container flex w-full items-center gap-1.5">
           <span className="min-w-0 truncate">
-            <span className="text-white/40">{owner}/</span>
+            <span className="text-white/40 @max-[220px]:hidden">{owner}/</span>
             <span className="text-white">{name}</span>
           </span>
-          <span className="ml-auto shrink-0">
+          <span className="ml-auto shrink-0 @max-[150px]:hidden">
             <VisibilityBadge isPrivate={r.private} />
           </span>
         </span>

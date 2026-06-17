@@ -95,7 +95,7 @@ export function OverviewPanel({ notify }: { notify: boolean }) {
           <thead>
             <tr className="border-b border-white/10 bg-white/5 text-left text-xs font-medium tracking-wider text-white/50 uppercase">
               {[
-                { label: "Status", width: "w-[14%]" },
+                { label: "Status", width: "w-[14%]", center: true },
                 // Wider on mobile so the output pill (Issue/PR + state glyph)
                 // fits its cell; without the extra room the fixed layout
                 // starves this column and the badge spills into Repository.
@@ -107,7 +107,7 @@ export function OverviewPanel({ notify }: { notify: boolean }) {
               ].map((h, i) => (
                 <th
                   key={i}
-                  className={`px-3 py-2 align-middle md:px-4 md:py-3 ${h.width} ${h.optional ? "hidden md:table-cell" : ""}`}
+                  className={`px-3 py-2 align-middle md:px-4 md:py-3 ${h.width} ${h.center ? "text-center" : ""} ${h.optional ? "hidden md:table-cell" : ""}`}
                 >
                   {h.label}
                 </th>
@@ -129,7 +129,7 @@ export function OverviewPanel({ notify }: { notify: boolean }) {
                   }
                 >
                   <td className="px-3 py-2 align-middle md:px-4 md:py-3">
-                    <div className="flex flex-col items-start gap-1">
+                    <div className="flex flex-col items-center gap-1">
                       <StatusBadge status={agent.status} />
                       {agent.awaitingInput && (
                         <span className="flex items-center gap-1 rounded-full border border-amber-400/50 bg-amber-400/15 px-2 py-0.5 text-xs font-medium text-amber-200">

@@ -66,7 +66,14 @@ export function TaskRow({
       </td>
 
       <td className="px-3 py-2 align-middle md:px-4 md:py-3">
-        <span className="text-sm text-white/90">{agent.displayName}</span>
+        {/* Clamped to one line so a long description can't bleed past the fixed
+            column width into the actions alongside it. */}
+        <span
+          title={agent.displayName}
+          className="block truncate text-sm text-white/90"
+        >
+          {agent.displayName}
+        </span>
       </td>
 
       <td

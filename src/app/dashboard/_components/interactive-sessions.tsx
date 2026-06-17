@@ -154,7 +154,7 @@ export function InteractiveRow({
 
         {/* Task (chevron + name) */}
         <td className="px-3 py-2 align-middle md:px-4 md:py-3">
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 items-center gap-2">
             <svg
               viewBox="0 0 16 16"
               fill="currentColor"
@@ -165,7 +165,14 @@ export function InteractiveRow({
             >
               <path d="M4.22 6.22a.75.75 0 0 1 1.06 0L8 8.94l2.72-2.72a.75.75 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 7.28a.75.75 0 0 1 0-1.06Z" />
             </svg>
-            <span className="text-sm text-white/90">{agent.displayName}</span>
+            {/* Clamped to one line so a long description can't bleed past the
+                fixed column width into the End session button alongside it. */}
+            <span
+              title={agent.displayName}
+              className="truncate text-sm text-white/90"
+            >
+              {agent.displayName}
+            </span>
           </div>
         </td>
 

@@ -19,11 +19,52 @@ const PROVIDER_LABELS = {
     label: "AWS Bedrock",
     style: "border-orange-500/40 bg-orange-500/10 text-orange-300",
   },
+  openai: {
+    label: "OpenAI API",
+    style: "border-teal-500/40 bg-teal-500/10 text-teal-300",
+  },
+  gemini: {
+    label: "Google Gemini",
+    style: "border-blue-500/40 bg-blue-500/10 text-blue-300",
+  },
   none: {
     label: "No provider configured",
     style: "border-red-500/40 bg-red-500/10 text-red-400",
   },
 } as const;
+
+// Compact source tag shown next to each model in the picker so it's clear which
+// provider it comes from.
+const PROVIDER_TAGS: Record<string, { label: string; style: string }> = {
+  anthropic: {
+    label: "Anthropic",
+    style: "border-purple-500/40 bg-purple-500/10 text-purple-300",
+  },
+  bedrock: {
+    label: "Bedrock",
+    style: "border-orange-500/40 bg-orange-500/10 text-orange-300",
+  },
+  openai: {
+    label: "OpenAI",
+    style: "border-teal-500/40 bg-teal-500/10 text-teal-300",
+  },
+  gemini: {
+    label: "Gemini",
+    style: "border-blue-500/40 bg-blue-500/10 text-blue-300",
+  },
+};
+
+function ProviderTag({ provider }: { provider: string }) {
+  const tag = PROVIDER_TAGS[provider];
+  if (!tag) return null;
+  return (
+    <span
+      className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] ${tag.style}`}
+    >
+      {tag.label}
+    </span>
+  );
+}
 
 export function DeployModal({
   onClose,
@@ -48,6 +89,10 @@ export function DeployModal({
   const [issueNumber, setIssueNumber] = useState("");
   // Interactive agents stay alive and wait for the user's input between turns.
   const [interactive, setInteractive] = useState(false);
+  // "pr" opens a pull request; "issue" opens a GitHub issue (sub-task) from the
+  // agent's findings. Issue output needs a repository to open the issue in.
+  const [outputType, setOutputType] = useState<"pr" | "issue">("pr");
+  const issueOutput = outputType === "issue";
 
   const { data: providerInfo } = api.agents.providerInfo.useQuery({
     repoFullName,
@@ -78,6 +123,7 @@ export function DeployModal({
     models[0]?.id ??
     "";
   const effectiveModel = model || defaultModel;
+  const selectedModel = models.find((m) => m.id === effectiveModel) ?? null;
 
   const utils = api.useUtils();
   const deploy = api.agents.deploy.useMutation({
@@ -104,14 +150,20 @@ export function DeployModal({
       repoFullName,
       branch,
       model: effectiveModel,
+      modelProvider: selectedModel?.provider,
       maxTurns: maxTurns ? parseInt(maxTurns, 10) : undefined,
       issueNumber: hasIssue ? parseInt(issueNumber, 10) : undefined,
       interactive: interactive || undefined,
+      outputType: issueOutput ? "issue" : undefined,
     });
   }
 
-  const provider = providerInfo?.provider ?? "none";
-  const providerMeta = PROVIDER_LABELS[provider];
+  // Badge reflects the selected model's provider so it's clear what this deploy
+  // will run on; falls back to the account's primary provider before a model
+  // loads.
+  const badgeProvider =
+    selectedModel?.provider ?? providerInfo?.provider ?? "none";
+  const providerMeta = PROVIDER_LABELS[badgeProvider];
 
   return (
     <div
@@ -130,7 +182,7 @@ export function DeployModal({
                 className={`rounded-full border px-2 py-0.5 text-xs ${providerMeta.style}`}
               >
                 {providerMeta.label}
-                {providerInfo.provider === "bedrock" && providerInfo.region
+                {badgeProvider === "bedrock" && providerInfo.region
                   ? ` · ${providerInfo.region}`
                   : ""}
               </span>
@@ -149,8 +201,8 @@ export function DeployModal({
           {/* No-provider warning */}
           {providerInfo?.provider === "none" && (
             <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
-              No model provider is configured. Add an Anthropic API key or AWS
-              Bedrock credentials in settings before deploying.
+              No model provider is configured. Add an Anthropic, OpenAI, or AWS
+              Bedrock credential in settings before deploying.
             </p>
           )}
 
@@ -230,10 +282,48 @@ export function DeployModal({
               />
               {hasIssue && (
                 <p className="text-xs text-white/40">
-                  The agent gets the issue details as context and opens a PR
-                  that closes it. The task below is optional extra context.
+                  {issueOutput
+                    ? "The agent analyses the issue and opens a sub-task issue (Part of #" +
+                      selectedIssue?.number +
+                      ") from its findings. The task below is optional extra context."
+                    : "The agent gets the issue details as context and opens a PR that closes it. The task below is optional extra context."}
                 </p>
               )}
+            </div>
+          )}
+
+          {/* Output type — what the run produces (needs a repository) */}
+          {repoFullName && (
+            <div className="space-y-1.5">
+              <label className="block text-xs font-medium text-white/60">
+                Output
+              </label>
+              <div className="flex gap-2">
+                {(
+                  [
+                    { value: "pr", label: "Pull request" },
+                    { value: "issue", label: "GitHub issue" },
+                  ] as const
+                ).map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setOutputType(opt.value)}
+                    className={`flex-1 rounded-lg border px-3 py-2 text-sm transition ${
+                      outputType === opt.value
+                        ? "border-purple-500/50 bg-purple-500/15 text-white"
+                        : "border-white/10 bg-white/5 text-white/60 hover:bg-white/10"
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-white/40">
+                {issueOutput
+                  ? "The agent explores read-only and opens a GitHub issue describing the work — no code changes."
+                  : "The agent implements the task and opens a pull request."}
+              </p>
             </div>
           )}
 
@@ -270,23 +360,29 @@ export function DeployModal({
             <label className="block text-xs font-medium text-white/60">
               Model
             </label>
-            <select
-              value={effectiveModel}
-              onChange={(e) => setModel(e.target.value)}
-              disabled={modelsLoading || models.length === 0}
-              className="w-full cursor-pointer rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white focus:border-purple-500/50 focus:outline-none disabled:opacity-50"
-            >
-              {modelsLoading && <option>Loading models…</option>}
-              {modelsError && <option>Failed to load models</option>}
-              {!modelsLoading && !modelsError && models.length === 0 && (
-                <option>No models available</option>
-              )}
-              {models.map((m) => (
-                <option key={m.id} value={m.id} className="bg-[#0a0a1a]">
-                  {m.label}
-                </option>
-              ))}
-            </select>
+            <SearchableSelect
+              options={models.map((m) => ({
+                value: m.id,
+                searchText: `${m.label} ${m.id} ${m.provider}`.toLowerCase(),
+                label: (
+                  <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
+                    <span className="truncate">{m.label}</span>
+                    <ProviderTag provider={m.provider} />
+                  </span>
+                ),
+              }))}
+              value={effectiveModel || null}
+              onChange={(v) => setModel(v ?? "")}
+              placeholder="Select a model"
+              loading={modelsLoading}
+              disabled={!modelsLoading && models.length === 0}
+              searchPlaceholder="Search models…"
+              emptyText={
+                modelsError
+                  ? "Failed to load models."
+                  : "No models available — configure a provider in settings."
+              }
+            />
           </div>
 
           {/* Repo + Branch */}

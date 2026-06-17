@@ -4,11 +4,13 @@ import { z } from "zod";
 
 import { cleanSessionToken, validateAwsCredentials } from "~/server/agents/aws";
 import { validateAnthropicKey } from "~/server/agents/anthropic";
-import { getUserGithubToken } from "~/server/agents/github-token";
 import {
-  isServerKubeconfigSet,
-  validateKubeconfig,
-} from "~/server/agents/kubeconfig";
+  summarizeGeminiCredentials,
+  validateGeminiCredentials,
+} from "~/server/agents/gemini";
+import { getUserGithubToken } from "~/server/agents/github-token";
+import { validateOpenaiKey } from "~/server/agents/openai";
+import { validateKubeconfig } from "~/server/agents/kubeconfig";
 import { canManageWebhooks } from "~/server/agents/webhook-config";
 import { type db } from "~/server/db";
 import { repoWebhookConfig } from "~/server/db/schema";
@@ -78,6 +80,7 @@ export const webhooksRouter = createTRPCRouter({
           prefix: repoWebhookConfig.prefix,
           secret: repoWebhookConfig.secret,
           agentImage: repoWebhookConfig.agentImage,
+          defaultWebhookModel: repoWebhookConfig.defaultWebhookModel,
         })
         .from(repoWebhookConfig)
         .where(eq(repoWebhookConfig.repoFullName, input.repoFullName))
@@ -90,6 +93,7 @@ export const webhooksRouter = createTRPCRouter({
         updatedAt: row?.updatedAt ?? null,
         prefix: row?.prefix ?? "",
         agentImage: row?.agentImage ?? "",
+        defaultWebhookModel: row?.defaultWebhookModel ?? null,
       };
     }),
 
@@ -150,38 +154,43 @@ export const webhooksRouter = createTRPCRouter({
       return { success: true };
     }),
 
-  // Clears the per-repo webhook secret. Preserves any other repo config (e.g. a
-  // configured agent image) by keeping the row and only nulling the secret;
-  // drops the row entirely once nothing else is set.
+  // Clears the per-repo webhook secret only. The config row also carries shared
+  // credentials (kubeconfig, model keys, AWS), the default webhook model, and the
+  // prefer flag, so it is never deleted here — only the secret is nulled — to
+  // avoid wiping that other config as collateral.
   deleteConfig: protectedProcedure
     .input(z.object({ repoFullName: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       await requireRepoAdmin(ctx, input.repoFullName);
 
-      const [row] = await ctx.db
-        .select({
-          prefix: repoWebhookConfig.prefix,
-          agentImage: repoWebhookConfig.agentImage,
+      await ctx.db
+        .update(repoWebhookConfig)
+        .set({
+          secret: null,
+          configuredBy: ctx.session.user.id,
+          updatedAt: new Date(),
         })
-        .from(repoWebhookConfig)
-        .where(eq(repoWebhookConfig.repoFullName, input.repoFullName))
-        .limit(1);
+        .where(eq(repoWebhookConfig.repoFullName, input.repoFullName));
+      return { success: true };
+    }),
 
-      const hasOtherConfig = !!row && (!!row.prefix || !!row.agentImage);
-      if (hasOtherConfig) {
-        await ctx.db
-          .update(repoWebhookConfig)
-          .set({
-            secret: null,
-            configuredBy: ctx.session.user.id,
-            updatedAt: new Date(),
-          })
-          .where(eq(repoWebhookConfig.repoFullName, input.repoFullName));
-      } else {
-        await ctx.db
-          .delete(repoWebhookConfig)
-          .where(eq(repoWebhookConfig.repoFullName, input.repoFullName));
-      }
+  // Set (or clear, with an empty string) the default model for webhook-triggered
+  // agents. Partial upsert so it doesn't clobber other webhook config. Not
+  // validated against the live model list here — selection re-checks availability
+  // at trigger time and falls back to the provider default.
+  setDefaultModel: protectedProcedure
+    .input(
+      z.object({
+        repoFullName: z.string().min(1),
+        model: z.string(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await requireRepoAdmin(ctx, input.repoFullName);
+      const value = input.model.trim() ? input.model.trim() : null;
+      await upsertRepoConfig(ctx.db, input.repoFullName, ctx.session.user.id, {
+        defaultWebhookModel: value,
+      });
       return { success: true };
     }),
 
@@ -201,6 +210,8 @@ export const webhooksRouter = createTRPCRouter({
         .select({
           kubeconfig: repoWebhookConfig.kubeconfig,
           anthropicApiKey: repoWebhookConfig.anthropicApiKey,
+          openaiApiKey: repoWebhookConfig.openaiApiKey,
+          geminiApiKey: repoWebhookConfig.geminiApiKey,
           awsAccessKeyId: repoWebhookConfig.awsAccessKeyId,
           awsSecretAccessKey: repoWebhookConfig.awsSecretAccessKey,
           awsSessionToken: repoWebhookConfig.awsSessionToken,
@@ -211,14 +222,24 @@ export const webhooksRouter = createTRPCRouter({
         .where(eq(repoWebhookConfig.repoFullName, input.repoFullName))
         .limit(1);
       const hasAws = !!row?.awsAccessKeyId && !!row.awsSecretAccessKey;
-      // A server-wide kubeconfig overrides any repo/user one, so surface that.
       return {
-        kubeconfigManagedByServer: isServerKubeconfigSet(),
         hasKubeconfig: !!row?.kubeconfig,
         anthropic: row?.anthropicApiKey
           ? {
               configured: true as const,
               apiKeyMasked: maskKey(row.anthropicApiKey),
+            }
+          : { configured: false as const },
+        openai: row?.openaiApiKey
+          ? {
+              configured: true as const,
+              apiKeyMasked: maskKey(row.openaiApiKey),
+            }
+          : { configured: false as const },
+        gemini: row?.geminiApiKey
+          ? {
+              configured: true as const,
+              ...summarizeGeminiCredentials(row.geminiApiKey),
             }
           : { configured: false as const },
         aws: hasAws
@@ -243,13 +264,6 @@ export const webhooksRouter = createTRPCRouter({
     )
     .mutation(async ({ ctx, input }) => {
       await requireRepoAdmin(ctx, input.repoFullName);
-      if (isServerKubeconfigSet()) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message:
-            "A server-wide kubeconfig is configured; it can't be overridden.",
-        });
-      }
       const validation = await validateKubeconfig(input.kubeconfig);
       if (!validation.valid) {
         throw new TRPCError({
@@ -309,6 +323,83 @@ export const webhooksRouter = createTRPCRouter({
         .update(repoWebhookConfig)
         .set({
           anthropicApiKey: null,
+          configuredBy: ctx.session.user.id,
+          updatedAt: new Date(),
+        })
+        .where(eq(repoWebhookConfig.repoFullName, input.repoFullName));
+      return { success: true };
+    }),
+
+  // Validate then store a repo-scoped OpenAI API key (used via the Codex CLI).
+  setOpenai: protectedProcedure
+    .input(
+      z.object({
+        repoFullName: z.string().min(1),
+        apiKey: z.string().min(1),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await requireRepoAdmin(ctx, input.repoFullName);
+      const validation = await validateOpenaiKey(input.apiKey);
+      if (!validation.valid) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: validation.error ?? "OpenAI API key is invalid.",
+        });
+      }
+      await upsertRepoConfig(ctx.db, input.repoFullName, ctx.session.user.id, {
+        openaiApiKey: input.apiKey,
+      });
+      return { valid: true as const };
+    }),
+
+  deleteOpenai: protectedProcedure
+    .input(z.object({ repoFullName: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      await requireRepoAdmin(ctx, input.repoFullName);
+      await ctx.db
+        .update(repoWebhookConfig)
+        .set({
+          openaiApiKey: null,
+          configuredBy: ctx.session.user.id,
+          updatedAt: new Date(),
+        })
+        .where(eq(repoWebhookConfig.repoFullName, input.repoFullName));
+      return { success: true };
+    }),
+
+  // Validate then store repo-scoped Gemini project credentials (a Google Cloud
+  // service-account key JSON, used via the Antigravity CLI).
+  setGemini: protectedProcedure
+    .input(
+      z.object({
+        repoFullName: z.string().min(1),
+        credentials: z.string().min(1),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await requireRepoAdmin(ctx, input.repoFullName);
+      const validation = await validateGeminiCredentials(input.credentials);
+      if (!validation.valid) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: validation.error ?? "Gemini credentials are invalid.",
+        });
+      }
+      await upsertRepoConfig(ctx.db, input.repoFullName, ctx.session.user.id, {
+        geminiApiKey: input.credentials,
+      });
+      return { valid: true as const };
+    }),
+
+  deleteGemini: protectedProcedure
+    .input(z.object({ repoFullName: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      await requireRepoAdmin(ctx, input.repoFullName);
+      await ctx.db
+        .update(repoWebhookConfig)
+        .set({
+          geminiApiKey: null,
           configuredBy: ctx.session.user.id,
           updatedAt: new Date(),
         })

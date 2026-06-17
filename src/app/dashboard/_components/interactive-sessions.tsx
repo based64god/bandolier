@@ -12,6 +12,7 @@ export interface InteractiveAgent {
   status: string;
   awaitingInput: boolean;
   pullRequestUrl: string | null;
+  createdIssueUrl: string | null;
 }
 
 /**
@@ -163,6 +164,16 @@ function InteractiveCard({
           onClick={(e) => e.stopPropagation()}
           className="flex shrink-0 items-center gap-2"
         >
+          {agent.createdIssueUrl && (
+            <a
+              href={agent.createdIssueUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-xs text-emerald-300 hover:bg-emerald-500/20"
+            >
+              Issue
+            </a>
+          )}
           {agent.pullRequestUrl && (
             <a
               href={agent.pullRequestUrl}

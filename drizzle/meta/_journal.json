@@ -15,6 +15,34 @@
       "when": 1781545998444,
       "tag": "0001_sleepy_iron_patriot",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1781586679765,
+      "tag": "0002_wise_speed",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1781588791548,
+      "tag": "0003_noisy_annihilus",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1781589702872,
+      "tag": "0004_nasty_george_stacy",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1781590438830,
+      "tag": "0005_bumpy_nova",
+      "breakpoints": true
     }
   ]
 }

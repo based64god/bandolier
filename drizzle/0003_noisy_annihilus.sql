@@ -1,0 +1,1 @@
+ALTER TABLE "repo_webhook_config" ADD COLUMN "openai_api_key" text;

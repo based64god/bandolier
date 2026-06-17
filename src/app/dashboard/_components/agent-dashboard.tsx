@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import { BandolierIcon } from "~/app/_components/bandolier-icon";
+import { InstallButton } from "~/app/_components/install-button";
 import { repoToNamespace } from "~/server/agents/namespace";
 import { authClient } from "~/server/better-auth/client";
 import { api } from "~/trpc/react";
@@ -188,7 +189,7 @@ export function AgentDashboard({
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-[#2e026d] to-[#15162c] text-white">
+    <div className="flex min-h-screen flex-col bg-gradient-to-b from-[#2e026d] to-[#15162c] text-white">
       {/* Header */}
       <header className="border-b border-white/10 px-6 py-4">
         <div className="flex items-center justify-between">
@@ -316,7 +317,7 @@ export function AgentDashboard({
         </div>
       </header>
 
-      <main className="space-y-6 px-6 py-6">
+      <main className="flex-1 space-y-6 px-6 py-6">
         {/* No kubeconfig — prompt to connect a cluster before anything else. */}
         {!kubeLoading && !kubeConfigured && (
           <div className="flex flex-col items-center gap-4 rounded-xl border border-sky-500/20 bg-sky-500/5 py-20 text-center">
@@ -452,7 +453,23 @@ export function AgentDashboard({
                           className="px-4 py-4 align-top"
                           onClick={(e) => e.stopPropagation()}
                         >
-                          {agent.pullRequestUrl ? (
+                          {agent.createdIssueUrl ? (
+                            <a
+                              href={agent.createdIssueUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1.5 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-xs text-emerald-300 transition hover:bg-emerald-500/20"
+                            >
+                              <svg
+                                viewBox="0 0 16 16"
+                                fill="currentColor"
+                                className="h-3.5 w-3.5"
+                              >
+                                <path d="M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0Zm0 4a1 1 0 0 1 1 1v3a1 1 0 0 1-2 0V5a1 1 0 0 1 1-1Zm0 7.5a1.1 1.1 0 1 1 0 2.2 1.1 1.1 0 0 1 0-2.2Z" />
+                              </svg>
+                              Issue
+                            </a>
+                          ) : agent.pullRequestUrl ? (
                             <a
                               href={agent.pullRequestUrl}
                               target="_blank"
@@ -523,6 +540,14 @@ export function AgentDashboard({
           </>
         )}
       </main>
+
+      {/* Footer */}
+      <footer className="border-t border-white/10 px-6 py-4">
+        <div className="flex items-center justify-between text-sm text-white/40">
+          <span>Bandolier</span>
+          <InstallButton />
+        </div>
+      </footer>
 
       {logPod && namespace && (
         <LogModal

@@ -49,6 +49,11 @@ export function unsupportedKubeconfigAuth(kubeconfig: string): string | null {
   return null;
 }
 
+/** The API-server URL of the kubeconfig's current cluster, or null. */
+export function getKubeconfigServer(kubeconfig: string): string | null {
+  return buildKubeConfig(kubeconfig).getCurrentCluster()?.server ?? null;
+}
+
 export function getCoreV1Api(kubeconfig: string): k8s.CoreV1Api {
   return buildKubeConfig(kubeconfig).makeApiClient(k8s.CoreV1Api);
 }

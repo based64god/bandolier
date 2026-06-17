@@ -11,6 +11,8 @@ export interface RepoWebhookConfig {
   prefix: string | null;
   /** Agent harness image override; null means use the server-wide default. */
   agentImage: string | null;
+  /** Default model id for webhook-triggered agents; null means provider default. */
+  defaultWebhookModel: string | null;
 }
 
 /**
@@ -22,6 +24,8 @@ export interface RepoWebhookConfig {
 export interface RepoCredentials {
   kubeconfig: string | null;
   anthropicApiKey: string | null;
+  openaiApiKey: string | null;
+  geminiApiKey: string | null;
   aws: AwsCredentials | null;
   preferRepoCredentials: boolean;
 }
@@ -35,6 +39,8 @@ export async function getRepoCredentials(
     .select({
       kubeconfig: repoWebhookConfig.kubeconfig,
       anthropicApiKey: repoWebhookConfig.anthropicApiKey,
+      openaiApiKey: repoWebhookConfig.openaiApiKey,
+      geminiApiKey: repoWebhookConfig.geminiApiKey,
       awsAccessKeyId: repoWebhookConfig.awsAccessKeyId,
       awsSecretAccessKey: repoWebhookConfig.awsSecretAccessKey,
       awsSessionToken: repoWebhookConfig.awsSessionToken,
@@ -60,6 +66,8 @@ export async function getRepoCredentials(
   return {
     kubeconfig: row.kubeconfig ?? null,
     anthropicApiKey: row.anthropicApiKey ?? null,
+    openaiApiKey: row.openaiApiKey ?? null,
+    geminiApiKey: row.geminiApiKey ?? null,
     aws,
     preferRepoCredentials: row.preferRepoCredentials,
   };
@@ -75,6 +83,7 @@ export async function getRepoWebhookConfig(
       secret: repoWebhookConfig.secret,
       prefix: repoWebhookConfig.prefix,
       agentImage: repoWebhookConfig.agentImage,
+      defaultWebhookModel: repoWebhookConfig.defaultWebhookModel,
     })
     .from(repoWebhookConfig)
     .where(eq(repoWebhookConfig.repoFullName, repoFullName))
@@ -84,12 +93,13 @@ export async function getRepoWebhookConfig(
     secret: row.secret ?? null,
     prefix: row.prefix ?? null,
     agentImage: row.agentImage ?? null,
+    defaultWebhookModel: row.defaultWebhookModel ?? null,
   };
 }
 
 /**
  * The agent harness image to use for a repo: its configured override, or null
- * when none is set (callers fall back to the server-wide HARNESS_IMAGE).
+ * when none is set (callers fall back to the built-in DEFAULT_HARNESS_IMAGE).
  */
 export async function getRepoAgentImage(
   database: typeof db,

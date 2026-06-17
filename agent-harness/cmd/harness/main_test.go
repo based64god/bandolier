@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -232,6 +235,149 @@ func TestSetEnvIfMissing(t *testing.T) {
 	})
 }
 
+func TestBuildEnvOpenAI(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "sk-openai")
+	// CODEX_API_KEY is absent in the pod, mirroring the real environment. (Setting
+	// it to "" via t.Setenv would count as present and skip the mirror.)
+	t.Setenv("CODEX_API_KEY", "placeholder")
+	_ = os.Unsetenv("CODEX_API_KEY")
+	env := buildEnv(providerOpenAI)
+	if !containsEnv(env, "CODEX_API_KEY=sk-openai") {
+		t.Errorf("buildEnv(openai) should mirror OPENAI_API_KEY to CODEX_API_KEY: %v", env)
+	}
+}
+
+func TestCodexArgs(t *testing.T) {
+	cfg := config{model: "gpt-5"}
+
+	// One-shot: no resume, ephemeral session, model + json + prompt present.
+	oneShot := codexArgs(cfg, "do the thing", false, true)
+	if oneShot[0] != "exec" {
+		t.Errorf("first arg = %q, want exec", oneShot[0])
+	}
+	joined := strings.Join(oneShot, " ")
+	if !strings.Contains(joined, "--ephemeral") {
+		t.Errorf("one-shot should be --ephemeral: %v", oneShot)
+	}
+	if strings.Contains(joined, "resume") {
+		t.Errorf("one-shot should not resume: %v", oneShot)
+	}
+	if oneShot[len(oneShot)-1] != "do the thing" {
+		t.Errorf("prompt should be the last arg: %v", oneShot)
+	}
+	if !strings.Contains(joined, "--model gpt-5") {
+		t.Errorf("model flag missing: %v", oneShot)
+	}
+
+	// Resume turn: `exec resume --last`, persisted (no --ephemeral).
+	resume := codexArgs(cfg, "next message", true, false)
+	rjoined := strings.Join(resume, " ")
+	if !strings.Contains(rjoined, "exec resume --last") {
+		t.Errorf("resume should use `exec resume --last`: %v", resume)
+	}
+	if strings.Contains(rjoined, "--ephemeral") {
+		t.Errorf("resume turn must persist (no --ephemeral): %v", resume)
+	}
+	if resume[len(resume)-1] != "next message" {
+		t.Errorf("prompt should be the last arg: %v", resume)
+	}
+}
+
+func TestFoldSystemPrompt(t *testing.T) {
+	if got := foldSystemPrompt("", "just a task"); got != "just a task" {
+		t.Errorf("no system prompt should pass the task through: %q", got)
+	}
+	got := foldSystemPrompt("FRAMING", "TASK")
+	if !strings.HasPrefix(got, "FRAMING") || !strings.HasSuffix(got, "TASK") {
+		t.Errorf("system prompt should be prepended to the task: %q", got)
+	}
+}
+
+func TestBuildEnvGemini(t *testing.T) {
+	// With no project credentials and no ANTIGRAVITY_API_KEY, a legacy
+	// GEMINI_API_KEY is mirrored so agy still finds a credential.
+	_ = os.Unsetenv("GOOGLE_PROJECT_CREDENTIALS")
+	_ = os.Unsetenv("ANTIGRAVITY_API_KEY")
+	t.Setenv("GEMINI_API_KEY", "AIza-gemini")
+	env := buildEnv(providerGemini)
+	if !containsEnv(env, "ANTIGRAVITY_API_KEY=AIza-gemini") {
+		t.Errorf("buildEnv(gemini) should mirror GEMINI_API_KEY to ANTIGRAVITY_API_KEY: %v", env)
+	}
+}
+
+func TestBuildEnvGeminiProjectCredentials(t *testing.T) {
+	// With project credentials JSON injected, buildEnv writes it to
+	// ~/.gemini/credentials.json and sets the ADC / Vertex / project env.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("GEMINI_API_KEY", "")
+	t.Setenv("ANTIGRAVITY_API_KEY", "")
+	t.Setenv("GOOGLE_PROJECT_CREDENTIALS", `{"type":"service_account","project_id":"my-proj"}`)
+
+	env := buildEnv(providerGemini)
+
+	credPath := filepath.Join(home, ".gemini", "credentials.json")
+	if !containsEnv(env, "GOOGLE_APPLICATION_CREDENTIALS="+credPath) {
+		t.Errorf("buildEnv(gemini) should point GOOGLE_APPLICATION_CREDENTIALS at the written file: %v", env)
+	}
+	if !containsEnv(env, "GOOGLE_GENAI_USE_VERTEXAI=true") {
+		t.Errorf("buildEnv(gemini) should enable Vertex mode: %v", env)
+	}
+	if !containsEnv(env, "GOOGLE_CLOUD_PROJECT=my-proj") {
+		t.Errorf("buildEnv(gemini) should derive GOOGLE_CLOUD_PROJECT from project_id: %v", env)
+	}
+	data, err := os.ReadFile(credPath)
+	if err != nil {
+		t.Fatalf("credentials file not written: %v", err)
+	}
+	if !strings.Contains(string(data), "my-proj") {
+		t.Errorf("credentials file should contain the injected JSON, got: %s", data)
+	}
+}
+
+func TestAgyArgs(t *testing.T) {
+	args := agyArgs(config{model: "gemini-2.5-pro"}, "do the thing")
+	joined := strings.Join(args, " ")
+	// -p must be immediately followed by the prompt as its own argument (no shell).
+	if len(args) < 2 || args[0] != "-p" || args[1] != "do the thing" {
+		t.Errorf("agy args should pass the prompt as the -p value: %v", args)
+	}
+	if !strings.Contains(joined, "--model gemini-2.5-pro") {
+		t.Errorf("agy args should set the model: %v", args)
+	}
+	if !strings.Contains(joined, "--dangerously-skip-permissions") {
+		t.Errorf("agy args should auto-approve tool actions: %v", args)
+	}
+}
+
+func TestHandleCodexEvent(t *testing.T) {
+	// Redirect the assistant-text sink to a buffer for the duration of the test.
+	var buf bytes.Buffer
+	orig := stdoutTee
+	stdoutTee = &buf
+	defer func() { stdoutTee = orig }()
+
+	// An agent_message item renders its text to stdout (assistant output).
+	handleCodexEvent([]byte(`{"type":"item.completed","item":{"type":"agent_message","text":"Hello world"}}`))
+	if got := strings.TrimSpace(buf.String()); got != "Hello world" {
+		t.Errorf("agent_message text = %q, want %q", got, "Hello world")
+	}
+
+	// A command_execution item is not assistant text — nothing on stdout.
+	buf.Reset()
+	handleCodexEvent([]byte(`{"type":"item.completed","item":{"type":"command_execution","command":"ls -la"}}`))
+	if buf.Len() != 0 {
+		t.Errorf("command_execution should not write to stdout, got %q", buf.String())
+	}
+
+	// Invalid JSON is ignored without panicking or writing.
+	buf.Reset()
+	handleCodexEvent([]byte(`not json`))
+	if buf.Len() != 0 {
+		t.Errorf("invalid JSON should be ignored, got %q", buf.String())
+	}
+}
+
 func containsEnv(env []string, want string) bool {
 	for _, e := range env {
 		if e == want {
@@ -290,11 +436,33 @@ func TestIsResultEvent(t *testing.T) {
 
 func TestDetectProvider(t *testing.T) {
 	// Clear all provider-selecting vars, then assert each selection path.
-	for _, k := range []string{"CLAUDE_CODE_USE_BEDROCK", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "ANTHROPIC_API_KEY"} {
+	for _, k := range []string{"CLAUDE_CODE_USE_BEDROCK", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_PROJECT_CREDENTIALS", "GOOGLE_APPLICATION_CREDENTIALS", "ANTIGRAVITY_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"} {
 		t.Setenv(k, "")
 	}
 	if got := detectProvider(); got != providerNone {
 		t.Errorf("no env → %v, want providerNone", got)
+	}
+
+	t.Setenv("GOOGLE_PROJECT_CREDENTIALS", `{"project_id":"p"}`)
+	if got := detectProvider(); got != providerGemini {
+		t.Errorf("GOOGLE_PROJECT_CREDENTIALS set → %v, want providerGemini", got)
+	}
+	t.Setenv("GOOGLE_PROJECT_CREDENTIALS", "")
+
+	t.Setenv("ANTIGRAVITY_API_KEY", "AIza-antigravity")
+	if got := detectProvider(); got != providerGemini {
+		t.Errorf("ANTIGRAVITY_API_KEY set → %v, want providerGemini", got)
+	}
+
+	t.Setenv("ANTIGRAVITY_API_KEY", "")
+	t.Setenv("GEMINI_API_KEY", "AIza-gemini")
+	if got := detectProvider(); got != providerGemini {
+		t.Errorf("legacy GEMINI_API_KEY set → %v, want providerGemini", got)
+	}
+
+	t.Setenv("OPENAI_API_KEY", "sk-openai")
+	if got := detectProvider(); got != providerOpenAI {
+		t.Errorf("OPENAI_API_KEY beats Gemini → %v, want providerOpenAI", got)
 	}
 
 	t.Setenv("CLAUDE_CODE_USE_BEDROCK", "1")
@@ -305,7 +473,7 @@ func TestDetectProvider(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_USE_BEDROCK", "")
 	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-x")
 	if got := detectProvider(); got != providerAnthropic {
-		t.Errorf("ANTHROPIC_API_KEY set → %v, want providerAnthropic", got)
+		t.Errorf("ANTHROPIC_API_KEY beats OpenAI → %v, want providerAnthropic", got)
 	}
 
 	t.Setenv("AWS_ACCESS_KEY_ID", "AKIA")

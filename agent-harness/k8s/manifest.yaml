@@ -3,7 +3,7 @@
 # The Bandolier server creates namespaces, the claude-agent ServiceAccount, and
 # per-job credential secrets dynamically at deploy time. There is NO shared,
 # pre-created credentials secret: every agent runs with the deploying user's own
-# credentials (GitHub via OAuth; AWS/Anthropic from their account settings),
+# credentials (GitHub via OAuth; AWS/Anthropic/OpenAI from their account settings),
 # stored in a short-lived per-job secret that is garbage-collected with the Job.
 #
 # This file documents the resource shapes the server produces. The Job at the
@@ -54,11 +54,6 @@ spec:
       serviceAccountName: claude-agent
       restartPolicy: Never
 
-      securityContext:
-        runAsNonRoot: true
-        runAsUser: 1000
-        fsGroup: 1000
-
       containers:
         - name: harness
           # Published by .github/workflows/agent-harness-image.yml.
@@ -103,6 +98,26 @@ spec:
                 secretKeyRef:
                   name: claude-agent-example-creds
                   key: ANTHROPIC_API_KEY
+                  optional: true
+            # OpenAI models run via the Codex CLI instead of claude; the server
+            # injects this when an OpenAI model is selected (and CLAUDE_MODEL then
+            # holds the OpenAI model id, e.g. "gpt-5").
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: claude-agent-example-creds
+                  key: OPENAI_API_KEY
+                  optional: true
+            # Gemini models run via the Antigravity CLI (agy), which authenticates
+            # against a Google Cloud project via Application Default Credentials.
+            # The server injects the project credentials JSON when a Gemini model
+            # is selected (CLAUDE_MODEL then holds the id, e.g. "gemini-2.5-pro");
+            # the harness writes it to ~/.gemini/credentials.json.
+            - name: GOOGLE_PROJECT_CREDENTIALS
+              valueFrom:
+                secretKeyRef:
+                  name: claude-agent-example-creds
+                  key: GOOGLE_PROJECT_CREDENTIALS
                   optional: true
             - name: GITHUB_TOKEN
               valueFrom:

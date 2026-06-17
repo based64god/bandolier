@@ -117,6 +117,203 @@ function AnthropicSection() {
   );
 }
 
+function OpenAISection() {
+  const utils = api.useUtils();
+  const { data: status } = api.account.openaiStatus.useQuery();
+  const [apiKey, setApiKey] = useState("");
+  const [result, setResult] = useState<string | null>(null);
+
+  const setOpenai = api.account.setOpenai.useMutation({
+    onSuccess: () => {
+      void utils.account.openaiStatus.invalidate();
+      setApiKey("");
+      setResult("Saved and verified ✓");
+    },
+  });
+  const testOpenai = api.account.testOpenai.useMutation({
+    onSuccess: (r) => setResult(r.valid ? "Valid ✓" : `Invalid: ${r.error}`),
+  });
+  const deleteOpenai = api.account.deleteOpenai.useMutation({
+    onSuccess: () => {
+      void utils.account.openaiStatus.invalidate();
+      setResult(null);
+    },
+  });
+
+  return (
+    <div className="space-y-3">
+      <h3 className="text-sm font-semibold text-teal-300">OpenAI API key</h3>
+
+      {status?.configured && (
+        <div className="flex items-center justify-between rounded-lg border border-white/10 bg-white/5 px-3 py-2.5 text-sm">
+          <code className="text-teal-300">{status.apiKeyMasked}</code>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                setResult("Testing…");
+                testOpenai.mutate();
+              }}
+              disabled={testOpenai.isPending}
+              className="rounded bg-white/10 px-2 py-1 text-xs hover:bg-white/20 disabled:opacity-50"
+            >
+              Test
+            </button>
+            <button
+              onClick={() => deleteOpenai.mutate()}
+              disabled={deleteOpenai.isPending}
+              className="rounded bg-red-500/10 px-2 py-1 text-xs text-red-400 hover:bg-red-500/20 disabled:opacity-50"
+            >
+              Remove
+            </button>
+          </div>
+        </div>
+      )}
+
+      {!status?.configured && (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            setResult(null);
+            setOpenai.mutate({ apiKey });
+          }}
+          className="flex gap-2"
+        >
+          <input
+            type="password"
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            placeholder="sk-…"
+            className="flex-1 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 focus:border-teal-500/50 focus:outline-none"
+          />
+          <button
+            type="submit"
+            disabled={setOpenai.isPending || !apiKey}
+            className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-medium hover:bg-teal-500 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {setOpenai.isPending ? "Verifying…" : "Save"}
+          </button>
+        </form>
+      )}
+
+      <StatusFeedback
+        error={
+          setOpenai.error?.message ??
+          (result?.startsWith("Invalid") ? result : null)
+        }
+        ok={result && !result.startsWith("Invalid") ? result : null}
+      />
+    </div>
+  );
+}
+
+function GeminiSection() {
+  const utils = api.useUtils();
+  const { data: status } = api.account.geminiStatus.useQuery();
+  const [credentials, setCredentials] = useState("");
+  const [result, setResult] = useState<string | null>(null);
+
+  const setGemini = api.account.setGemini.useMutation({
+    onSuccess: () => {
+      void utils.account.geminiStatus.invalidate();
+      setCredentials("");
+      setResult("Saved and verified ✓");
+    },
+  });
+  const testGemini = api.account.testGemini.useMutation({
+    onSuccess: (r) => setResult(r.valid ? "Valid ✓" : `Invalid: ${r.error}`),
+  });
+  const deleteGemini = api.account.deleteGemini.useMutation({
+    onSuccess: () => {
+      void utils.account.geminiStatus.invalidate();
+      setResult(null);
+    },
+  });
+
+  return (
+    <div className="space-y-3">
+      <h3 className="text-sm font-semibold text-blue-300">
+        Gemini (Google Cloud project credentials)
+      </h3>
+
+      {status?.configured && (
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-white/5 px-3 py-2.5 text-sm">
+          <div className="min-w-0">
+            <div className="truncate text-blue-300">
+              {status.clientEmail ?? "service account"}
+            </div>
+            {status.projectId && (
+              <div className="truncate text-xs text-white/40">
+                project: {status.projectId}
+              </div>
+            )}
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              onClick={() => {
+                setResult("Testing…");
+                testGemini.mutate();
+              }}
+              disabled={testGemini.isPending}
+              className="rounded bg-white/10 px-2 py-1 text-xs hover:bg-white/20 disabled:opacity-50"
+            >
+              Test
+            </button>
+            <button
+              onClick={() => deleteGemini.mutate()}
+              disabled={deleteGemini.isPending}
+              className="rounded bg-red-500/10 px-2 py-1 text-xs text-red-400 hover:bg-red-500/20 disabled:opacity-50"
+            >
+              Remove
+            </button>
+          </div>
+        </div>
+      )}
+
+      {!status?.configured && (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            setResult(null);
+            setGemini.mutate({ credentials });
+          }}
+          className="space-y-2"
+        >
+          <p className="text-xs text-white/40">
+            Paste a Google Cloud service-account key (JSON). The agent
+            authenticates to your project via Application Default Credentials.
+          </p>
+          <textarea
+            rows={6}
+            value={credentials}
+            onChange={(e) => setCredentials(e.target.value)}
+            placeholder={
+              '{\n  "type": "service_account",\n  "project_id": "…",\n  "client_email": "…",\n  "private_key": "-----BEGIN PRIVATE KEY-----…"\n}'
+            }
+            className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 font-mono text-xs text-white placeholder-white/25 focus:border-blue-500/50 focus:outline-none"
+          />
+          <div className="flex justify-end">
+            <button
+              type="submit"
+              disabled={setGemini.isPending || !credentials}
+              className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {setGemini.isPending ? "Verifying…" : "Save"}
+            </button>
+          </div>
+        </form>
+      )}
+
+      <StatusFeedback
+        error={
+          setGemini.error?.message ??
+          (result?.startsWith("Invalid") ? result : null)
+        }
+        ok={result && !result.startsWith("Invalid") ? result : null}
+      />
+    </div>
+  );
+}
+
 function AwsSection() {
   const utils = api.useUtils();
   const { data: status } = api.account.awsStatus.useQuery();
@@ -296,9 +493,6 @@ function KubeconfigSection() {
       setResult(null);
     },
   });
-
-  // A server-wide kubeconfig is in effect — users can't configure their own.
-  if (status?.managedByServer) return null;
 
   return (
     <div className="space-y-3 border-t border-white/10 pt-6">
@@ -536,11 +730,17 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
         <div className="space-y-6 px-5 py-5">
           <p className="text-xs text-white/40">
-            Configure how your agents reach Claude. AWS Bedrock takes precedence
-            when both are set; otherwise your Anthropic key is used. Credentials
-            are verified before they&apos;re saved and again before each deploy.
+            Configure how your agents reach their model. For Claude, AWS Bedrock
+            takes precedence when both are set; otherwise your Anthropic key is
+            used. OpenAI keys and Gemini project credentials add their models to
+            the picker alongside Claude — you choose per deploy. Credentials are
+            verified before they&apos;re saved and again before each deploy.
           </p>
           <AnthropicSection />
+          <div className="border-t border-white/10" />
+          <OpenAISection />
+          <div className="border-t border-white/10" />
+          <GeminiSection />
           <div className="border-t border-white/10" />
           <AwsSection />
           <KubeconfigSection />

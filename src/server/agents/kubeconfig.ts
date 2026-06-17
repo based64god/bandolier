@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
 
 import { eq } from "drizzle-orm";
 
@@ -6,13 +7,67 @@ import { env } from "~/env";
 import { getRepoCredentials } from "~/server/agents/webhook-config";
 import { type db } from "~/server/db";
 import { userKubeconfig } from "~/server/db/schema";
-import { getVersionApi, unsupportedKubeconfigAuth } from "~/server/k8s/client";
+import {
+  getKubeconfigServer,
+  getVersionApi,
+  unsupportedKubeconfigAuth,
+} from "~/server/k8s/client";
 
 export interface KubeconfigValidation {
   valid: boolean;
   /** The Kubernetes server version when reachable (e.g. "v1.31.0"). */
   version?: string;
   error?: string;
+}
+
+/**
+ * Whether an IP is in the link-local range (IPv4 169.254.0.0/16, IPv6 fe80::/10),
+ * which is where cloud instance-metadata services live (e.g. 169.254.169.254).
+ * Such addresses are never a legitimate Kubernetes API server, so we block the
+ * validation probe from reaching them — that's the credential-theft SSRF target.
+ * Note we deliberately do NOT block other private ranges (10/8, 192.168/16,
+ * 127/8, …): those are legitimate on-prem / local (kind, minikube) clusters.
+ */
+function isMetadataAddress(ip: string): boolean {
+  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(ip);
+  const v4 = mapped?.[1] ?? ip;
+  if (isIP(v4) === 4) {
+    const [a, b] = v4.split(".").map(Number);
+    return a === 169 && b === 254;
+  }
+  return ip.toLowerCase().startsWith("fe80");
+}
+
+/**
+ * Guards the server-side validation probe against SSRF to a cloud metadata
+ * endpoint: rejects when the cluster server is (or resolves to) a link-local
+ * address. Throws with a clear message; a DNS-resolution failure is left for the
+ * probe itself to report as "unreachable".
+ */
+async function assertNotMetadataHost(serverUrl: string): Promise<void> {
+  let host: string;
+  try {
+    host = new URL(serverUrl).hostname.replace(/^\[|\]$/g, "");
+  } catch {
+    return; // malformed URL — the probe will surface a clear error
+  }
+
+  if (isIP(host)) {
+    if (isMetadataAddress(host)) {
+      throw new Error("cluster server points at a link-local/metadata address");
+    }
+    return;
+  }
+
+  let addresses: { address: string }[];
+  try {
+    addresses = await lookup(host, { all: true });
+  } catch {
+    return; // unresolvable — leave it to the probe
+  }
+  if (addresses.some((a) => isMetadataAddress(a.address))) {
+    throw new Error("cluster server resolves to a link-local/metadata address");
+  }
 }
 
 /**
@@ -47,6 +102,23 @@ export async function validateKubeconfig(
     };
   }
 
+  // SSRF guard: this probe runs from the web server (not the sandboxed pod), so
+  // block it from hitting a cloud metadata endpoint via a crafted server URL.
+  const server = getKubeconfigServer(kubeconfig);
+  if (server) {
+    try {
+      await assertNotMetadataHost(server);
+    } catch (err) {
+      return {
+        valid: false,
+        error:
+          err instanceof Error
+            ? `Invalid kubeconfig: ${err.message}`
+            : "Cluster server address is not allowed.",
+      };
+    }
+  }
+
   try {
     const info = await api.getCode();
     return { valid: true, version: info.gitVersion };
@@ -72,42 +144,18 @@ export async function getUserKubeconfig(
   return row?.kubeconfig ?? null;
 }
 
-/** Whether a server-wide kubeconfig is configured (disables per-user config). */
-export function isServerKubeconfigSet(): boolean {
-  return !!env.SERVER_KUBECONFIG;
-}
-
 /**
- * The server-wide kubeconfig content, or null if not configured. SERVER_KUBECONFIG
- * may be inline YAML or a path to a kubeconfig file.
- */
-export function getServerKubeconfig(): string | null {
-  const value = env.SERVER_KUBECONFIG;
-  if (!value) return null;
-  // Inline YAML starts with apiVersion; otherwise treat it as a file path.
-  return value.trimStart().startsWith("apiVersion")
-    ? value
-    : readFileSync(value, "utf8");
-}
-
-/**
- * Resolves the kubeconfig to use. Precedence:
- *  1. the server-wide kubeconfig, when configured (always overrides);
- *  2. otherwise the repo-scoped one vs. the user's own, ordered by the repo's
- *     `preferRepoCredentials` flag (repo first when set, user first otherwise),
- *     falling back to whichever is present;
- *  3. null when none is set.
+ * Resolves the kubeconfig to use. The repo-scoped one and the user's own are
+ * ordered by the repo's `preferRepoCredentials` flag (repo first when set, user
+ * first otherwise), falling back to whichever is present; null when neither is.
  * `repoFullName` is optional — omit it for contexts with no repo (e.g. the
- * cross-repo overview), which then only considers the server/user configs.
+ * cross-repo overview), which then only considers the user's config.
  */
 export async function resolveKubeconfig(
   database: typeof db,
   userId: string,
   repoFullName?: string,
 ): Promise<string | null> {
-  const server = getServerKubeconfig();
-  if (server) return server;
-
   const userKc = await getUserKubeconfig(database, userId);
   const repo = repoFullName
     ? await getRepoCredentials(database, repoFullName)

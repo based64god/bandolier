@@ -9,16 +9,23 @@ import {
 import { cleanSessionToken, validateAwsCredentials } from "~/server/agents/aws";
 import {
   getUserKubeconfig,
-  isServerKubeconfigSet,
   resolveKubeconfig,
   validateKubeconfig,
 } from "~/server/agents/kubeconfig";
+import {
+  getUserGeminiKey,
+  summarizeGeminiCredentials,
+  validateGeminiCredentials,
+} from "~/server/agents/gemini";
+import { getUserOpenaiKey, validateOpenaiKey } from "~/server/agents/openai";
 import { getUserAwsCredentials } from "~/server/agents/user-aws";
 import { getRepoCredentials } from "~/server/agents/webhook-config";
 import {
   userAnthropicCredentials,
   userAwsCredentials,
+  userGeminiCredentials,
   userKubeconfig,
+  userOpenaiCredentials,
 } from "~/server/db/schema";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
 
@@ -151,6 +158,94 @@ export const accountRouter = createTRPCRouter({
     return { success: true };
   }),
 
+  // ── OpenAI API key ────────────────────────────────────────────────────────
+
+  openaiStatus: protectedProcedure.query(async ({ ctx }) => {
+    const key = await getUserOpenaiKey(ctx.db, ctx.session.user.id);
+    if (!key) return { configured: false as const };
+    return { configured: true as const, apiKeyMasked: maskKey(key) };
+  }),
+
+  testOpenai: protectedProcedure.mutation(async ({ ctx }) => {
+    const key = await getUserOpenaiKey(ctx.db, ctx.session.user.id);
+    if (!key) return { valid: false as const, error: "No API key configured." };
+    return validateOpenaiKey(key);
+  }),
+
+  setOpenai: protectedProcedure
+    .input(z.object({ apiKey: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      const validation = await validateOpenaiKey(input.apiKey);
+      if (!validation.valid) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: validation.error ?? "OpenAI API key is invalid.",
+        });
+      }
+
+      await ctx.db
+        .insert(userOpenaiCredentials)
+        .values({ userId: ctx.session.user.id, apiKey: input.apiKey })
+        .onConflictDoUpdate({
+          target: userOpenaiCredentials.userId,
+          set: { apiKey: input.apiKey, updatedAt: new Date() },
+        });
+
+      return { valid: true as const };
+    }),
+
+  deleteOpenai: protectedProcedure.mutation(async ({ ctx }) => {
+    await ctx.db
+      .delete(userOpenaiCredentials)
+      .where(eq(userOpenaiCredentials.userId, ctx.session.user.id));
+    return { success: true };
+  }),
+
+  // ── Gemini project credentials ──────────────────────────────────────────────
+
+  geminiStatus: protectedProcedure.query(async ({ ctx }) => {
+    const creds = await getUserGeminiKey(ctx.db, ctx.session.user.id);
+    if (!creds) return { configured: false as const };
+    const { projectId, clientEmail } = summarizeGeminiCredentials(creds);
+    return { configured: true as const, projectId, clientEmail };
+  }),
+
+  testGemini: protectedProcedure.mutation(async ({ ctx }) => {
+    const creds = await getUserGeminiKey(ctx.db, ctx.session.user.id);
+    if (!creds)
+      return { valid: false as const, error: "No credentials configured." };
+    return validateGeminiCredentials(creds);
+  }),
+
+  setGemini: protectedProcedure
+    .input(z.object({ credentials: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      const validation = await validateGeminiCredentials(input.credentials);
+      if (!validation.valid) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: validation.error ?? "Gemini credentials are invalid.",
+        });
+      }
+
+      await ctx.db
+        .insert(userGeminiCredentials)
+        .values({ userId: ctx.session.user.id, apiKey: input.credentials })
+        .onConflictDoUpdate({
+          target: userGeminiCredentials.userId,
+          set: { apiKey: input.credentials, updatedAt: new Date() },
+        });
+
+      return { valid: true as const };
+    }),
+
+  deleteGemini: protectedProcedure.mutation(async ({ ctx }) => {
+    await ctx.db
+      .delete(userGeminiCredentials)
+      .where(eq(userGeminiCredentials.userId, ctx.session.user.id));
+    return { success: true };
+  }),
+
   // ── Kubeconfig ────────────────────────────────────────────────────────────
 
   kubeconfigStatus: protectedProcedure
@@ -159,28 +254,21 @@ export const accountRouter = createTRPCRouter({
     // in which case the "Configure kubeconfig" prompt shouldn't render.
     .input(z.object({ repoFullName: z.string().optional() }).optional())
     .query(async ({ ctx, input }) => {
-      const managedByServer = isServerKubeconfigSet();
-      if (managedByServer) {
-        return {
-          managedByServer: true as const,
-          managedByRepo: false as const,
-          configured: true,
-        };
-      }
-
       // When the selected repo prefers its own shared credentials and has a set
       // configured, cluster access is the repo admin's responsibility — the
-      // user must never be prompted to configure their own kubeconfig. Mirrors
-      // `managedByServer`.
+      // user must never be prompted to configure their own kubeconfig.
       const repo = input?.repoFullName
         ? await getRepoCredentials(ctx.db, input.repoFullName)
         : null;
       const managedByRepo =
         !!repo?.preferRepoCredentials &&
-        (!!repo.kubeconfig || !!repo.anthropicApiKey || !!repo.aws);
+        (!!repo.kubeconfig ||
+          !!repo.anthropicApiKey ||
+          !!repo.openaiApiKey ||
+          !!repo.geminiApiKey ||
+          !!repo.aws);
       if (managedByRepo) {
         return {
-          managedByServer: false as const,
           managedByRepo: true as const,
           configured: true,
         };
@@ -192,7 +280,6 @@ export const accountRouter = createTRPCRouter({
         input?.repoFullName,
       );
       return {
-        managedByServer: false as const,
         managedByRepo: false as const,
         configured: !!kc,
       };
@@ -208,14 +295,6 @@ export const accountRouter = createTRPCRouter({
   setKubeconfig: protectedProcedure
     .input(z.object({ kubeconfig: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
-      if (isServerKubeconfigSet()) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message:
-            "A server-wide kubeconfig is configured; it can't be overridden.",
-        });
-      }
-
       const validation = await validateKubeconfig(input.kubeconfig);
       if (!validation.valid) {
         throw new TRPCError({

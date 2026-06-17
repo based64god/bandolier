@@ -85,15 +85,9 @@ BETTER_AUTH_GITHUB_CLIENT_SECRET="…"
 
 # Local Postgres (matches start-database.sh below)
 DATABASE_URL="postgresql://postgres:password@localhost:5432/bandolier"
-
-# Image the agent Jobs run. Use the published image, or build your own (below).
-HARNESS_IMAGE="ghcr.io/based64god/bandolier-agent-harness:latest"
 ```
 
-You also need a cluster for agents to deploy into. Either:
-
-- Set **`SERVER_KUBECONFIG`** (inline YAML or a path to a kubeconfig file) so *all* agents deploy to one cluster — and the per-user kubeconfig setting is hidden, or
-- Leave it unset and have **each user paste their own kubeconfig** in the app's settings.
+You also need a cluster for agents to deploy into: **each user pastes their own kubeconfig** in the app's settings, or a repo admin configures a shared kubeconfig for a repo in its settings.
 
 See [Configuration reference](#configuration-reference) for every variable.
 
@@ -117,7 +111,7 @@ Open <http://localhost:3000> and sign in with GitHub.
 Open **Settings** in the dashboard and add:
 
 - **A model provider** — either AWS Bedrock credentials or an Anthropic API key. Credentials are validated before they're saved, and the model picker is populated live from whichever provider you configured.
-- **A kubeconfig** — unless the server set `SERVER_KUBECONFIG` for everyone.
+- **A kubeconfig** — the cluster your agents deploy into (a repo can also provide a shared one).
 
 You can now select a repo, deploy an agent, and watch it work.
 
@@ -125,27 +119,14 @@ You can now select a repo, deploy an agent, and watch it work.
 
 ## The agent harness image
 
-Agent Jobs run the image named by `HARNESS_IMAGE`. You can use the prebuilt image or build your own.
+Agent Jobs run a built-in default image, `ghcr.io/based64god/bandolier-agent-harness:latest` (built and pushed by `.github/workflows/agent-harness-image.yml` on pushes to `main` and version tags). Pods always pull it (`imagePullPolicy: Always`).
 
-**Use the published image** (built and pushed by `.github/workflows/agent-harness-image.yml` on pushes to `main` and version tags):
-
-```bash
-HARNESS_IMAGE="ghcr.io/based64god/bandolier-agent-harness:latest"
-```
-
-**Build it yourself:**
+To run a custom build, set a per-repo **agent image** override in the repo's settings. Because pods always pull, the image must be pushed to a registry the cluster can reach:
 
 ```bash
-docker build -t bandolier-agent-harness:latest agent-harness
+docker build -t <your-registry>/bandolier-agent-harness:latest agent-harness
+docker push <your-registry>/bandolier-agent-harness:latest
 ```
-
-If you're on a local cluster, the image must be loadable by the cluster. For kind:
-
-```bash
-kind load docker-image bandolier-agent-harness:latest
-```
-
-Then set `HARNESS_IMAGE="bandolier-agent-harness:latest"` and `HARNESS_IMAGE_PULL_POLICY="IfNotPresent"`. When pulling from a remote registry instead, use `HARNESS_IMAGE_PULL_POLICY="Always"`.
 
 `agent-harness/k8s/manifest.yaml` is a standalone reference Job you can apply directly to test the image in isolation; the running app generates equivalent Jobs itself and does not use that file.
 
@@ -199,10 +180,9 @@ All server configuration is validated in `src/env.js`.
 | Variable | Default | Description |
 | --- | --- | --- |
 | `BETTER_AUTH_URL` | `http://localhost:3000` | Public base URL of the app. |
-| `HARNESS_IMAGE` | `ghcr.io/based64god/bandolier-agent-harness:latest` | Container image agent Jobs run. |
-| `HARNESS_IMAGE_PULL_POLICY` | `IfNotPresent` | `Always` when pulling from a remote registry. |
-| `SERVER_KUBECONFIG` | _(unset)_ | Inline YAML or path. When set, all agents use this cluster and users can't set their own. |
-| `K8S_NAMESPACE` | `claude-agents` | Default namespace when one isn't derived from the repo. |
+| `K8S_LABEL_SELECTOR` | `app=claude-agent` | Label selector identifying Bandolier-managed agent pods. |
+
+The harness image (`ghcr.io/based64god/bandolier-agent-harness:latest`, always pulled) is a built-in default, overridable per repo in repo settings. The agent namespace is derived from the repo (default `claude-agents`). Neither is configured via environment variables.
 
 ### Agent isolation
 

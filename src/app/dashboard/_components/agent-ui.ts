@@ -37,12 +37,27 @@ export function isAgentDone(status: string): boolean {
   return DONE_STATUSES.has(status);
 }
 
-// Time left until the finished job is garbage-collected. Null/running → "—".
-export function expiresIn(expiresAt: string | null): string {
+// When the finished job will be garbage-collected, shown as a local clock time
+// (e.g. "3:25 PM"). Null/running → "—"; an already-passed expiry → "expiring…".
+// The date is appended when the expiry doesn't fall on the current local day, so
+// far-off times aren't mistaken for today.
+export function expiresAtLocal(expiresAt: string | null): string {
   if (!expiresAt) return "—";
-  const secs = Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000);
-  if (secs <= 0) return "expiring…";
-  if (secs < 60) return `${secs}s`;
-  if (secs < 3600) return `${Math.floor(secs / 60)}m`;
-  return `${Math.floor(secs / 3600)}h ${Math.floor((secs % 3600) / 60)}m`;
+  const when = new Date(expiresAt);
+  if (when.getTime() <= Date.now()) return "expiring…";
+  const now = new Date();
+  const sameDay =
+    when.getFullYear() === now.getFullYear() &&
+    when.getMonth() === now.getMonth() &&
+    when.getDate() === now.getDate();
+  const time = when.toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  if (sameDay) return time;
+  const date = when.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
+  return `${date}, ${time}`;
 }

@@ -8,6 +8,7 @@ import {
   getGithubAccountByGithubId,
   githubGitIdentity,
 } from "~/server/agents/github-token";
+import { postIssueComment } from "~/server/agents/github-issues";
 import { resolveKubeconfig } from "~/server/agents/kubeconfig";
 import {
   fuzzyPickModel,
@@ -289,7 +290,7 @@ async function handleIssueOpened(
   // GitHub links them to that account regardless of the sender's email privacy.
   const gitIdentity = githubGitIdentity(sender.id, sender.login);
 
-  await createAgentJob({
+  const jobName = await createAgentJob({
     namespace: repoToNamespace(repository.full_name),
     // Build the prompt here (no operator context): the issue context is stored
     // as CLAUDE_TASK and shown in the dashboard; the instructional framing goes
@@ -327,6 +328,31 @@ async function handleIssueOpened(
     kubeconfig,
     agentImage: agentImage ?? undefined,
   });
+
+  // Notify the issue author that the task was received and is being worked on.
+  if (linked.accessToken) {
+    const taskUrl = `${env.BETTER_AUTH_URL}/repo/${repository.full_name}`;
+    const commentBody =
+      `🤖 Bando picked up this issue and is working on it.\n\n` +
+      `[View task on the dashboard](${taskUrl}) (job: \`${jobName}\`)`;
+    try {
+      await postIssueComment(
+        linked.accessToken,
+        repository.full_name,
+        issue.number,
+        commentBody,
+      );
+      console.log("[bandolier:webhook] issue comment posted", {
+        issue: issue.number,
+        job: jobName,
+      });
+    } catch (err) {
+      console.warn("[bandolier:webhook] failed to post issue comment", {
+        issue: issue.number,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
 }
 
 // ── Route handler ─────────────────────────────────────────────────────────────

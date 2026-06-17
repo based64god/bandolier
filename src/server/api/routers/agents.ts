@@ -8,7 +8,11 @@ import { z } from "zod";
 import { env } from "~/env";
 import { getArtifact } from "~/server/agents/artifacts";
 import { validateAwsCredentials } from "~/server/agents/aws";
-import { getIssue } from "~/server/agents/github-issues";
+import {
+  getGithubItemState,
+  getIssue,
+  type GithubItemState,
+} from "~/server/agents/github-issues";
 import { SPAWNED_BY_LABEL, spawnedByLabelValue } from "~/server/agents/labels";
 import {
   buildIssueSystemPrompt,
@@ -182,8 +186,49 @@ async function assertOwnsInteractiveJob(
   }
 }
 
+/**
+ * Resolves the open/closed/merged state of a created PR, created issue, and
+ * source issue for a task. Best-effort: without a GitHub token (or on an API
+ * failure) the states stay null and the badges render without an indicator.
+ */
+async function resolveItemStates(
+  githubToken: string | null,
+  urls: {
+    pullRequestUrl: string | null;
+    createdIssueUrl: string | null;
+    issueUrl: string | null;
+  },
+): Promise<{
+  pullRequestState: GithubItemState | null;
+  createdIssueState: GithubItemState | null;
+  issueState: GithubItemState | null;
+}> {
+  if (!githubToken) {
+    return {
+      pullRequestState: null,
+      createdIssueState: null,
+      issueState: null,
+    };
+  }
+  const [pullRequestState, createdIssueState, issueState] = await Promise.all([
+    urls.pullRequestUrl
+      ? getGithubItemState(githubToken, urls.pullRequestUrl)
+      : null,
+    urls.createdIssueUrl
+      ? getGithubItemState(githubToken, urls.createdIssueUrl)
+      : null,
+    urls.issueUrl ? getGithubItemState(githubToken, urls.issueUrl) : null,
+  ]);
+  return { pullRequestState, createdIssueState, issueState };
+}
+
 /** Maps a pod into the task shape returned by `list`/`get` (reads logs once). */
-async function podToTask(pod: V1Pod, namespace: string, kubeconfig: string) {
+async function podToTask(
+  pod: V1Pod,
+  namespace: string,
+  kubeconfig: string,
+  githubToken: string | null,
+) {
   const annotations = pod.metadata?.annotations ?? {};
   const name = pod.metadata?.name ?? "unknown";
   const status = pod.status?.phase ?? "Unknown";
@@ -208,6 +253,14 @@ async function podToTask(pod: V1Pod, namespace: string, kubeconfig: string) {
 
   const creationTimestamp = pod.metadata?.creationTimestamp;
 
+  const issueUrl = annotations["bandolier.io/issue-url"] ?? null;
+  const { pullRequestState, createdIssueState, issueState } =
+    await resolveItemStates(githubToken, {
+      pullRequestUrl,
+      createdIssueUrl,
+      issueUrl,
+    });
+
   return {
     name,
     jobName: pod.metadata?.labels?.["bandolier.io/job"] ?? name,
@@ -220,13 +273,16 @@ async function podToTask(pod: V1Pod, namespace: string, kubeconfig: string) {
     prompt,
     source: pod.metadata?.labels?.["bandolier.io/source"] ?? "dashboard",
     issueNumber: annotations["bandolier.io/github-issue"] ?? null,
-    issueUrl: annotations["bandolier.io/issue-url"] ?? null,
+    issueUrl,
     createdBy: annotations["bandolier.io/created-by"] ?? null,
     status,
     currently,
     expiresAt,
     pullRequestUrl,
+    pullRequestState,
     createdIssueUrl,
+    createdIssueState,
+    issueState,
     outputType:
       pod.metadata?.annotations?.["bandolier.io/output-type"] === "issue"
         ? ("issue" as const)
@@ -300,6 +356,7 @@ export const agentsRouter = createTRPCRouter({
   overview: protectedProcedure.query(async ({ ctx }) => {
     const userId = ctx.session.user.id;
     const kubeconfig = await requireKubeconfig(ctx.db, userId);
+    const githubToken = await getUserGithubToken(ctx.db, userId);
 
     try {
       const res = await getCoreV1Api(kubeconfig).listPodForAllNamespaces({
@@ -320,6 +377,14 @@ export const agentsRouter = createTRPCRouter({
           const interactive =
             pod.metadata?.labels?.[INTERACTIVE_LABEL] === "true";
 
+          const issueUrl = annotations["bandolier.io/issue-url"] ?? null;
+          const { pullRequestState, createdIssueState, issueState } =
+            await resolveItemStates(githubToken, {
+              pullRequestUrl,
+              createdIssueUrl,
+              issueUrl,
+            });
+
           return {
             name,
             namespace,
@@ -328,11 +393,14 @@ export const agentsRouter = createTRPCRouter({
             source:
               pod.metadata?.labels?.["bandolier.io/source"] ?? "dashboard",
             issueNumber: annotations["bandolier.io/github-issue"] ?? null,
-            issueUrl: annotations["bandolier.io/issue-url"] ?? null,
+            issueUrl,
             createdBy: annotations["bandolier.io/created-by"] ?? null,
             status,
             pullRequestUrl,
+            pullRequestState,
             createdIssueUrl,
+            createdIssueState,
+            issueState,
             outputType:
               annotations["bandolier.io/output-type"] === "issue"
                 ? ("issue" as const)
@@ -365,13 +433,19 @@ export const agentsRouter = createTRPCRouter({
         ctx.session.user.id,
         input.repoFullName,
       );
+      const githubToken = await getUserGithubToken(
+        ctx.db,
+        ctx.session.user.id,
+      );
       try {
         const res = await getCoreV1Api(kubeconfig).listNamespacedPod({
           namespace: input.namespace,
           labelSelector: LABEL_SELECTOR,
         });
         return await Promise.all(
-          res.items.map((pod) => podToTask(pod, input.namespace, kubeconfig)),
+          res.items.map((pod) =>
+            podToTask(pod, input.namespace, kubeconfig, githubToken),
+          ),
         );
       } catch (err) {
         throw new TRPCError({
@@ -409,7 +483,11 @@ export const agentsRouter = createTRPCRouter({
             message: `Task ${input.jobName} not found`,
           });
         }
-        return await podToTask(pod, input.namespace, kubeconfig);
+        const githubToken = await getUserGithubToken(
+          ctx.db,
+          ctx.session.user.id,
+        );
+        return await podToTask(pod, input.namespace, kubeconfig, githubToken);
       } catch (err) {
         if (err instanceof TRPCError) throw err;
         throw new TRPCError({

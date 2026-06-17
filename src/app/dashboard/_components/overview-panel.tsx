@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { api } from "~/trpc/react";
 import { STATUS_STYLES } from "./agent-ui";
 import { useAwaitingInputAlerts, useCompletionAlerts } from "./notifications";
+import { OutputBadge, SourceBadge } from "./output-badge";
 
 // Active agents float to the top; finished ones sort by soonest expiry.
 const STATUS_RANK: Record<string, number> = {
@@ -138,21 +139,14 @@ export function OverviewPanel({ notify }: { notify: boolean }) {
                     </span>
                   </td>
                   <td className="px-4 py-4 align-top">
-                    {agent.source === "github-issue" && agent.issueUrl ? (
-                      <a
-                        href={agent.issueUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={(e) => e.stopPropagation()}
-                        className="inline-flex items-center gap-1.5 rounded-md border border-sky-500/30 bg-sky-500/10 px-2 py-1 text-xs text-sky-300 transition hover:bg-sky-500/20"
-                      >
-                        Issue #{agent.issueNumber}
-                      </a>
-                    ) : (
-                      <span className="text-xs text-white/50">
-                        {agent.createdBy ?? "Dashboard"}
-                      </span>
-                    )}
+                    <SourceBadge
+                      source={agent.source}
+                      issueUrl={agent.issueUrl}
+                      issueNumber={agent.issueNumber}
+                      issueState={agent.issueState}
+                      createdBy={agent.createdBy}
+                      onClick={(e) => e.stopPropagation()}
+                    />
                   </td>
                   <td className="px-4 py-4 align-top">
                     <div className="flex flex-col items-start gap-1">
@@ -173,41 +167,14 @@ export function OverviewPanel({ notify }: { notify: boolean }) {
                     className="px-4 py-4 align-top"
                     onClick={(e) => e.stopPropagation()}
                   >
-                    {agent.createdIssueUrl ? (
-                      <a
-                        href={agent.createdIssueUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1.5 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-xs text-emerald-300 transition hover:bg-emerald-500/20"
-                      >
-                        <svg
-                          viewBox="0 0 16 16"
-                          fill="currentColor"
-                          className="h-3.5 w-3.5"
-                        >
-                          <path d="M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0Zm0 4a1 1 0 0 1 1 1v3a1 1 0 0 1-2 0V5a1 1 0 0 1 1-1Zm0 7.5a1.1 1.1 0 1 1 0 2.2 1.1 1.1 0 0 1 0-2.2Z" />
-                        </svg>
-                        Issue
-                      </a>
-                    ) : agent.pullRequestUrl ? (
-                      <a
-                        href={agent.pullRequestUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1.5 rounded-md border border-purple-500/30 bg-purple-500/10 px-2 py-1 text-xs text-purple-300 transition hover:bg-purple-500/20"
-                      >
-                        <svg
-                          viewBox="0 0 16 16"
-                          fill="currentColor"
-                          className="h-3.5 w-3.5"
-                        >
-                          <path d="M5 3.25a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Zm0 2.122a2.25 2.25 0 1 0-1.5 0v5.256a2.251 2.251 0 1 0 1.5 0V5.372ZM5 12.75a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Zm6-2.626a2.251 2.251 0 1 0 1.5 0V6.75A3.75 3.75 0 0 0 8.75 3H7.81l.72-.72a.75.75 0 0 0-1.06-1.06L5.22 3.47a.75.75 0 0 0 0 1.06l2.25 2.25a.75.75 0 0 0 1.06-1.06l-.72-.72h.94A2.25 2.25 0 0 1 11 6.75v3.374Zm.75 3.314a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5Z" />
-                        </svg>
-                        Pull request
-                      </a>
-                    ) : (
-                      <span className="text-xs text-white/20">—</span>
-                    )}
+                    <OutputBadge
+                      createdIssueUrl={agent.createdIssueUrl}
+                      createdIssueState={agent.createdIssueState}
+                      pullRequestUrl={agent.pullRequestUrl}
+                      pullRequestState={agent.pullRequestState}
+                      showIcon
+                      prLabel="Pull request"
+                    />
                   </td>
                 </tr>
               );

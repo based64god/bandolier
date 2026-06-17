@@ -366,7 +366,7 @@ export function DeployModal({
                 searchText: `${m.label} ${m.id} ${m.provider}`.toLowerCase(),
                 label: (
                   <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
-                    <span className="truncate">{m.label}</span>
+                    <span className="truncate text-white">{m.label}</span>
                     <ProviderTag provider={m.provider} />
                   </span>
                 ),

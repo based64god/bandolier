@@ -16,42 +16,11 @@ export interface InteractiveAgent {
 }
 
 /**
- * Renders interactive agents as live cards pinned to the top of the dashboard:
- * streamed logs, an input box, and a prominent "waiting for input" state.
+ * Renders an interactive agent as a live card within the task list: streamed
+ * logs, an input box, and a prominent "waiting for input" state. Expands and
+ * collapses in place, and auto-expands when it starts awaiting input.
  */
-export function InteractiveSessions({
-  agents,
-  namespace,
-  repoFullName,
-}: {
-  agents: InteractiveAgent[];
-  namespace: string;
-  repoFullName?: string;
-}) {
-  if (agents.length === 0) return null;
-  return (
-    <section className="space-y-3">
-      <h2 className="flex items-center gap-2 text-xs font-medium tracking-wider text-white/40 uppercase">
-        Interactive sessions
-        <span className="rounded-full bg-white/10 px-1.5 text-[10px] text-white/50">
-          {agents.length}
-        </span>
-      </h2>
-      <div className="space-y-3">
-        {agents.map((agent) => (
-          <InteractiveCard
-            key={agent.name}
-            agent={agent}
-            namespace={namespace}
-            repoFullName={repoFullName}
-          />
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function InteractiveCard({
+export function InteractiveCard({
   agent,
   namespace,
   repoFullName,

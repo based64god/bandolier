@@ -206,11 +206,17 @@ async function podToTask(pod: V1Pod, namespace: string, kubeconfig: string) {
     containerEnv.find((e) => e.name === "CLAUDE_TASK")?.value ?? null;
   const interactive = pod.metadata?.labels?.[INTERACTIVE_LABEL] === "true";
 
+  const creationTimestamp = pod.metadata?.creationTimestamp;
+
   return {
     name,
     jobName: pod.metadata?.labels?.["bandolier.io/job"] ?? name,
     repoFullName: annotations["bandolier.io/repo"] ?? null,
     displayName: annotations["bandolier.io/display-name"] ?? name,
+    // Pod creation time, used to sort the task list reverse-chronologically.
+    createdAt: creationTimestamp
+      ? new Date(creationTimestamp).toISOString()
+      : null,
     prompt,
     source: pod.metadata?.labels?.["bandolier.io/source"] ?? "dashboard",
     issueNumber: annotations["bandolier.io/github-issue"] ?? null,

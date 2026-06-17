@@ -330,14 +330,18 @@ async function handleIssueOpened(
   });
 
   // Notify the issue author that the task was received and is being worked on.
-  if (linked.accessToken) {
+  // Post as the Bandolier service user when its token is configured so the
+  // comment is attributed to the bot; otherwise fall back to the triggering
+  // user's token.
+  const commentToken = env.BANDOLIER_GITHUB_TOKEN ?? linked.accessToken;
+  if (commentToken) {
     const taskUrl = `${env.BETTER_AUTH_URL}/repo/${repository.full_name}`;
     const commentBody =
       `🤖 Bando picked up this issue and is working on it.\n\n` +
       `[View task on the dashboard](${taskUrl}) (job: \`${jobName}\`)`;
     try {
       await postIssueComment(
-        linked.accessToken,
+        commentToken,
         repository.full_name,
         issue.number,
         commentBody,

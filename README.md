@@ -197,6 +197,7 @@ The harness image (`ghcr.io/based64god/bandolier-agent-harness:latest`, always p
 | --- | --- |
 | `GITHUB_WEBHOOK_SECRET` | Global fallback secret for verifying webhook signatures (per-repo secrets take precedence). |
 | `GITHUB_TRIGGER_LABEL` | If set, only act on issues that carry this label. |
+| `BANDOLIER_GITHUB_TOKEN` | OAuth/PAT token for a dedicated Bandolier GitHub service user. When set, the automated "Bando picked up this issue…" comment is posted as this user rather than the issue author. Falls back to the triggering user's token when unset. |
 
 ### Access gate (optional)
 

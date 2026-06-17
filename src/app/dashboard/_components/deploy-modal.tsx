@@ -8,6 +8,7 @@ import {
   issuePreviewBranch,
 } from "~/lib/issue-prompt";
 import { api } from "~/trpc/react";
+import { usePreferredModel } from "./preferred-model";
 import { SearchableSelect } from "./searchable-select";
 
 const PROVIDER_LABELS = {
@@ -111,19 +112,27 @@ export function DeployModal({
   } = api.models.list.useQuery({ repoFullName });
   const models = modelData?.models ?? [];
 
+  // Per-browser preferred model. Used purely as a dashboard default; never sent
+  // to the server, so webhook-spawned tasks are unaffected.
+  const [preferredModel, setPreferredModel] = usePreferredModel();
+
   const hasIssue = issueNumber !== "";
   const selectedIssue = hasIssue
     ? (issues.find((i) => String(i.number) === issueNumber) ?? null)
     : null;
 
-  // Derive the effective model (no effect needed): an explicit choice, else a
-  // Sonnet, else the first available.
+  // Derive the effective model (no effect needed): an explicit choice, else the
+  // user's preferred model (if still available), else a Sonnet, else the first
+  // available.
+  const preferredAvailable = models.some((m) => m.id === preferredModel);
   const defaultModel =
-    models.find((m) => /sonnet/i.test(m.id) || /sonnet/i.test(m.label))?.id ??
-    models[0]?.id ??
+    (preferredAvailable ? preferredModel : "") ||
+    models.find((m) => /sonnet/i.test(m.id) || /sonnet/i.test(m.label))?.id ||
+    models[0]?.id ||
     "";
   const effectiveModel = model || defaultModel;
   const selectedModel = models.find((m) => m.id === effectiveModel) ?? null;
+  const isPreferred = !!effectiveModel && effectiveModel === preferredModel;
 
   const utils = api.useUtils();
   const deploy = api.agents.deploy.useMutation({
@@ -360,29 +369,57 @@ export function DeployModal({
             <label className="block text-xs font-medium text-white/60">
               Model
             </label>
-            <SearchableSelect
-              options={models.map((m) => ({
-                value: m.id,
-                searchText: `${m.label} ${m.id} ${m.provider}`.toLowerCase(),
-                label: (
-                  <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
-                    <span className="truncate text-white">{m.label}</span>
-                    <ProviderTag provider={m.provider} />
-                  </span>
-                ),
-              }))}
-              value={effectiveModel || null}
-              onChange={(v) => setModel(v ?? "")}
-              placeholder="Select a model"
-              loading={modelsLoading}
-              disabled={!modelsLoading && models.length === 0}
-              searchPlaceholder="Search models…"
-              emptyText={
-                modelsError
-                  ? "Failed to load models."
-                  : "No models available — configure a provider in settings."
-              }
-            />
+            <div className="flex items-center gap-2">
+              <div className="min-w-0 flex-1">
+                <SearchableSelect
+                  options={models.map((m) => ({
+                    value: m.id,
+                    searchText:
+                      `${m.label} ${m.id} ${m.provider}`.toLowerCase(),
+                    label: (
+                      <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
+                        <span className="truncate text-white">{m.label}</span>
+                        <ProviderTag provider={m.provider} />
+                      </span>
+                    ),
+                  }))}
+                  value={effectiveModel || null}
+                  onChange={(v) => setModel(v ?? "")}
+                  placeholder="Select a model"
+                  loading={modelsLoading}
+                  disabled={!modelsLoading && models.length === 0}
+                  searchPlaceholder="Search models…"
+                  emptyText={
+                    modelsError
+                      ? "Failed to load models."
+                      : "No models available — configure a provider in settings."
+                  }
+                />
+              </div>
+              <label
+                className={`flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 py-2 text-xs transition ${
+                  isPreferred
+                    ? "border-purple-500/50 bg-purple-500/15 text-white"
+                    : "border-white/10 bg-white/5 text-white/60 hover:bg-white/10"
+                } ${!effectiveModel ? "cursor-not-allowed opacity-40" : ""}`}
+                title="Use this model as the default when deploying from the dashboard. Doesn't affect webhook-triggered tasks."
+              >
+                <input
+                  type="checkbox"
+                  checked={isPreferred}
+                  disabled={!effectiveModel}
+                  onChange={(e) =>
+                    setPreferredModel(e.target.checked ? effectiveModel : "")
+                  }
+                  className="h-3.5 w-3.5 cursor-pointer accent-purple-600"
+                />
+                Preferred
+              </label>
+            </div>
+            <p className="text-xs text-white/40">
+              Your preferred model is the default for dashboard deploys.
+              Webhook-triggered tasks aren&rsquo;t affected.
+            </p>
           </div>
 
           {/* Repo + Branch */}

@@ -5,6 +5,11 @@ import { env } from "~/env";
 import { validateAwsCredentials } from "~/server/agents/aws";
 import { createAgentJob } from "~/server/agents/create-job";
 import {
+  getRepoBotToken,
+  removeInstallation,
+  upsertInstallation,
+} from "~/server/agents/github-app";
+import {
   getGithubAccountByGithubId,
   githubGitIdentity,
 } from "~/server/agents/github-token";
@@ -71,6 +76,24 @@ interface IssuePayload {
   issue: GitHubIssue;
   repository: GitHubRepository;
   sender: { id: number; login: string };
+}
+
+// Payloads for the GitHub App's lifecycle events, which maintain the
+// repo → installation mapping the bot-token broker reads.
+interface InstallationRef {
+  id: number;
+  account: { login: string } | null;
+}
+
+// `installation` event: the App is installed/uninstalled, or repos are added to
+// / removed from an existing installation (action "added"/"removed").
+interface InstallationPayload {
+  action: string;
+  installation: InstallationRef;
+  // Present on install with "selected repositories" and on the "added" action.
+  repositories?: { full_name: string }[];
+  repositories_added?: { full_name: string }[];
+  repositories_removed?: { full_name: string }[];
 }
 
 // An issue label of the form `model:<query>` lets the author pick the model for
@@ -330,10 +353,13 @@ async function handleIssueOpened(
   });
 
   // Notify the issue author that the task was received and is being worked on.
-  // Post as the Bandolier service user when its token is configured so the
-  // comment is attributed to the bot; otherwise fall back to the triggering
-  // user's token.
-  const commentToken = env.BANDOLIER_GITHUB_TOKEN ?? linked.accessToken;
+  // This is a bot-voice action, so prefer the GitHub App installation token
+  // (comment is attributed to bandolier[bot]); fall back to the legacy service
+  // user PAT, then to the triggering user's token, for deployments without the
+  // App installed.
+  const botToken = await getRepoBotToken(db, repository.full_name, Date.now());
+  const commentToken =
+    botToken ?? env.BANDOLIER_GITHUB_TOKEN ?? linked.accessToken;
   if (commentToken) {
     const taskUrl = `${env.BETTER_AUTH_URL}/repo/${repository.full_name}`;
     const commentBody =
@@ -357,6 +383,46 @@ async function handleIssueOpened(
       });
     }
   }
+}
+
+/**
+ * Maintains the repo → installation mapping from the App's `installation` and
+ * `installation_repositories` events. Both deliver the same shape; the action
+ * distinguishes adds from removes:
+ *   - created / added   → record the listed repos under this installation
+ *   - deleted / removed → drop the listed repos (or all, on a full uninstall)
+ */
+async function handleInstallation(
+  payload: InstallationPayload,
+  fullUninstall: boolean,
+): Promise<void> {
+  const installationId = String(payload.installation.id);
+  const accountLogin = payload.installation.account?.login ?? null;
+
+  const added = payload.repositories ?? payload.repositories_added ?? [];
+  for (const repo of added) {
+    await upsertInstallation(db, repo.full_name, installationId, accountLogin);
+  }
+
+  const removed = payload.repositories_removed ?? [];
+  for (const repo of removed) {
+    await removeInstallation(db, repo.full_name);
+  }
+
+  // A full uninstall carries the installation's repo list under `repositories`;
+  // those rows must be dropped, not added.
+  if (fullUninstall) {
+    for (const repo of payload.repositories ?? []) {
+      await removeInstallation(db, repo.full_name);
+    }
+  }
+
+  console.log("[bandolier:webhook] installation event processed", {
+    action: payload.action,
+    installation: installationId,
+    added: added.length,
+    removed: removed.length + (fullUninstall ? (payload.repositories?.length ?? 0) : 0),
+  });
 }
 
 // ── Route handler ─────────────────────────────────────────────────────────────
@@ -409,6 +475,16 @@ export async function POST(req: NextRequest) {
         repoConfig?.agentImage ?? null,
         repoConfig?.defaultWebhookModel ?? null,
       );
+    } else if (event === "installation") {
+      // App installed/uninstalled, or (action add/remove) repos changed for an
+      // installation. These carry no single `repository`, so the secret above
+      // resolves to the global GITHUB_WEBHOOK_SECRET — which must be set to the
+      // GitHub App's webhook secret for these to verify.
+      const p = payload as InstallationPayload;
+      await handleInstallation(p, p.action === "deleted");
+    } else if (event === "installation_repositories") {
+      // Repos added to / removed from an existing installation.
+      await handleInstallation(payload as InstallationPayload, false);
     }
     // Other event types ignored for now.
     return NextResponse.json({ ok: true });

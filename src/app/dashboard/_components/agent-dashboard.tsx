@@ -416,16 +416,22 @@ export function AgentDashboard({
                       <thead>
                         <tr className="border-b border-white/10 bg-white/5 text-left text-xs font-medium tracking-wider text-white/50 uppercase">
                           {[
-                            "Status",
-                            "Output",
-                            "Task",
-                            "Created by",
-                            "Currently",
-                            "Expires",
-                            "",
+                            { label: "Status" },
+                            { label: "Output" },
+                            { label: "Task" },
+                            // These secondary columns are dropped on narrow
+                            // viewports where space is limited — the row stays
+                            // readable with Status/Output/Task alone.
+                            { label: "Created by", optional: true },
+                            { label: "Currently", optional: true },
+                            { label: "Expires", optional: true },
+                            { label: "" },
                           ].map((h, i) => (
-                            <th key={i} className="px-4 py-3 align-top">
-                              {h}
+                            <th
+                              key={i}
+                              className={`px-4 py-3 align-top ${h.optional ? "hidden md:table-cell" : ""}`}
+                            >
+                              {h.label}
                             </th>
                           ))}
                         </tr>

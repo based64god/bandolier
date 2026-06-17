@@ -623,7 +623,7 @@ export function AgentDashboard({
 
       {/* Footer */}
       <footer className="border-t border-white/10 px-6 py-4">
-        <div className="flex items-center justify-between text-sm text-white/40">
+        <div className="flex items-center justify-center gap-6 text-sm text-white/40">
           <a
             href="https://github.com/based64god/bandolier"
             target="_blank"

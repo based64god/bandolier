@@ -126,6 +126,7 @@ jobs:
       # DATABASE_URL, so skip validation — env.DATABASE_URL still resolves from
       # process.env when skipped.
       - name: Apply migrations
+        environment: production
         run: |
           pnpm db:migrate
         env:

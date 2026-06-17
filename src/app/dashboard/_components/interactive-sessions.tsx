@@ -262,7 +262,10 @@ export function InteractiveRow({
                         : "Send a message (the agent will pick it up after its current turn)…"
                       : "Session ended."
                   }
-                  className="min-h-0 flex-1 resize-y rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/30 focus:outline-none disabled:opacity-40"
+                  // min-w-0 lets the textarea shrink below its intrinsic width
+                  // so the auto-layout table can't be forced wider than the
+                  // viewport (which overflowed and shifted columns on mobile).
+                  className="min-h-0 w-0 min-w-0 flex-1 resize-y rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/30 focus:outline-none disabled:opacity-40"
                 />
                 <button
                   onClick={send}

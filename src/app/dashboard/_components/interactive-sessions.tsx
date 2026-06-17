@@ -97,8 +97,8 @@ export function InteractiveRow({
         className={`cursor-pointer select-none ${rowTint}`}
       >
         {/* Status (+ awaiting pill) */}
-        <td className="px-4 py-3 align-top">
-          <div className="flex flex-col items-start gap-1">
+        <td className="px-3 py-2 align-middle md:px-4 md:py-3">
+          <div className="flex flex-wrap items-center gap-1">
             <StatusBadge status={agent.status} />
             {awaiting && (
               <span
@@ -115,7 +115,7 @@ export function InteractiveRow({
 
         {/* Output */}
         <td
-          className="px-4 py-3 align-top"
+          className="px-3 py-2 align-middle md:px-4 md:py-3"
           onClick={(e) => e.stopPropagation()}
         >
           {agent.createdIssueUrl ? (
@@ -142,7 +142,7 @@ export function InteractiveRow({
         </td>
 
         {/* Task (chevron + name) */}
-        <td className="px-4 py-3 align-top">
+        <td className="px-3 py-2 align-middle md:px-4 md:py-3">
           <div className="flex items-center gap-2">
             <svg
               viewBox="0 0 16 16"
@@ -160,7 +160,7 @@ export function InteractiveRow({
 
         {/* Created by — dropped on narrow viewports where space is limited. */}
         <td
-          className="hidden px-4 py-3 align-top md:table-cell"
+          className="hidden px-3 py-2 align-middle md:px-4 md:py-3 md:table-cell"
           onClick={(e) => e.stopPropagation()}
         >
           {agent.source === "github-issue" && agent.issueUrl ? (
@@ -181,7 +181,7 @@ export function InteractiveRow({
 
         {/* Currently — clamped to one line, full text on hover. Dropped on
             narrow viewports where space is limited. */}
-        <td className="hidden px-4 py-3 align-top md:table-cell">
+        <td className="hidden px-3 py-2 align-middle md:px-4 md:py-3 md:table-cell">
           <span
             title={agent.currently ?? undefined}
             className="block max-w-[16rem] truncate text-xs text-white/40 italic"
@@ -191,13 +191,13 @@ export function InteractiveRow({
         </td>
 
         {/* Expires — dropped on narrow viewports where space is limited. */}
-        <td className="hidden px-4 py-3 align-top whitespace-nowrap text-white/50 tabular-nums md:table-cell">
+        <td className="hidden px-3 py-2 align-middle md:px-4 md:py-3 whitespace-nowrap text-white/50 tabular-nums md:table-cell">
           {expiresIn(agent.expiresAt)}
         </td>
 
         {/* Actions */}
         <td
-          className="px-4 py-3 text-right align-top"
+          className="px-3 py-2 text-right align-middle md:px-4 md:py-3"
           onClick={(e) => e.stopPropagation()}
         >
           <div className="flex items-center justify-end gap-2">

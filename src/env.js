@@ -32,6 +32,11 @@ export const env = createEnv({
       .default("10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"),
     GITHUB_WEBHOOK_SECRET: z.string().optional(),
     GITHUB_TRIGGER_LABEL: z.string().optional(),
+    // OAuth/PAT token for the dedicated Bandolier GitHub service user. When set,
+    // automated issue comments ("Bando picked up this issue…") are posted as
+    // this user instead of the issue author, so the notice is clearly attributed
+    // to the bot. Falls back to the triggering user's token when unset.
+    BANDOLIER_GITHUB_TOKEN: z.string().optional(),
     // Optional shared password gate in front of the whole app (UI + API). When
     // set, visitors must enter it before reaching anything (the GitHub webhook
     // is exempt — it authenticates via signature). Unset = gate disabled.
@@ -72,6 +77,7 @@ export const env = createEnv({
     AGENT_EGRESS_BLOCKED_CIDRS: process.env.AGENT_EGRESS_BLOCKED_CIDRS,
     GITHUB_WEBHOOK_SECRET: process.env.GITHUB_WEBHOOK_SECRET,
     GITHUB_TRIGGER_LABEL: process.env.GITHUB_TRIGGER_LABEL,
+    BANDOLIER_GITHUB_TOKEN: process.env.BANDOLIER_GITHUB_TOKEN,
     APP_PASSWORD: process.env.APP_PASSWORD,
     ARTIFACTS_S3_BUCKET: process.env.ARTIFACTS_S3_BUCKET,
     ARTIFACTS_S3_REGION: process.env.ARTIFACTS_S3_REGION,

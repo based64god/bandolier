@@ -86,7 +86,7 @@ function RepoSelector({
 
   return (
     <SearchableSelect
-      className="w-80"
+      className="min-w-0 flex-1 sm:w-80 sm:flex-none"
       options={options}
       value={selected?.fullName ?? null}
       onChange={(v) => v && onChange(v)}
@@ -199,9 +199,9 @@ export function AgentDashboard({
   return (
     <div className="flex min-h-screen flex-col bg-gradient-to-b from-[#2e026d] to-[#15162c] text-white">
       {/* Header */}
-      <header className="border-b border-white/10 px-6 py-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
+      <header className="border-b border-white/10 px-4 py-3 sm:px-6 sm:py-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
             <h1 className="text-2xl font-bold tracking-tight">
               <Link
                 href="/"
@@ -232,9 +232,9 @@ export function AgentDashboard({
             )}
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
             {namespace && kubeConfigured && (
-              <span className="text-xs text-white/30">
+              <span className="hidden text-xs text-white/30 sm:inline">
                 {agentsLoading
                   ? "Refreshing…"
                   : `Updated ${new Date(dataUpdatedAt).toLocaleTimeString()}`}
@@ -301,7 +301,7 @@ export function AgentDashboard({
                 />
               </svg>
             </button>
-            <div className="flex items-center gap-2 border-l border-white/10 pl-3">
+            <div className="flex items-center gap-2 sm:border-l sm:border-white/10 sm:pl-3">
               {user.image && (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
@@ -310,7 +310,9 @@ export function AgentDashboard({
                   className="h-7 w-7 rounded-full"
                 />
               )}
-              <span className="text-sm text-white/60">{user.name}</span>
+              <span className="hidden text-sm text-white/60 sm:inline">
+                {user.name}
+              </span>
               <button
                 onClick={async () => {
                   await authClient.signOut();
@@ -325,7 +327,7 @@ export function AgentDashboard({
         </div>
       </header>
 
-      <main className="flex-1 space-y-6 px-6 py-6">
+      <main className="flex-1 space-y-6 px-4 py-4 sm:px-6 sm:py-6">
         {/* No kubeconfig — prompt to connect a cluster before anything else. */}
         {!kubeLoading && !kubeConfigured && (
           <div className="flex flex-col items-center gap-4 rounded-xl border border-sky-500/20 bg-sky-500/5 py-20 text-center">
@@ -414,9 +416,10 @@ export function AgentDashboard({
                       <thead>
                         <tr className="border-b border-white/10 bg-white/5 text-left text-xs font-medium tracking-wider text-white/50 uppercase">
                           {[
+                            "Status",
+                            "Output",
                             "Task",
                             "Created by",
-                            "Status",
                             "Currently",
                             "Expires",
                             "",

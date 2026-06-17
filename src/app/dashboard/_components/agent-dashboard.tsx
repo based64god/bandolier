@@ -523,24 +523,32 @@ export function AgentDashboard({
                   </div>
                 ) : (
                   <div className="overflow-hidden rounded-xl border border-white/10">
-                    <table className="w-full text-sm">
+                    {/* table-fixed locks column geometry to the header widths
+                        below, so an interactive row expanding in place (a
+                        full-width colSpan cell with logs + input) can only push
+                        the rows below it down — it can never re-balance the
+                        columns the way auto layout did. Percentage widths keep
+                        the layout responsive and redistribute proportionally
+                        when the optional columns are hidden on narrow
+                        viewports. */}
+                    <table className="w-full table-fixed text-sm">
                       <thead>
                         <tr className="border-b border-white/10 bg-white/5 text-left text-xs font-medium tracking-wider text-white/50 uppercase">
                           {[
-                            { label: "Status" },
-                            { label: "Output" },
-                            { label: "Task" },
+                            { label: "Status", width: "w-[12%]" },
+                            { label: "Output", width: "w-[10%]" },
+                            { label: "Task", width: "w-[28%]" },
                             // These secondary columns are dropped on narrow
                             // viewports where space is limited — the row stays
                             // readable with Status/Output/Task alone.
-                            { label: "Created by", optional: true },
-                            { label: "Currently", optional: true },
-                            { label: "Expires", optional: true },
-                            { label: "" },
+                            { label: "Created by", width: "w-[15%]", optional: true },
+                            { label: "Currently", width: "w-[18%]", optional: true },
+                            { label: "Expires", width: "w-[9%]", optional: true },
+                            { label: "", width: "w-[8%]" },
                           ].map((h, i) => (
                             <th
                               key={i}
-                              className={`px-3 py-2 align-middle md:px-4 md:py-3 ${h.optional ? "hidden md:table-cell" : ""}`}
+                              className={`px-3 py-2 align-middle md:px-4 md:py-3 ${h.width} ${h.optional ? "hidden md:table-cell" : ""}`}
                             >
                               {h.label}
                             </th>

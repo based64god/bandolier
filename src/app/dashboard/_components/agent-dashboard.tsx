@@ -90,7 +90,7 @@ function RepoSelector({
 
   return (
     <SearchableSelect
-      className="min-w-0 flex-1 sm:w-80 sm:flex-none"
+      className="min-w-0 flex-1 sm:w-80 sm:flex-initial"
       options={options}
       value={selected?.fullName ?? null}
       onChange={(v) => v && onChange(v)}
@@ -207,9 +207,14 @@ export function AgentDashboard({
     <div className="flex min-h-screen flex-col bg-gradient-to-b from-[#2e026d] to-[#15162c] text-white">
       {/* Header */}
       <header className="border-b border-white/10 px-4 py-3 sm:px-6 sm:py-4">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-            <h1 className="text-2xl font-bold tracking-tight">
+        {/* A single row at every width. Space is given up from the left: the
+            branding text hides first (sm:), then the repo selector shrinks and
+            truncates, and only the right-hand group is protected (shrink-0) so
+            the Deploy button is the last thing to lose space — it never wraps
+            to a new row. */}
+        <div className="flex items-center gap-2 sm:gap-3">
+          <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
+            <h1 className="shrink-0 text-2xl font-bold tracking-tight">
               <Link
                 href="/"
                 className="flex items-center gap-2.5 transition hover:opacity-80"
@@ -239,9 +244,9 @@ export function AgentDashboard({
             )}
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+          <div className="flex shrink-0 items-center gap-2 sm:gap-3">
             {namespace && kubeConfigured && (
-              <span className="hidden text-xs text-white/30 sm:inline">
+              <span className="hidden text-xs text-white/30 lg:inline">
                 {agentsLoading
                   ? "Refreshing…"
                   : `Updated ${new Date(dataUpdatedAt).toLocaleTimeString()}`}

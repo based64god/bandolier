@@ -92,6 +92,7 @@ jobs:
 
   db-migrate:
     name: Apply migrations (drizzle)
+    environment: production
     # Only apply migrations once changes have actually landed on the default
     # branch — never on pull requests, where DATABASE_URL is unavailable and a
     # migration would be premature.
@@ -126,7 +127,6 @@ jobs:
       # DATABASE_URL, so skip validation — env.DATABASE_URL still resolves from
       # process.env when skipped.
       - name: Apply migrations
-        environment: production
         run: |
           pnpm db:migrate
         env:

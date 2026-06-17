@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   buildIssueSystemPrompt,
@@ -95,6 +95,13 @@ export function DeployModal({
   const [outputType, setOutputType] = useState<"pr" | "issue">("pr");
   const issueOutput = outputType === "issue";
 
+  // Context-preview tooltip. Hover shows it; clicking the info button "pins" it
+  // open so the user can scroll/select inside without it closing on mouse-out.
+  const [contextPinned, setContextPinned] = useState(false);
+  const [contextHovered, setContextHovered] = useState(false);
+  const contextRef = useRef<HTMLSpanElement>(null);
+  const showContext = contextPinned || contextHovered;
+
   const { data: providerInfo } = api.agents.providerInfo.useQuery({
     repoFullName,
   });
@@ -149,6 +156,18 @@ export function DeployModal({
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [onClose]);
+
+  // Clicking outside a pinned context tooltip dismisses it.
+  useEffect(() => {
+    if (!contextPinned) return;
+    const handler = (e: MouseEvent) => {
+      if (!contextRef.current?.contains(e.target as Node)) {
+        setContextPinned(false);
+      }
+    };
+    window.addEventListener("mousedown", handler);
+    return () => window.removeEventListener("mousedown", handler);
+  }, [contextPinned]);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -230,43 +249,57 @@ export function DeployModal({
           {/* GitHub issue (optional) */}
           {repoFullName && (
             <div className="space-y-1.5">
-              <div className="flex items-center gap-1.5">
+              <div className="relative flex items-center gap-1.5">
                 <label className="block text-xs font-medium text-white/60">
                   GitHub issue{" "}
                   <span className="font-normal text-white/30">(optional)</span>
                 </label>
                 {selectedIssue && (
-                  <span className="group relative flex">
-                    <svg
-                      viewBox="0 0 16 16"
-                      fill="currentColor"
-                      className="h-3.5 w-3.5 cursor-help text-white/40 hover:text-white/70"
+                  <span
+                    ref={contextRef}
+                    className="flex"
+                    onMouseEnter={() => setContextHovered(true)}
+                    onMouseLeave={() => setContextHovered(false)}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setContextPinned((p) => !p)}
+                      className="flex text-white/40 hover:text-white/70"
                       aria-label="Preview context sent to Claude"
+                      aria-expanded={showContext}
                     >
-                      <path d="M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0Zm0 4a1 1 0 0 1 1 1v3a1 1 0 0 1-2 0V5a1 1 0 0 1 1-1Zm0 7.5a1.1 1.1 0 1 1 0 2.2 1.1 1.1 0 0 1 0-2.2Z" />
-                    </svg>
-                    <div className="invisible absolute top-5 left-0 z-30 w-96 opacity-0 transition-opacity group-hover:visible group-hover:opacity-100">
-                      <div className="max-h-72 overflow-auto rounded-lg border border-white/10 bg-[#0d0d20] p-3 shadow-2xl">
-                        <p className="mb-1.5 text-[10px] font-medium tracking-wider text-white/40 uppercase">
-                          System prompt
-                        </p>
-                        <pre className="mb-3 font-mono text-[11px] leading-4 whitespace-pre-wrap text-white/60">
-                          {buildIssueSystemPrompt(
-                            selectedIssue,
-                            issuePreviewBranch(
-                              selectedIssue.number,
-                              selectedIssue.title,
-                            ),
-                          )}
-                        </pre>
-                        <p className="mb-1.5 text-[10px] font-medium tracking-wider text-white/40 uppercase">
-                          Context sent to Claude
-                        </p>
-                        <pre className="font-mono text-[11px] leading-4 whitespace-pre-wrap text-white/60">
-                          {buildIssueUserMessage(selectedIssue, task)}
-                        </pre>
+                      <svg
+                        viewBox="0 0 16 16"
+                        fill="currentColor"
+                        className="h-3.5 w-3.5"
+                      >
+                        <path d="M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0Zm0 4a1 1 0 0 1 1 1v3a1 1 0 0 1-2 0V5a1 1 0 0 1 1-1Zm0 7.5a1.1 1.1 0 1 1 0 2.2 1.1 1.1 0 0 1 0-2.2Z" />
+                      </svg>
+                    </button>
+                    {showContext && (
+                      <div className="absolute top-full right-0 left-0 z-30 mt-1">
+                        <div className="max-h-72 overflow-auto rounded-lg border border-white/10 bg-[#0d0d20] p-3 shadow-2xl">
+                          <p className="mb-1.5 text-[10px] font-medium tracking-wider text-white/40 uppercase">
+                            System prompt
+                          </p>
+                          <pre className="mb-3 font-mono text-[11px] leading-4 whitespace-pre-wrap text-white/60">
+                            {buildIssueSystemPrompt(
+                              selectedIssue,
+                              issuePreviewBranch(
+                                selectedIssue.number,
+                                selectedIssue.title,
+                              ),
+                            )}
+                          </pre>
+                          <p className="mb-1.5 text-[10px] font-medium tracking-wider text-white/40 uppercase">
+                            Context sent to Claude
+                          </p>
+                          <pre className="font-mono text-[11px] leading-4 whitespace-pre-wrap text-white/60">
+                            {buildIssueUserMessage(selectedIssue, task)}
+                          </pre>
+                        </div>
                       </div>
-                    </div>
+                    )}
                   </span>
                 )}
               </div>

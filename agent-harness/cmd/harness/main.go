@@ -884,11 +884,11 @@ func run(ctx context.Context, cfg config) error {
 	// Git identity.
 	name := cfg.gitName
 	if name == "" {
-		name = "Claude Agent"
+		name = "Bandolier Agent"
 	}
 	email := cfg.gitEmail
 	if email == "" {
-		email = "claude-agent@bandolier.local"
+		email = "bandolier-agent@bandolier.local"
 	}
 
 	// Sign off every commit (DCO) regardless of how the agent commits, via a

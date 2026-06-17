@@ -441,10 +441,13 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
           spec: {
             serviceAccountName: "claude-agent",
             restartPolicy: "Never",
+            // Run as root: the harness image is built around HOME=/root with the
+            // agent CLIs in /root/.local/bin (see agent-harness/Dockerfile), so a
+            // non-root uid can't read its tools or write $HOME (e.g. ~/.gemini).
             securityContext: {
-              runAsNonRoot: true,
-              runAsUser: 1000,
-              fsGroup: 1000,
+              runAsUser: 0,
+              runAsGroup: 0,
+              fsGroup: 0,
             },
             containers: [
               {

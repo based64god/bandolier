@@ -24,6 +24,12 @@ describe("ingestToken", () => {
       ingestToken("job-abc", "secret-b"),
     );
   });
+
+  it("returns an empty (unusable) token when no secret is configured", () => {
+    // Fail closed: an unset secret must not yield a publicly-computable token.
+    expect(ingestToken("job-abc", undefined)).toBe("");
+    expect(ingestToken("job-abc", "")).toBe("");
+  });
 });
 
 describe("verifyIngestToken", () => {
@@ -48,5 +54,14 @@ describe("verifyIngestToken", () => {
 
   it("rejects an empty token", () => {
     expect(verifyIngestToken("job-abc", "", "secret")).toBe(false);
+  });
+
+  it("rejects any token when no secret is configured", () => {
+    // No secret → no valid token can exist, even if the caller supplies one
+    // that was computed against an empty key.
+    const forged = ingestToken("job-abc", "");
+    expect(verifyIngestToken("job-abc", forged, undefined)).toBe(false);
+    expect(verifyIngestToken("job-abc", "anything", undefined)).toBe(false);
+    expect(verifyIngestToken("job-abc", "anything", "")).toBe(false);
   });
 });

@@ -235,6 +235,41 @@ func TestSetEnvIfMissing(t *testing.T) {
 	})
 }
 
+func TestProjectIDFromCredentials(t *testing.T) {
+	t.Run("reads project_id from a service-account key", func(t *testing.T) {
+		got := projectIDFromCredentials(`{"type":"service_account","project_id":"my-proj"}`)
+		if got != "my-proj" {
+			t.Errorf("project_id = %q, want my-proj", got)
+		}
+	})
+
+	t.Run("falls back to quota_project_id", func(t *testing.T) {
+		got := projectIDFromCredentials(`{"quota_project_id":"quota-proj"}`)
+		if got != "quota-proj" {
+			t.Errorf("quota fallback = %q, want quota-proj", got)
+		}
+	})
+
+	t.Run("prefers project_id over quota_project_id", func(t *testing.T) {
+		got := projectIDFromCredentials(`{"project_id":"p","quota_project_id":"q"}`)
+		if got != "p" {
+			t.Errorf("= %q, want p", got)
+		}
+	})
+
+	t.Run("returns empty for invalid JSON", func(t *testing.T) {
+		if got := projectIDFromCredentials("not json"); got != "" {
+			t.Errorf("invalid JSON = %q, want empty", got)
+		}
+	})
+
+	t.Run("returns empty when neither field is present", func(t *testing.T) {
+		if got := projectIDFromCredentials(`{"type":"service_account"}`); got != "" {
+			t.Errorf("= %q, want empty", got)
+		}
+	})
+}
+
 func TestBuildEnvOpenAI(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "sk-openai")
 	// CODEX_API_KEY is absent in the pod, mirroring the real environment. (Setting

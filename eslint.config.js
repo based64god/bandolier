@@ -5,7 +5,7 @@ import drizzle from "eslint-plugin-drizzle";
 
 export default tseslint.config(
   {
-    ignores: [".next"],
+    ignores: [".next", "coverage"],
   },
   ...nextCoreWebVitals,
   {

@@ -57,6 +57,15 @@ const CHAT_MODEL_RE = /^(gpt-|chatgpt-|o[0-9])/i;
 const NON_CHAT_RE =
   /(embedding|whisper|tts|audio|realtime|transcribe|image|dall-e|moderation|search|instruct)/i;
 
+/**
+ * Whether an OpenAI model id is a chat model an agent can drive: it's in the GPT
+ * or o-series chat families and isn't an embeddings/audio/image/moderation/
+ * instruct variant.
+ */
+export function isChatModel(id: string): boolean {
+  return CHAT_MODEL_RE.test(id) && !NON_CHAT_RE.test(id);
+}
+
 /** Lists the chat-capable models available to an OpenAI API key. */
 export async function listOpenaiModels(
   apiKey: string,
@@ -69,7 +78,7 @@ export async function listOpenaiModels(
   }
   const body = (await res.json()) as { data: OpenaiModel[] };
   return body.data
-    .filter((m) => CHAT_MODEL_RE.test(m.id) && !NON_CHAT_RE.test(m.id))
+    .filter((m) => isChatModel(m.id))
     .map((m) => ({ id: m.id, label: m.id }))
     .sort((a, b) => a.label.localeCompare(b.label));
 }

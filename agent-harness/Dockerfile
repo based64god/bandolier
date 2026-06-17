@@ -33,6 +33,10 @@ COPY --from=builder /build/harness /usr/local/bin/harness
 
 ENV HOME=/root
 ENV PATH="${HOME}/.local/bin:${PATH}"
+# The pod runs as root (the CLIs live under /root); Claude Code otherwise refuses
+# to use --dangerously-skip-permissions as root. IS_SANDBOX=1 signals that the
+# isolated, network-restricted pod is the sandbox, so root is allowed.
+ENV IS_SANDBOX=1
 # Agent CLIs — each vendor's official installer drops a self-contained binary
 # into /root/.local/bin (no Node runtime needed); HOME + PATH above put them on
 # the runtime PATH. NOTE: the runtime base must be full debian, not -slim — the

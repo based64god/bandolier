@@ -3,16 +3,16 @@
 import { useState } from "react";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { BandolierIcon } from "~/app/_components/bandolier-icon";
 import { InstallButton } from "~/app/_components/install-button";
 import { repoToNamespace } from "~/server/agents/namespace";
 import { authClient } from "~/server/better-auth/client";
 import { api } from "~/trpc/react";
-import { expiresIn, isAgentDone, STATUS_STYLES } from "./agent-ui";
+import { isAgentDone } from "./agent-ui";
 import { DeployModal } from "./deploy-modal";
-import { InteractiveSessions } from "./interactive-sessions";
+import { InteractiveCard } from "./interactive-sessions";
 import { LogModal } from "./log-modal";
 import {
   primeAudio,
@@ -25,6 +25,7 @@ import { OverviewPanel } from "./overview-panel";
 import { RepoConfigModal } from "./repo-config-modal";
 import { SearchableSelect, type SelectOption } from "./searchable-select";
 import { SettingsModal } from "./settings-modal";
+import { TaskRow } from "./task-row";
 
 type Repo = {
   fullName: string;
@@ -105,8 +106,9 @@ export function AgentDashboard({
   repoSlug: string | null;
 }) {
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [logPod, setLogPod] = useState<string | null>(null);
-  const [confirmKill, setConfirmKill] = useState<string | null>(null);
   const [showDeploy, setShowDeploy] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showWebhooks, setShowWebhooks] = useState(false);
@@ -146,27 +148,34 @@ export function AgentDashboard({
     },
   );
 
-  const terminate = api.agents.terminate.useMutation({
-    onSuccess: () => setConfirmKill(null),
-  });
+  // The "hide completed" filter persists in the URL (?hideCompleted=1) so it
+  // survives refreshes and is shareable.
+  const hideCompleted = searchParams.get("hideCompleted") === "1";
 
-  // Interactive agents are pinned above the table; those awaiting input come
-  // first so the user sees what needs them at the very top, and finished
-  // sessions sink to the bottom.
-  const interactiveAgents = agents
-    .filter((a) => a.interactive)
-    .sort((a, b) => {
-      const doneDiff =
-        Number(isAgentDone(a.status)) - Number(isAgentDone(b.status));
-      if (doneDiff !== 0) return doneDiff;
-      return Number(b.awaitingInput) - Number(a.awaitingInput);
-    });
-  // Non-interactive agents fill the table; completed ones sink to the bottom.
-  const tableAgents = agents
-    .filter((a) => !a.interactive)
-    .sort(
-      (a, b) => Number(isAgentDone(a.status)) - Number(isAgentDone(b.status)),
-    );
+  function toggleHideCompleted() {
+    const params = new URLSearchParams(searchParams.toString());
+    if (hideCompleted) params.delete("hideCompleted");
+    else params.set("hideCompleted", "1");
+    const qs = params.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+  }
+
+  // One contiguous list. Tasks awaiting input float to the top regardless of
+  // age (they need the user now); the rest follow newest-first. Interactive
+  // tasks render as expandable cards (unchanged behaviour); the rest as rows.
+  // The "hide completed" filter optionally drops finished (Succeeded/Failed)
+  // tasks.
+  const sortedAgents = [...agents].sort((a, b) => {
+    const awaitDiff = Number(b.awaitingInput) - Number(a.awaitingInput);
+    if (awaitDiff !== 0) return awaitDiff;
+    return (b.createdAt ?? "").localeCompare(a.createdAt ?? "");
+  });
+  const visibleAgents = hideCompleted
+    ? sortedAgents.filter((a) => !isAgentDone(a.status))
+    : sortedAgents;
+
+  // Interactive agents still drive the awaiting-input alerts.
+  const interactiveAgents = agents.filter((a) => a.interactive);
 
   // Chime + system notification when an agent finishes or starts awaiting input.
   const [notify, setNotify] = useNotifyPref();
@@ -183,7 +192,6 @@ export function AgentDashboard({
 
   function handleRepoChange(fullName: string) {
     setLogPod(null);
-    setConfirmKill(null);
     // Navigate to the repo's own URL so the selection persists across refreshes.
     router.push(`/repo/${fullName}`);
   }
@@ -363,178 +371,65 @@ export function AgentDashboard({
               </div>
             )}
 
-            {/* Interactive sessions, pinned to the top with live logs + input */}
-            <InteractiveSessions
-              agents={interactiveAgents}
-              namespace={namespace}
-              repoFullName={repoSlug ?? undefined}
-            />
-
-            {/* Agent table (non-interactive agents) */}
+            {/* Single contiguous task list — newest first. Interactive tasks
+                expand in place; the rest open their logs on click. */}
             {!error && agents.length === 0 && !agentsLoading ? (
               <div className="rounded-xl border border-white/10 bg-white/5 py-16 text-center text-white/40">
                 No agents running in{" "}
                 <code className="text-white/60">{namespace}</code>
               </div>
-            ) : tableAgents.length === 0 ? null : (
-              <div className="overflow-hidden rounded-xl border border-white/10">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-white/10 bg-white/5 text-left text-xs font-medium tracking-wider text-white/50 uppercase">
-                      {[
-                        "Task",
-                        "Created by",
-                        "Status",
-                        "Currently",
-                        "Expires",
-                        "Output",
-                        "",
-                      ].map((h) => (
-                        <th key={h} className="px-4 py-4 align-top">
-                          {h}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-white/5">
-                    {tableAgents.map((agent) => (
-                      <tr
-                        key={agent.name}
-                        onClick={() => setLogPod(agent.name)}
-                        className="cursor-pointer hover:bg-white/[0.04]"
-                      >
-                        <td className="px-4 py-4 align-top">
-                          <span className="text-sm text-white/90">
-                            {agent.displayName}
-                          </span>
-                        </td>
-                        <td
-                          className="px-4 py-4 align-top"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          {agent.source === "github-issue" && agent.issueUrl ? (
-                            <a
-                              href={agent.issueUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1.5 rounded-md border border-sky-500/30 bg-sky-500/10 px-2 py-1 text-xs text-sky-300 transition hover:bg-sky-500/20"
-                            >
-                              <svg
-                                viewBox="0 0 16 16"
-                                fill="currentColor"
-                                className="h-3.5 w-3.5"
-                              >
-                                <path d="M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0Zm0 4a1 1 0 0 1 1 1v3a1 1 0 0 1-2 0V5a1 1 0 0 1 1-1Zm0 7.5a1.1 1.1 0 1 1 0 2.2 1.1 1.1 0 0 1 0-2.2Z" />
-                              </svg>
-                              Issue #{agent.issueNumber}
-                            </a>
-                          ) : (
-                            <span className="text-xs text-white/50">
-                              {agent.createdBy ?? "Dashboard"}
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-4 py-4 align-top">
-                          <span
-                            className={`rounded-full border px-2 py-0.5 text-xs ${STATUS_STYLES[agent.status] ?? STATUS_STYLES.Unknown}`}
-                          >
-                            {agent.status}
-                          </span>
-                        </td>
-                        <td className="max-w-md px-4 py-4 align-top">
-                          <span className="block text-xs break-words text-white/40 italic">
-                            {agent.currently ?? "—"}
-                          </span>
-                        </td>
-                        <td className="px-4 py-4 align-top text-white/50 tabular-nums">
-                          {expiresIn(agent.expiresAt)}
-                        </td>
-                        <td
-                          className="px-4 py-4 align-top"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          {agent.createdIssueUrl ? (
-                            <a
-                              href={agent.createdIssueUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1.5 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-xs text-emerald-300 transition hover:bg-emerald-500/20"
-                            >
-                              <svg
-                                viewBox="0 0 16 16"
-                                fill="currentColor"
-                                className="h-3.5 w-3.5"
-                              >
-                                <path d="M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0Zm0 4a1 1 0 0 1 1 1v3a1 1 0 0 1-2 0V5a1 1 0 0 1 1-1Zm0 7.5a1.1 1.1 0 1 1 0 2.2 1.1 1.1 0 0 1 0-2.2Z" />
-                              </svg>
-                              Issue
-                            </a>
-                          ) : agent.pullRequestUrl ? (
-                            <a
-                              href={agent.pullRequestUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1.5 rounded-md border border-purple-500/30 bg-purple-500/10 px-2 py-1 text-xs text-purple-300 transition hover:bg-purple-500/20"
-                            >
-                              <svg
-                                viewBox="0 0 16 16"
-                                fill="currentColor"
-                                className="h-3.5 w-3.5"
-                              >
-                                <path d="M5 3.25a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Zm0 2.122a2.25 2.25 0 1 0-1.5 0v5.256a2.251 2.251 0 1 0 1.5 0V5.372ZM5 12.75a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Zm6-2.626a2.251 2.251 0 1 0 1.5 0V6.75A3.75 3.75 0 0 0 8.75 3H7.81l.72-.72a.75.75 0 0 0-1.06-1.06L5.22 3.47a.75.75 0 0 0 0 1.06l2.25 2.25a.75.75 0 0 0 1.06-1.06l-.72-.72h.94A2.25 2.25 0 0 1 11 6.75v3.374Zm.75 3.314a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5Z" />
-                              </svg>
-                              Pull request
-                            </a>
-                          ) : (
-                            <span className="text-xs text-white/20">—</span>
-                          )}
-                        </td>
-                        <td
-                          className="px-4 py-4 text-right align-top"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          {confirmKill === agent.name ? (
-                            <div className="flex items-center justify-end gap-1">
-                              <button
-                                onClick={() =>
-                                  terminate.mutate({
-                                    podName: agent.name,
-                                    namespace: namespace,
-                                    repoFullName: repoSlug ?? undefined,
-                                  })
-                                }
-                                disabled={terminate.isPending}
-                                className="rounded bg-red-600/40 px-2 py-1 text-xs text-red-200 hover:bg-red-600/60 disabled:opacity-50"
-                              >
-                                {terminate.isPending ? "…" : "Confirm"}
-                              </button>
-                              <button
-                                onClick={() => setConfirmKill(null)}
-                                className="rounded bg-white/10 px-2 py-1 text-xs hover:bg-white/20"
-                              >
-                                Cancel
-                              </button>
-                            </div>
-                          ) : (
-                            <button
-                              onClick={() => setConfirmKill(agent.name)}
-                              aria-label="Terminate agent"
-                              className="rounded p-1 text-red-500/50 hover:bg-red-500/10 hover:text-red-400"
-                            >
-                              <svg
-                                viewBox="0 0 16 16"
-                                fill="currentColor"
-                                className="h-4 w-4"
-                              >
-                                <path d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.75.75 0 1 1 1.06 1.06L9.06 8l3.22 3.22a.75.75 0 1 1-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 0 1-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06Z" />
-                              </svg>
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+            ) : agents.length === 0 ? null : (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h2 className="flex items-center gap-2 text-xs font-medium tracking-wider text-white/40 uppercase">
+                    Tasks
+                    <span className="rounded-full bg-white/10 px-1.5 text-[10px] text-white/50">
+                      {visibleAgents.length}
+                    </span>
+                  </h2>
+                  <label className="flex cursor-pointer items-center gap-2 text-xs text-white/50 select-none hover:text-white/70">
+                    <input
+                      type="checkbox"
+                      checked={hideCompleted}
+                      onChange={toggleHideCompleted}
+                      className="h-3.5 w-3.5 rounded border-white/20 bg-white/5 accent-purple-500"
+                    />
+                    Hide completed
+                  </label>
+                </div>
+
+                {visibleAgents.length === 0 ? (
+                  <div className="rounded-xl border border-white/10 bg-white/5 py-12 text-center text-sm text-white/40">
+                    All tasks are completed.{" "}
+                    <button
+                      onClick={toggleHideCompleted}
+                      className="text-white/70 underline hover:text-white"
+                    >
+                      Show them
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {visibleAgents.map((agent) =>
+                      agent.interactive ? (
+                        <InteractiveCard
+                          key={agent.name}
+                          agent={agent}
+                          namespace={namespace}
+                          repoFullName={repoSlug ?? undefined}
+                        />
+                      ) : (
+                        <TaskRow
+                          key={agent.name}
+                          agent={agent}
+                          namespace={namespace}
+                          repoFullName={repoSlug ?? undefined}
+                          onOpenLogs={setLogPod}
+                        />
+                      ),
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </>

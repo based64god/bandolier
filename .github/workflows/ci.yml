@@ -127,8 +127,7 @@ jobs:
       # process.env when skipped.
       - name: Apply migrations
         run: |
-          export DATABASE_URL="${POOLED_DATABASE_URL/-pooler/}"
           pnpm db:migrate
         env:
-          POOLED_DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
           SKIP_ENV_VALIDATION: "1"

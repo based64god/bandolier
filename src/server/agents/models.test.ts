@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  friendlyAwsError,
   fuzzyPickModel,
   pickDefaultModel,
   pickLatestGeminiFlash,
@@ -181,5 +182,40 @@ describe("fuzzyPickModel", () => {
   it("returns undefined for no match or an empty query", () => {
     expect(fuzzyPickModel("llama", models)).toBeUndefined();
     expect(fuzzyPickModel("   ", models)).toBeUndefined();
+  });
+});
+
+describe("friendlyAwsError", () => {
+  it("maps expired-token errors to an update-credentials message", () => {
+    expect(friendlyAwsError({ name: "ExpiredTokenException" })).toMatch(
+      /expired/i,
+    );
+    expect(friendlyAwsError({ name: "ExpiredToken" })).toMatch(/expired/i);
+  });
+
+  it("maps signature/client errors to an invalid-credentials message", () => {
+    expect(friendlyAwsError({ name: "InvalidSignatureException" })).toMatch(
+      /invalid/i,
+    );
+    expect(friendlyAwsError({ name: "UnrecognizedClientException" })).toMatch(
+      /invalid/i,
+    );
+  });
+
+  it("explains the missing Bedrock permission on access denied", () => {
+    expect(friendlyAwsError({ name: "AccessDeniedException" })).toMatch(
+      /permission/i,
+    );
+  });
+
+  it("falls back to the error message for unknown errors", () => {
+    expect(friendlyAwsError({ name: "SomethingElse", message: "boom" })).toBe(
+      "boom",
+    );
+  });
+
+  it("uses a generic message when there's no name or message", () => {
+    expect(friendlyAwsError({})).toBe("Failed to query AWS Bedrock models.");
+    expect(friendlyAwsError(null)).toBe("Failed to query AWS Bedrock models.");
   });
 });

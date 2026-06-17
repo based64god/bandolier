@@ -130,8 +130,8 @@ async function listBedrockModels(
 }
 
 /** Maps AWS SDK error names to clear, user-facing messages. */
-function friendlyAwsError(err: unknown): string {
-  const e = err as { name?: string; message?: string };
+export function friendlyAwsError(err: unknown): string {
+  const e = (err ?? {}) as { name?: string; message?: string };
   switch (e.name) {
     case "ExpiredTokenException":
     case "ExpiredToken":

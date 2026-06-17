@@ -25,7 +25,7 @@ import { OverviewPanel } from "./overview-panel";
 import { RepoConfigModal } from "./repo-config-modal";
 import { SearchableSelect, type SelectOption } from "./searchable-select";
 import { SettingsModal } from "./settings-modal";
-import { TaskRow } from "./task-row";
+import { TaskRow, TASK_COLUMNS } from "./task-row";
 
 type Repo = {
   fullName: string;
@@ -409,25 +409,50 @@ export function AgentDashboard({
                     </button>
                   </div>
                 ) : (
-                  <div className="space-y-2">
-                    {visibleAgents.map((agent) =>
-                      agent.interactive ? (
-                        <InteractiveCard
-                          key={agent.name}
-                          agent={agent}
-                          namespace={namespace}
-                          repoFullName={repoSlug ?? undefined}
-                        />
-                      ) : (
-                        <TaskRow
-                          key={agent.name}
-                          agent={agent}
-                          namespace={namespace}
-                          repoFullName={repoSlug ?? undefined}
-                          onOpenLogs={setLogPod}
-                        />
-                      ),
-                    )}
+                  <div className="overflow-hidden rounded-xl border border-white/10">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-white/10 bg-white/5 text-left text-xs font-medium tracking-wider text-white/50 uppercase">
+                          {[
+                            "Task",
+                            "Created by",
+                            "Status",
+                            "Currently",
+                            "Expires",
+                            "",
+                          ].map((h, i) => (
+                            <th key={i} className="px-4 py-3 align-top">
+                              {h}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-white/5">
+                        {visibleAgents.map((agent) =>
+                          agent.interactive ? (
+                            // Interactive sessions keep their expandable card,
+                            // spanning the full table width.
+                            <tr key={agent.name}>
+                              <td colSpan={TASK_COLUMNS} className="p-2">
+                                <InteractiveCard
+                                  agent={agent}
+                                  namespace={namespace}
+                                  repoFullName={repoSlug ?? undefined}
+                                />
+                              </td>
+                            </tr>
+                          ) : (
+                            <TaskRow
+                              key={agent.name}
+                              agent={agent}
+                              namespace={namespace}
+                              repoFullName={repoSlug ?? undefined}
+                              onOpenLogs={setLogPod}
+                            />
+                          ),
+                        )}
+                      </tbody>
+                    </table>
                   </div>
                 )}
               </div>

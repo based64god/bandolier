@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "~/trpc/react";
 import type { RouterOutputs } from "~/trpc/react";
 import { expiresIn } from "./agent-ui";
+import { OutputBadge, SourceBadge } from "./output-badge";
 import { StatusBadge } from "./status-badge";
 import { TASK_COLUMNS } from "./task-row";
 
@@ -118,27 +119,12 @@ export function InteractiveRow({
           className="px-3 py-2 align-middle md:px-4 md:py-3"
           onClick={(e) => e.stopPropagation()}
         >
-          {agent.createdIssueUrl ? (
-            <a
-              href={agent.createdIssueUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-xs text-emerald-300 transition hover:bg-emerald-500/20"
-            >
-              Issue
-            </a>
-          ) : agent.pullRequestUrl ? (
-            <a
-              href={agent.pullRequestUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 rounded-md border border-purple-500/30 bg-purple-500/10 px-2 py-1 text-xs text-purple-300 transition hover:bg-purple-500/20"
-            >
-              PR
-            </a>
-          ) : (
-            <span className="text-xs text-white/20">—</span>
-          )}
+          <OutputBadge
+            createdIssueUrl={agent.createdIssueUrl}
+            createdIssueState={agent.createdIssueState}
+            pullRequestUrl={agent.pullRequestUrl}
+            pullRequestState={agent.pullRequestState}
+          />
         </td>
 
         {/* Task (chevron + name) */}
@@ -163,20 +149,13 @@ export function InteractiveRow({
           className="hidden px-3 py-2 align-middle md:px-4 md:py-3 md:table-cell"
           onClick={(e) => e.stopPropagation()}
         >
-          {agent.source === "github-issue" && agent.issueUrl ? (
-            <a
-              href={agent.issueUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 rounded-md border border-sky-500/30 bg-sky-500/10 px-2 py-1 text-xs whitespace-nowrap text-sky-300 transition hover:bg-sky-500/20"
-            >
-              Issue #{agent.issueNumber}
-            </a>
-          ) : (
-            <span className="text-xs whitespace-nowrap text-white/50">
-              {agent.createdBy ?? "Dashboard"}
-            </span>
-          )}
+          <SourceBadge
+            source={agent.source}
+            issueUrl={agent.issueUrl}
+            issueNumber={agent.issueNumber}
+            issueState={agent.issueState}
+            createdBy={agent.createdBy}
+          />
         </td>
 
         {/* Currently — clamped to one line, full text on hover. Dropped on

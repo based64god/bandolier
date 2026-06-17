@@ -38,11 +38,11 @@ export function TaskRow({
       onClick={() => onOpenLogs(agent.name)}
       className="cursor-pointer hover:bg-white/[0.04]"
     >
-      <td className="px-4 py-3 align-top">
+      <td className="px-3 py-2 align-middle md:px-4 md:py-3">
         <StatusBadge status={agent.status} />
       </td>
 
-      <td className="px-4 py-3 align-top" onClick={(e) => e.stopPropagation()}>
+      <td className="px-3 py-2 align-middle md:px-4 md:py-3" onClick={(e) => e.stopPropagation()}>
         {agent.createdIssueUrl ? (
           <a
             href={agent.createdIssueUrl}
@@ -66,12 +66,12 @@ export function TaskRow({
         )}
       </td>
 
-      <td className="px-4 py-3 align-top">
+      <td className="px-3 py-2 align-middle md:px-4 md:py-3">
         <span className="text-sm text-white/90">{agent.displayName}</span>
       </td>
 
       <td
-        className="hidden px-4 py-3 align-top md:table-cell"
+        className="hidden px-3 py-2 align-middle md:px-4 md:py-3 md:table-cell"
         onClick={(e) => e.stopPropagation()}
       >
         {agent.source === "github-issue" && agent.issueUrl ? (
@@ -93,7 +93,7 @@ export function TaskRow({
       {/* Live "currently" line — clamped to one line so a long output can't
           grow the row height; the full text is available on hover. Dropped on
           narrow viewports where space is limited. */}
-      <td className="hidden px-4 py-3 align-top md:table-cell">
+      <td className="hidden px-3 py-2 align-middle md:px-4 md:py-3 md:table-cell">
         <span
           title={agent.currently ?? undefined}
           className="block max-w-[16rem] truncate text-xs text-white/40 italic"
@@ -102,12 +102,12 @@ export function TaskRow({
         </span>
       </td>
 
-      <td className="hidden px-4 py-3 align-top whitespace-nowrap text-white/50 tabular-nums md:table-cell">
+      <td className="hidden px-3 py-2 align-middle md:px-4 md:py-3 whitespace-nowrap text-white/50 tabular-nums md:table-cell">
         {expiresIn(agent.expiresAt)}
       </td>
 
       <td
-        className="px-4 py-3 text-right align-top"
+        className="px-3 py-2 text-right align-middle md:px-4 md:py-3"
         onClick={(e) => e.stopPropagation()}
       >
         {confirmKill ? (

@@ -1,0 +1,99 @@
+name: bandolier-self-host image
+
+# Build the self-host container — the agent-harness image plus the Go and Node
+# toolchains this repo builds with — and publish it to GitHub Container Registry
+# (ghcr.io). Pull requests build it as a CI check but do not push; pushes to the
+# default branch and version tags publish.
+#
+# Rebuilds when the image definition changes, when the harness base changes
+# (the harness image rebuilds from agent-harness/**), or when the repo's Go or
+# Node versions change (go.mod / package.json) — the versions are read from
+# those files and baked in, so the image always matches the repo's build.
+on:
+  push:
+    branches: [main]
+    tags: ["v*.*.*"]
+    paths:
+      - "self-host/**"
+      - "agent-harness/**"
+      - "agent-harness/go.mod"
+      - "package.json"
+      - ".github/workflows/self-host-image.yml"
+  pull_request:
+    paths:
+      - "self-host/**"
+      - "agent-harness/**"
+      - "agent-harness/go.mod"
+      - "package.json"
+      - ".github/workflows/self-host-image.yml"
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/bandolier-self-host
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Pin the toolchain base images to the exact versions the repo builds with,
+      # read straight from go.mod and package.json so they can't drift.
+      - name: Resolve Go & Node versions
+        id: versions
+        run: |
+          set -euo pipefail
+          GO_VERSION="$(grep -E '^go [0-9]' agent-harness/go.mod | awk '{print $2}')"
+          # engines.node is like "24.x" / ">=24" — keep the leading major.
+          NODE_VERSION="$(grep -oE '"node"[[:space:]]*:[[:space:]]*"[^"]+"' package.json | grep -oE '[0-9]+' | head -1)"
+          if [ -z "$GO_VERSION" ] || [ -z "$NODE_VERSION" ]; then
+            echo "Failed to resolve versions (go='$GO_VERSION' node='$NODE_VERSION')" >&2
+            exit 1
+          fi
+          echo "go=$GO_VERSION" >> "$GITHUB_OUTPUT"
+          echo "node=$NODE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Building with golang:$GO_VERSION and node:$NODE_VERSION"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Only authenticate when we intend to push (not on PRs from forks).
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=long
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: ./self-host
+          file: ./self-host/Dockerfile
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            GO_IMAGE=golang:${{ steps.versions.outputs.go }}
+            NODE_IMAGE=node:${{ steps.versions.outputs.node }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

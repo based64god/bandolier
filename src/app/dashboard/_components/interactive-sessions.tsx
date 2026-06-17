@@ -7,9 +7,31 @@ import type { RouterOutputs } from "~/trpc/react";
 import { expiresIn } from "./agent-ui";
 import { OutputBadge, SourceBadge } from "./output-badge";
 import { StatusBadge } from "./status-badge";
-import { TASK_COLUMNS } from "./task-row";
+import { MOBILE_TASK_COLUMNS, TASK_COLUMNS } from "./task-row";
 
 type Task = RouterOutputs["agents"]["list"][number];
+
+// Mirrors Tailwind's `md` breakpoint (48rem / 768px), which is where the table
+// shows or hides its three secondary columns.
+const MD_QUERY = "(min-width: 48rem)";
+
+/**
+ * Tracks whether the viewport is at or above the `md` breakpoint, so the
+ * expanded row can span exactly the columns that are actually rendered. Starts
+ * `true` to match SSR (where the optional columns are present) and corrects on
+ * mount, avoiding a hydration mismatch.
+ */
+function useIsDesktop() {
+  const [isDesktop, setIsDesktop] = useState(true);
+  useEffect(() => {
+    const mql = window.matchMedia(MD_QUERY);
+    const update = () => setIsDesktop(mql.matches);
+    update();
+    mql.addEventListener("change", update);
+    return () => mql.removeEventListener("change", update);
+  }, []);
+  return isDesktop;
+}
 
 /**
  * Renders an interactive agent as a row in the task table: the same columns as a
@@ -32,6 +54,7 @@ export function InteractiveRow({
   // there's nothing to interact with, so keep them out of the way. Live
   // sessions start open. The effects below handle later status transitions.
   const [collapsed, setCollapsed] = useState(!running);
+  const isDesktop = useIsDesktop();
   const utils = api.useUtils();
 
   const awaiting = agent.awaitingInput;
@@ -219,7 +242,14 @@ export function InteractiveRow({
       {/* Expanded body — live logs + input, spanning the full table width. */}
       {!collapsed && (
         <tr className={awaiting ? "bg-amber-500/[0.06]" : undefined}>
-          <td colSpan={TASK_COLUMNS} className="p-0">
+          {/* Span only the columns that exist at the current breakpoint. The
+              three secondary columns are dropped below `md`, so spanning all
+              seven there would conjure phantom columns and re-balance the
+              table, shifting every row sideways as it expands. */}
+          <td
+            colSpan={isDesktop ? TASK_COLUMNS : MOBILE_TASK_COLUMNS}
+            className="p-0"
+          >
             <LogView text={logs ?? ""} />
             <div className="border-t border-white/10 p-3">
               <div className="flex items-end gap-2">

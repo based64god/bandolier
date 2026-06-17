@@ -134,6 +134,29 @@ export async function getGithubItemState(
   }
 }
 
+/** Posts a comment on a GitHub issue. Best-effort: failures are logged but not thrown. */
+export async function postIssueComment(
+  token: string,
+  repoFullName: string,
+  issueNumber: number,
+  body: string,
+): Promise<void> {
+  const res = await fetch(
+    `https://api.github.com/repos/${repoFullName}/issues/${issueNumber}/comments`,
+    {
+      method: "POST",
+      headers: {
+        ...ghHeaders(token),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ body }),
+    },
+  );
+  if (!res.ok) {
+    throw new Error(`GitHub API ${res.status}: ${res.statusText}`);
+  }
+}
+
 /** Fetches a single issue, or null if not found. */
 export async function getIssue(
   token: string,

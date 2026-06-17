@@ -11,6 +11,7 @@ import { validateAwsCredentials } from "~/server/agents/aws";
 import {
   getGithubItemState,
   getIssue,
+  postIssueComment,
   type GithubItemState,
 } from "~/server/agents/github-issues";
 import { SPAWNED_BY_LABEL, spawnedByLabelValue } from "~/server/agents/labels";
@@ -976,6 +977,29 @@ export const agentsRouter = createTRPCRouter({
           gitName: gitIdentity.name,
           gitEmail: gitIdentity.email,
         });
+
+        // When a task is spawned from a GitHub issue (via the dashboard or the
+        // REST API), leave a comment so the issue author knows it was received.
+        if (issue && githubToken && input.repoFullName) {
+          const taskUrl = `${env.BETTER_AUTH_URL}/repo/${input.repoFullName}`;
+          const commentBody =
+            `🤖 Bando picked up this issue and is working on it.\n\n` +
+            `[View task on the dashboard](${taskUrl}) (job: \`${jobName}\`)`;
+          try {
+            await postIssueComment(
+              githubToken,
+              input.repoFullName,
+              issue.number,
+              commentBody,
+            );
+          } catch (err) {
+            console.warn("[bandolier:deploy] failed to post issue comment", {
+              issue: issue.number,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+        }
+
         return { jobName };
       } catch (err) {
         console.error("[bandolier:deploy] failed", {

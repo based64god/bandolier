@@ -3,29 +3,24 @@
 import { useEffect, useRef, useState } from "react";
 
 import { api } from "~/trpc/react";
-import { STATUS_STYLES } from "./agent-ui";
+import type { RouterOutputs } from "~/trpc/react";
+import { expiresIn, STATUS_STYLES } from "./agent-ui";
+import { TASK_COLUMNS } from "./task-row";
 
-export interface InteractiveAgent {
-  name: string;
-  jobName: string;
-  displayName: string;
-  status: string;
-  awaitingInput: boolean;
-  pullRequestUrl: string | null;
-  createdIssueUrl: string | null;
-}
+type Task = RouterOutputs["agents"]["list"][number];
 
 /**
- * Renders an interactive agent as a live card within the task list: streamed
- * logs, an input box, and a prominent "waiting for input" state. Expands and
- * collapses in place, and auto-expands when it starts awaiting input.
+ * Renders an interactive agent as a row in the task table: the same columns as a
+ * non-interactive task when collapsed, expanding in place to reveal streamed
+ * logs and an input box. Auto-expands when it starts awaiting input and
+ * auto-collapses when the session finishes.
  */
-export function InteractiveCard({
+export function InteractiveRow({
   agent,
   namespace,
   repoFullName,
 }: {
-  agent: InteractiveAgent;
+  agent: Task;
   namespace: string;
   repoFullName?: string;
 }) {
@@ -90,145 +85,201 @@ export function InteractiveCard({
     });
   }
 
+  const rowTint = awaiting ? "bg-amber-500/[0.06]" : "hover:bg-white/[0.04]";
+
   return (
-    <div
-      className={`overflow-hidden rounded-xl border ${
-        awaiting
-          ? "border-amber-400/60 bg-amber-500/[0.06] shadow-[0_0_0_1px_rgba(251,191,36,0.25)]"
-          : "border-white/10 bg-white/5"
-      }`}
-    >
-      {/* Header — click anywhere (outside the action buttons) to collapse. */}
-      <div
+    <>
+      {/* Collapsed header row — same columns as a non-interactive task. Click
+          anywhere (outside links/buttons) to expand the live session. */}
+      <tr
         onClick={() => setCollapsed((c) => !c)}
-        className="flex cursor-pointer items-center justify-between gap-3 border-b border-white/10 px-4 py-2.5 select-none"
+        className={`cursor-pointer select-none ${rowTint}`}
       >
-        <div className="flex min-w-0 items-center gap-2">
-          <svg
-            viewBox="0 0 16 16"
-            fill="currentColor"
-            aria-hidden="true"
-            className={`h-3.5 w-3.5 shrink-0 text-white/40 transition-transform ${
-              collapsed ? "-rotate-90" : ""
-            }`}
-          >
-            <path d="M4.22 6.22a.75.75 0 0 1 1.06 0L8 8.94l2.72-2.72a.75.75 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 7.28a.75.75 0 0 1 0-1.06Z" />
-          </svg>
-          <span className="truncate text-sm text-white/90">
-            {agent.displayName}
-          </span>
-          <span
-            className={`shrink-0 rounded-full border px-2 py-0.5 text-xs ${STATUS_STYLES[agent.status] ?? STATUS_STYLES.Unknown}`}
-          >
-            {agent.status}
-          </span>
-          {awaiting && (
-            <span className="flex shrink-0 items-center gap-1 rounded-full border border-amber-400/50 bg-amber-400/15 px-2 py-0.5 text-xs font-medium text-amber-200">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-300" />
-              Waiting for input
+        {/* Status (+ awaiting pill) */}
+        <td className="px-4 py-3 align-top">
+          <div className="flex flex-col items-start gap-1">
+            <span
+              className={`rounded-full border px-2 py-0.5 text-xs whitespace-nowrap ${STATUS_STYLES[agent.status] ?? STATUS_STYLES.Unknown}`}
+            >
+              {agent.status}
             </span>
-          )}
-        </div>
-        <div
+            {awaiting && (
+              <span className="flex items-center gap-1 rounded-full border border-amber-400/50 bg-amber-400/15 px-2 py-0.5 text-xs font-medium whitespace-nowrap text-amber-200">
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-300" />
+                Waiting
+              </span>
+            )}
+          </div>
+        </td>
+
+        {/* Output */}
+        <td
+          className="px-4 py-3 align-top"
           onClick={(e) => e.stopPropagation()}
-          className="flex shrink-0 items-center gap-2"
         >
-          {agent.createdIssueUrl && (
+          {agent.createdIssueUrl ? (
             <a
               href={agent.createdIssueUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-xs text-emerald-300 hover:bg-emerald-500/20"
+              className="inline-flex items-center gap-1.5 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-xs text-emerald-300 transition hover:bg-emerald-500/20"
             >
               Issue
             </a>
-          )}
-          {agent.pullRequestUrl && (
+          ) : agent.pullRequestUrl ? (
             <a
               href={agent.pullRequestUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="rounded-md border border-purple-500/30 bg-purple-500/10 px-2 py-1 text-xs text-purple-300 hover:bg-purple-500/20"
+              className="inline-flex items-center gap-1.5 rounded-md border border-purple-500/30 bg-purple-500/10 px-2 py-1 text-xs text-purple-300 transition hover:bg-purple-500/20"
             >
-              Pull request
+              PR
             </a>
+          ) : (
+            <span className="text-xs text-white/20">—</span>
           )}
-          {running && (
+        </td>
+
+        {/* Task (chevron + name) */}
+        <td className="px-4 py-3 align-top">
+          <div className="flex items-center gap-2">
+            <svg
+              viewBox="0 0 16 16"
+              fill="currentColor"
+              aria-hidden="true"
+              className={`h-3.5 w-3.5 shrink-0 text-white/40 transition-transform ${
+                collapsed ? "-rotate-90" : ""
+              }`}
+            >
+              <path d="M4.22 6.22a.75.75 0 0 1 1.06 0L8 8.94l2.72-2.72a.75.75 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 7.28a.75.75 0 0 1 0-1.06Z" />
+            </svg>
+            <span className="text-sm text-white/90">{agent.displayName}</span>
+          </div>
+        </td>
+
+        {/* Created by */}
+        <td
+          className="px-4 py-3 align-top"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {agent.source === "github-issue" && agent.issueUrl ? (
+            <a
+              href={agent.issueUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-md border border-sky-500/30 bg-sky-500/10 px-2 py-1 text-xs whitespace-nowrap text-sky-300 transition hover:bg-sky-500/20"
+            >
+              Issue #{agent.issueNumber}
+            </a>
+          ) : (
+            <span className="text-xs whitespace-nowrap text-white/50">
+              {agent.createdBy ?? "Dashboard"}
+            </span>
+          )}
+        </td>
+
+        {/* Currently — clamped to one line, full text on hover. */}
+        <td className="px-4 py-3 align-top">
+          <span
+            title={agent.currently ?? undefined}
+            className="block max-w-[16rem] truncate text-xs text-white/40 italic"
+          >
+            {agent.currently ?? "—"}
+          </span>
+        </td>
+
+        {/* Expires */}
+        <td className="px-4 py-3 align-top whitespace-nowrap text-white/50 tabular-nums">
+          {expiresIn(agent.expiresAt)}
+        </td>
+
+        {/* Actions */}
+        <td
+          className="px-4 py-3 text-right align-top"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-center justify-end gap-2">
+            {running && (
+              <button
+                onClick={() =>
+                  endSession.mutate({
+                    namespace,
+                    jobName: agent.jobName,
+                    repoFullName,
+                  })
+                }
+                disabled={endSession.isPending || endSession.isSuccess}
+                className="rounded-md border border-white/10 px-2 py-1 text-xs whitespace-nowrap text-white/60 hover:bg-white/10 disabled:opacity-40"
+                title="Close the session and open a PR if there are commits"
+              >
+                {endSession.isSuccess ? "Ending…" : "End session"}
+              </button>
+            )}
             <button
               onClick={() =>
-                endSession.mutate({
+                terminate.mutate({
+                  podName: agent.name,
                   namespace,
-                  jobName: agent.jobName,
                   repoFullName,
                 })
               }
-              disabled={endSession.isPending || endSession.isSuccess}
-              className="rounded-md border border-white/10 px-2 py-1 text-xs text-white/60 hover:bg-white/10 disabled:opacity-40"
-              title="Close the session and open a PR if there are commits"
+              disabled={terminate.isPending}
+              aria-label="Terminate agent"
+              className="rounded p-1 text-red-500/50 hover:bg-red-500/10 hover:text-red-400 disabled:opacity-40"
             >
-              {endSession.isSuccess ? "Ending…" : "End session"}
+              <svg viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4">
+                <path d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.75.75 0 1 1 1.06 1.06L9.06 8l3.22 3.22a.75.75 0 1 1-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 0 1-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06Z" />
+              </svg>
             </button>
-          )}
-          <button
-            onClick={() =>
-              terminate.mutate({ podName: agent.name, namespace, repoFullName })
-            }
-            disabled={terminate.isPending}
-            aria-label="Terminate agent"
-            className="rounded p-1 text-red-500/50 hover:bg-red-500/10 hover:text-red-400 disabled:opacity-40"
-          >
-            <svg viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4">
-              <path d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.75.75 0 1 1 1.06 1.06L9.06 8l3.22 3.22a.75.75 0 1 1-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 0 1-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06Z" />
-            </svg>
-          </button>
-        </div>
-      </div>
-
-      {!collapsed && (
-        <>
-          {/* Logs */}
-          <LogView text={logs ?? ""} />
-
-          {/* Input */}
-          <div className="border-t border-white/10 p-3">
-            <div className="flex items-end gap-2">
-              <textarea
-                rows={2}
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    send();
-                  }
-                }}
-                disabled={!running}
-                placeholder={
-                  running
-                    ? awaiting
-                      ? "The agent is waiting — type a message and press Enter…"
-                      : "Send a message (the agent will pick it up after its current turn)…"
-                    : "Session ended."
-                }
-                className="min-h-0 flex-1 resize-y rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/30 focus:outline-none disabled:opacity-40"
-              />
-              <button
-                onClick={send}
-                disabled={!running || !draft.trim() || sendInput.isPending}
-                className="rounded-lg bg-purple-600 px-3 py-2 text-sm font-medium hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {sendInput.isPending ? "Sending…" : "Send"}
-              </button>
-            </div>
-            {sendInput.error && (
-              <p className="mt-1.5 text-xs text-red-400">
-                {sendInput.error.message}
-              </p>
-            )}
           </div>
-        </>
+        </td>
+      </tr>
+
+      {/* Expanded body — live logs + input, spanning the full table width. */}
+      {!collapsed && (
+        <tr className={awaiting ? "bg-amber-500/[0.06]" : undefined}>
+          <td colSpan={TASK_COLUMNS} className="p-0">
+            <LogView text={logs ?? ""} />
+            <div className="border-t border-white/10 p-3">
+              <div className="flex items-end gap-2">
+                <textarea
+                  rows={2}
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      send();
+                    }
+                  }}
+                  disabled={!running}
+                  placeholder={
+                    running
+                      ? awaiting
+                        ? "The agent is waiting — type a message and press Enter…"
+                        : "Send a message (the agent will pick it up after its current turn)…"
+                      : "Session ended."
+                  }
+                  className="min-h-0 flex-1 resize-y rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/30 focus:outline-none disabled:opacity-40"
+                />
+                <button
+                  onClick={send}
+                  disabled={!running || !draft.trim() || sendInput.isPending}
+                  className="rounded-lg bg-purple-600 px-3 py-2 text-sm font-medium hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {sendInput.isPending ? "Sending…" : "Send"}
+                </button>
+              </div>
+              {sendInput.error && (
+                <p className="mt-1.5 text-xs text-red-400">
+                  {sendInput.error.message}
+                </p>
+              )}
+            </div>
+          </td>
+        </tr>
       )}
-    </div>
+    </>
   );
 }
 

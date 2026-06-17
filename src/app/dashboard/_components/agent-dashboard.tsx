@@ -12,7 +12,7 @@ import { authClient } from "~/server/better-auth/client";
 import { api } from "~/trpc/react";
 import { isAgentDone } from "./agent-ui";
 import { DeployModal } from "./deploy-modal";
-import { InteractiveCard } from "./interactive-sessions";
+import { InteractiveRow } from "./interactive-sessions";
 import { LogModal } from "./log-modal";
 import {
   primeAudio,
@@ -25,7 +25,7 @@ import { OverviewPanel } from "./overview-panel";
 import { RepoConfigModal } from "./repo-config-modal";
 import { SearchableSelect, type SelectOption } from "./searchable-select";
 import { SettingsModal } from "./settings-modal";
-import { TaskRow, TASK_COLUMNS } from "./task-row";
+import { TaskRow } from "./task-row";
 
 type Repo = {
   fullName: string;
@@ -433,17 +433,14 @@ export function AgentDashboard({
                       <tbody className="divide-y divide-white/5">
                         {visibleAgents.map((agent) =>
                           agent.interactive ? (
-                            // Interactive sessions keep their expandable card,
-                            // spanning the full table width.
-                            <tr key={agent.name}>
-                              <td colSpan={TASK_COLUMNS} className="p-2">
-                                <InteractiveCard
-                                  agent={agent}
-                                  namespace={namespace}
-                                  repoFullName={repoSlug ?? undefined}
-                                />
-                              </td>
-                            </tr>
+                            // Interactive sessions are rows too, expanding in
+                            // place to reveal their live logs + input.
+                            <InteractiveRow
+                              key={agent.name}
+                              agent={agent}
+                              namespace={namespace}
+                              repoFullName={repoSlug ?? undefined}
+                            />
                           ) : (
                             <TaskRow
                               key={agent.name}

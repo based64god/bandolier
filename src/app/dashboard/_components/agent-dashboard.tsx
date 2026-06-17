@@ -112,6 +112,9 @@ export function AgentDashboard({
   const [showDeploy, setShowDeploy] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showWebhooks, setShowWebhooks] = useState(false);
+  // Mobile-only: the secondary header controls collapse into this menu so the
+  // bar stays within the viewport on narrow screens.
+  const [menuOpen, setMenuOpen] = useState(false);
 
   // The selected repo lives in the URL (repoSlug) so it survives refreshes.
   // Namespace is derived from the slug directly so the agent list can load
@@ -225,7 +228,7 @@ export function AgentDashboard({
             {selectedRepo?.canManageWebhooks && (
               <button
                 onClick={() => setShowWebhooks(true)}
-                className="rounded-lg border border-white/10 px-3 py-1.5 text-sm font-medium text-white/70 hover:bg-white/10 hover:text-white"
+                className="hidden rounded-lg border border-white/10 px-3 py-1.5 text-sm font-medium text-white/70 hover:bg-white/10 hover:text-white sm:inline-flex"
               >
                 Repo config
               </button>
@@ -240,6 +243,7 @@ export function AgentDashboard({
                   : `Updated ${new Date(dataUpdatedAt).toLocaleTimeString()}`}
               </span>
             )}
+            {/* Deploy is important enough to always render, even on mobile. */}
             <button
               onClick={() => setShowDeploy(true)}
               disabled={!selectedRepo || !kubeConfigured}
@@ -247,81 +251,188 @@ export function AgentDashboard({
             >
               + Deploy Agent
             </button>
-            <button
-              onClick={toggleNotify}
-              aria-label={
-                notify
-                  ? "Disable completion notifications"
-                  : "Enable completion notifications"
-              }
-              title={
-                notify
-                  ? "Completion alerts on (chime + notification)"
-                  : "Completion alerts off"
-              }
-              className={`rounded-lg p-1.5 hover:bg-white/10 ${
-                notify ? "text-purple-300" : "text-white/40 hover:text-white"
-              }`}
-            >
-              {notify ? (
+
+            {/* Secondary controls — inline from sm: up, collapsed into the
+                hamburger menu below on narrow screens. */}
+            <div className="hidden items-center gap-2 sm:flex sm:gap-3">
+              <button
+                onClick={toggleNotify}
+                aria-label={
+                  notify
+                    ? "Disable completion notifications"
+                    : "Enable completion notifications"
+                }
+                title={
+                  notify
+                    ? "Completion alerts on (chime + notification)"
+                    : "Completion alerts off"
+                }
+                className={`rounded-lg p-1.5 hover:bg-white/10 ${
+                  notify ? "text-purple-300" : "text-white/40 hover:text-white"
+                }`}
+              >
+                {notify ? (
+                  <svg
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                    className="h-5 w-5"
+                  >
+                    <path d="M10 2a5 5 0 0 0-5 5v2.6c0 .54-.21 1.06-.6 1.45L3 12.5V14h14v-1.5l-1.4-1.45a2.05 2.05 0 0 1-.6-1.45V7a5 5 0 0 0-5-5Zm0 16a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 10 18Z" />
+                  </svg>
+                ) : (
+                  <svg
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                    className="h-5 w-5"
+                  >
+                    <path d="M10 2a5 5 0 0 0-5 5v2.6c0 .54-.21 1.06-.6 1.45L3 12.5V14h14v-1.5l-1.4-1.45a2.05 2.05 0 0 1-.6-1.45V7a5 5 0 0 0-5-5Zm0 16a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 10 18Z" />
+                    <path
+                      d="M3 3l14 14"
+                      stroke="currentColor"
+                      strokeWidth="1.6"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                )}
+              </button>
+              <button
+                onClick={() => setShowSettings(true)}
+                aria-label="Settings"
+                title="Settings"
+                className="rounded-lg p-1.5 text-white/50 hover:bg-white/10 hover:text-white"
+              >
                 <svg
                   viewBox="0 0 20 20"
                   fill="currentColor"
                   className="h-5 w-5"
                 >
-                  <path d="M10 2a5 5 0 0 0-5 5v2.6c0 .54-.21 1.06-.6 1.45L3 12.5V14h14v-1.5l-1.4-1.45a2.05 2.05 0 0 1-.6-1.45V7a5 5 0 0 0-5-5Zm0 16a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 10 18Z" />
-                </svg>
-              ) : (
-                <svg
-                  viewBox="0 0 20 20"
-                  fill="currentColor"
-                  className="h-5 w-5"
-                >
-                  <path d="M10 2a5 5 0 0 0-5 5v2.6c0 .54-.21 1.06-.6 1.45L3 12.5V14h14v-1.5l-1.4-1.45a2.05 2.05 0 0 1-.6-1.45V7a5 5 0 0 0-5-5Zm0 16a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 10 18Z" />
                   <path
-                    d="M3 3l14 14"
-                    stroke="currentColor"
-                    strokeWidth="1.6"
-                    strokeLinecap="round"
+                    fillRule="evenodd"
+                    d="M8.34 1.94a1.5 1.5 0 0 1 3.32 0l.12.66a1.5 1.5 0 0 0 2.06 1.19l.63-.25a1.5 1.5 0 0 1 1.92 2.05l-.32.6a1.5 1.5 0 0 0 .79 2.16l.64.23a1.5 1.5 0 0 1 0 2.84l-.64.23a1.5 1.5 0 0 0-.79 2.16l.32.6a1.5 1.5 0 0 1-1.92 2.05l-.63-.25a1.5 1.5 0 0 0-2.06 1.19l-.12.66a1.5 1.5 0 0 1-3.32 0l-.12-.66a1.5 1.5 0 0 0-2.06-1.19l-.63.25a1.5 1.5 0 0 1-1.92-2.05l.32-.6a1.5 1.5 0 0 0-.79-2.16l-.64-.23a1.5 1.5 0 0 1 0-2.84l.64-.23a1.5 1.5 0 0 0 .79-2.16l-.32-.6a1.5 1.5 0 0 1 1.92-2.05l.63.25a1.5 1.5 0 0 0 2.06-1.19l.12-.66ZM10 13a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"
+                    clipRule="evenodd"
                   />
                 </svg>
-              )}
-            </button>
-            <button
-              onClick={() => setShowSettings(true)}
-              aria-label="Settings"
-              title="Settings"
-              className="rounded-lg p-1.5 text-white/50 hover:bg-white/10 hover:text-white"
-            >
-              <svg viewBox="0 0 20 20" fill="currentColor" className="h-5 w-5">
-                <path
-                  fillRule="evenodd"
-                  d="M8.34 1.94a1.5 1.5 0 0 1 3.32 0l.12.66a1.5 1.5 0 0 0 2.06 1.19l.63-.25a1.5 1.5 0 0 1 1.92 2.05l-.32.6a1.5 1.5 0 0 0 .79 2.16l.64.23a1.5 1.5 0 0 1 0 2.84l-.64.23a1.5 1.5 0 0 0-.79 2.16l.32.6a1.5 1.5 0 0 1-1.92 2.05l-.63-.25a1.5 1.5 0 0 0-2.06 1.19l-.12.66a1.5 1.5 0 0 1-3.32 0l-.12-.66a1.5 1.5 0 0 0-2.06-1.19l-.63.25a1.5 1.5 0 0 1-1.92-2.05l.32-.6a1.5 1.5 0 0 0-.79-2.16l-.64-.23a1.5 1.5 0 0 1 0-2.84l.64-.23a1.5 1.5 0 0 0 .79-2.16l-.32-.6a1.5 1.5 0 0 1 1.92-2.05l.63.25a1.5 1.5 0 0 0 2.06-1.19l.12-.66ZM10 13a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"
-                  clipRule="evenodd"
-                />
-              </svg>
-            </button>
-            <div className="flex items-center gap-2 sm:border-l sm:border-white/10 sm:pl-3">
-              {user.image && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={user.image}
-                  alt={user.name}
-                  className="h-7 w-7 rounded-full"
-                />
-              )}
-              <span className="hidden text-sm text-white/60 sm:inline">
-                {user.name}
-              </span>
-              <button
-                onClick={async () => {
-                  await authClient.signOut();
-                  router.refresh();
-                }}
-                className="rounded bg-white/10 px-2 py-1 text-xs text-white/60 hover:bg-white/20 hover:text-white"
-              >
-                Sign out
               </button>
+              <div className="flex items-center gap-2 sm:border-l sm:border-white/10 sm:pl-3">
+                {user.image && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={user.image}
+                    alt={user.name}
+                    className="h-7 w-7 rounded-full"
+                  />
+                )}
+                <span className="hidden text-sm text-white/60 sm:inline">
+                  {user.name}
+                </span>
+                <button
+                  onClick={async () => {
+                    await authClient.signOut();
+                    router.refresh();
+                  }}
+                  className="rounded bg-white/10 px-2 py-1 text-xs text-white/60 hover:bg-white/20 hover:text-white"
+                >
+                  Sign out
+                </button>
+              </div>
+            </div>
+
+            {/* Hamburger — mobile only. Holds the secondary controls so the bar
+                never overflows on narrow screens. */}
+            <div className="relative sm:hidden">
+              <button
+                onClick={() => setMenuOpen((o) => !o)}
+                aria-label="Menu"
+                aria-expanded={menuOpen}
+                aria-haspopup="menu"
+                className="rounded-lg p-1.5 text-white/60 hover:bg-white/10 hover:text-white"
+              >
+                <svg
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                  className="h-5 w-5"
+                >
+                  <path
+                    fillRule="evenodd"
+                    d="M3 5.75A.75.75 0 0 1 3.75 5h12.5a.75.75 0 0 1 0 1.5H3.75A.75.75 0 0 1 3 5.75Zm0 4.25A.75.75 0 0 1 3.75 9.25h12.5a.75.75 0 0 1 0 1.5H3.75A.75.75 0 0 1 3 10Zm.75 3.5a.75.75 0 0 0 0 1.5h12.5a.75.75 0 0 0 0-1.5H3.75Z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+              </button>
+              {menuOpen && (
+                <>
+                  {/* Click-away backdrop. */}
+                  <button
+                    aria-hidden="true"
+                    tabIndex={-1}
+                    onClick={() => setMenuOpen(false)}
+                    className="fixed inset-0 z-10 cursor-default"
+                  />
+                  <div
+                    role="menu"
+                    className="absolute right-0 z-20 mt-2 w-56 origin-top-right rounded-xl border border-white/10 bg-[#1b1340] p-2 shadow-xl"
+                  >
+                    <div className="flex items-center gap-2 border-b border-white/10 px-2 pb-2">
+                      {user.image && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={user.image}
+                          alt={user.name}
+                          className="h-7 w-7 rounded-full"
+                        />
+                      )}
+                      <span className="truncate text-sm text-white/70">
+                        {user.name}
+                      </span>
+                    </div>
+                    {selectedRepo?.canManageWebhooks && (
+                      <button
+                        role="menuitem"
+                        onClick={() => {
+                          setMenuOpen(false);
+                          setShowWebhooks(true);
+                        }}
+                        className="mt-1 block w-full rounded-lg px-2 py-2 text-left text-sm text-white/70 hover:bg-white/10 hover:text-white"
+                      >
+                        Repo config
+                      </button>
+                    )}
+                    <button
+                      role="menuitem"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        void toggleNotify();
+                      }}
+                      className="block w-full rounded-lg px-2 py-2 text-left text-sm text-white/70 hover:bg-white/10 hover:text-white"
+                    >
+                      {notify
+                        ? "Disable notifications"
+                        : "Enable notifications"}
+                    </button>
+                    <button
+                      role="menuitem"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        setShowSettings(true);
+                      }}
+                      className="block w-full rounded-lg px-2 py-2 text-left text-sm text-white/70 hover:bg-white/10 hover:text-white"
+                    >
+                      Settings
+                    </button>
+                    <button
+                      role="menuitem"
+                      onClick={async () => {
+                        setMenuOpen(false);
+                        await authClient.signOut();
+                        router.refresh();
+                      }}
+                      className="block w-full rounded-lg px-2 py-2 text-left text-sm text-white/70 hover:bg-white/10 hover:text-white"
+                    >
+                      Sign out
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>

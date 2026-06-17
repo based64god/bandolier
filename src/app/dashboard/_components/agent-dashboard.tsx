@@ -215,7 +215,7 @@ export function AgentDashboard({
                 className="flex items-center gap-2.5 transition hover:opacity-80"
               >
                 <BandolierIcon className="h-7 w-7 shrink-0" />
-                Bandolier
+                <span className="hidden sm:inline">Bandolier</span>
               </Link>
             </h1>
 
@@ -253,7 +253,7 @@ export function AgentDashboard({
               disabled={!selectedRepo || !kubeConfigured}
               className="rounded-lg bg-purple-600 px-3 py-1.5 text-sm font-medium hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              + Deploy Agent
+              +<span className="hidden sm:inline"> Deploy Agent</span>
             </button>
 
             {/* Secondary controls — inline from sm: up, collapsed into the

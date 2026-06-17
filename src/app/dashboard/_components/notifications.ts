@@ -48,6 +48,33 @@ export function primeAudio() {
   void ctx()?.resume();
 }
 
+/**
+ * Browsers start every AudioContext suspended and only resume it from within a
+ * user gesture. `primeAudio` covers the gesture that flips the toggle on, but
+ * the preference is persisted — on every later visit `notify` is already true,
+ * so the toggle is never clicked and the context stays suspended, leaving the
+ * chime silent. This hook re-arms the unlock: while notifications are enabled it
+ * primes audio on the next user gesture of the session, then detaches.
+ */
+export function useChimeUnlock(enabled: boolean) {
+  useEffect(() => {
+    if (!enabled || typeof window === "undefined") return;
+    // Already running (primed earlier this session) — nothing to arm.
+    if (ctx()?.state === "running") return;
+    const unlock = () => {
+      primeAudio();
+      remove();
+    };
+    const remove = () => {
+      window.removeEventListener("pointerdown", unlock);
+      window.removeEventListener("keydown", unlock);
+    };
+    window.addEventListener("pointerdown", unlock);
+    window.addEventListener("keydown", unlock);
+    return remove;
+  }, [enabled]);
+}
+
 function playChime() {
   const ac = ctx();
   if (!ac) return;

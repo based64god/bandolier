@@ -18,6 +18,7 @@ import {
   primeAudio,
   requestNotificationPermission,
   useAwaitingInputAlerts,
+  useChimeUnlock,
   useCompletionAlerts,
   useNotifyPref,
 } from "./notifications";
@@ -186,6 +187,9 @@ export function AgentDashboard({
 
   // Chime + system notification when an agent finishes or starts awaiting input.
   const [notify, setNotify] = useNotifyPref();
+  // Re-arm the audio unlock on each visit where notifications are already on
+  // (the toggle gesture only primes the session it's clicked in).
+  useChimeUnlock(notify);
   useCompletionAlerts(agents, notify);
   useAwaitingInputAlerts(interactiveAgents, notify);
 

@@ -4,7 +4,8 @@ import { useState } from "react";
 
 import { api } from "~/trpc/react";
 import type { RouterOutputs } from "~/trpc/react";
-import { expiresIn, STATUS_STYLES } from "./agent-ui";
+import { expiresIn } from "./agent-ui";
+import { StatusBadge } from "./status-badge";
 
 type Task = RouterOutputs["agents"]["list"][number];
 
@@ -38,11 +39,7 @@ export function TaskRow({
       className="cursor-pointer hover:bg-white/[0.04]"
     >
       <td className="px-4 py-3 align-top">
-        <span
-          className={`rounded-full border px-2 py-0.5 text-xs whitespace-nowrap ${STATUS_STYLES[agent.status] ?? STATUS_STYLES.Unknown}`}
-        >
-          {agent.status}
-        </span>
+        <StatusBadge status={agent.status} />
       </td>
 
       <td className="px-4 py-3 align-top" onClick={(e) => e.stopPropagation()}>
@@ -73,7 +70,10 @@ export function TaskRow({
         <span className="text-sm text-white/90">{agent.displayName}</span>
       </td>
 
-      <td className="px-4 py-3 align-top" onClick={(e) => e.stopPropagation()}>
+      <td
+        className="hidden px-4 py-3 align-top md:table-cell"
+        onClick={(e) => e.stopPropagation()}
+      >
         {agent.source === "github-issue" && agent.issueUrl ? (
           <a
             href={agent.issueUrl}
@@ -91,8 +91,9 @@ export function TaskRow({
       </td>
 
       {/* Live "currently" line — clamped to one line so a long output can't
-          grow the row height; the full text is available on hover. */}
-      <td className="px-4 py-3 align-top">
+          grow the row height; the full text is available on hover. Dropped on
+          narrow viewports where space is limited. */}
+      <td className="hidden px-4 py-3 align-top md:table-cell">
         <span
           title={agent.currently ?? undefined}
           className="block max-w-[16rem] truncate text-xs text-white/40 italic"
@@ -101,7 +102,7 @@ export function TaskRow({
         </span>
       </td>
 
-      <td className="px-4 py-3 align-top whitespace-nowrap text-white/50 tabular-nums">
+      <td className="hidden px-4 py-3 align-top whitespace-nowrap text-white/50 tabular-nums md:table-cell">
         {expiresIn(agent.expiresAt)}
       </td>
 

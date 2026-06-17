@@ -96,7 +96,10 @@ export function OverviewPanel({ notify }: { notify: boolean }) {
             <tr className="border-b border-white/10 bg-white/5 text-left text-xs font-medium tracking-wider text-white/50 uppercase">
               {[
                 { label: "Status", width: "w-[14%]", center: true },
-                { label: "Output", width: "w-[12%]" },
+                // Wider on mobile so the output pill (Issue/PR + state glyph)
+                // fits its cell; without the extra room the fixed layout
+                // starves this column and the badge spills into Repository.
+                { label: "Output", width: "w-[28%] md:w-[12%]" },
                 { label: "Repository", width: "w-[auto]" },
                 // Dropped on narrow viewports where space is limited — the row
                 // stays readable with Status/Output/Repository alone.

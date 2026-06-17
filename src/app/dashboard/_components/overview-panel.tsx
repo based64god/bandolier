@@ -3,9 +3,9 @@
 import { useRouter } from "next/navigation";
 
 import { api } from "~/trpc/react";
-import { STATUS_STYLES } from "./agent-ui";
 import { useAwaitingInputAlerts, useCompletionAlerts } from "./notifications";
 import { OutputBadge, SourceBadge } from "./output-badge";
+import { StatusBadge } from "./status-badge";
 
 // Active agents float to the top; finished ones sort by soonest expiry.
 const STATUS_RANK: Record<string, number> = {
@@ -95,16 +95,30 @@ export function OverviewPanel({ notify }: { notify: boolean }) {
       </div>
 
       <div className="overflow-hidden rounded-xl border border-white/10">
-        <table className="w-full text-sm">
+        {/* Mirrors the per-repo task list's layout (Status/Output first, a
+            compact density, optional columns dropped on narrow viewports). The
+            one departure: the repository that owns the task takes priority over
+            the task description — it's the primary column, with the task name as
+            a muted second line that's dropped on mobile, where the repo alone
+            stands in for the task. */}
+        <table className="w-full table-fixed text-sm">
           <thead>
             <tr className="border-b border-white/10 bg-white/5 text-left text-xs font-medium tracking-wider text-white/50 uppercase">
-              {["Repository", "Task", "Created by", "Status", "Output"].map(
-                (h) => (
-                  <th key={h} className="px-4 py-4 align-top">
-                    {h}
-                  </th>
-                ),
-              )}
+              {[
+                { label: "Status", width: "w-[14%]" },
+                { label: "Output", width: "w-[12%]" },
+                { label: "Repository", width: "w-[auto]" },
+                // Dropped on narrow viewports where space is limited — the row
+                // stays readable with Status/Output/Repository alone.
+                { label: "Created by", width: "w-[22%]", optional: true },
+              ].map((h, i) => (
+                <th
+                  key={i}
+                  className={`px-3 py-2 align-middle md:px-4 md:py-3 ${h.width} ${h.optional ? "hidden md:table-cell" : ""}`}
+                >
+                  {h.label}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody className="divide-y divide-white/5">
@@ -121,40 +135,9 @@ export function OverviewPanel({ notify }: { notify: boolean }) {
                     repo ? "cursor-pointer hover:bg-white/[0.04]" : undefined
                   }
                 >
-                  <td className="px-4 py-4 align-top">
-                    {repo ? (
-                      <span className="text-sm whitespace-nowrap">
-                        <span className="text-white/40">{owner}/</span>
-                        <span className="text-white/90">{name}</span>
-                      </span>
-                    ) : (
-                      <span className="text-xs text-white/30 italic">
-                        No repository
-                      </span>
-                    )}
-                  </td>
-                  <td className="max-w-md px-4 py-4 align-top">
-                    <span className="block text-sm break-words text-white/90">
-                      {agent.displayName}
-                    </span>
-                  </td>
-                  <td className="px-4 py-4 align-top">
-                    <SourceBadge
-                      source={agent.source}
-                      issueUrl={agent.issueUrl}
-                      issueNumber={agent.issueNumber}
-                      issueState={agent.issueState}
-                      createdBy={agent.createdBy}
-                      onClick={(e) => e.stopPropagation()}
-                    />
-                  </td>
-                  <td className="px-4 py-4 align-top">
+                  <td className="px-3 py-2 align-middle md:px-4 md:py-3">
                     <div className="flex flex-col items-start gap-1">
-                      <span
-                        className={`rounded-full border px-2 py-0.5 text-xs ${STATUS_STYLES[agent.status] ?? STATUS_STYLES.Unknown}`}
-                      >
-                        {agent.status}
-                      </span>
+                      <StatusBadge status={agent.status} />
                       {agent.awaitingInput && (
                         <span className="flex items-center gap-1 rounded-full border border-amber-400/50 bg-amber-400/15 px-2 py-0.5 text-xs font-medium text-amber-200">
                           <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-300" />
@@ -163,8 +146,9 @@ export function OverviewPanel({ notify }: { notify: boolean }) {
                       )}
                     </div>
                   </td>
+
                   <td
-                    className="px-4 py-4 align-top"
+                    className="px-3 py-2 align-middle md:px-4 md:py-3"
                     onClick={(e) => e.stopPropagation()}
                   >
                     <OutputBadge
@@ -172,8 +156,38 @@ export function OverviewPanel({ notify }: { notify: boolean }) {
                       createdIssueState={agent.createdIssueState}
                       pullRequestUrl={agent.pullRequestUrl}
                       pullRequestState={agent.pullRequestState}
-                      showIcon
-                      prLabel="Pull request"
+                    />
+                  </td>
+
+                  {/* The owning repository leads here, with the task name as a
+                      muted second line. On mobile the task line is dropped, so
+                      the repo stands in for the task. */}
+                  <td className="px-3 py-2 align-middle md:px-4 md:py-3">
+                    {repo ? (
+                      <span className="block truncate text-sm whitespace-nowrap">
+                        <span className="text-white/40">{owner}/</span>
+                        <span className="text-white/90">{name}</span>
+                      </span>
+                    ) : (
+                      <span className="block truncate text-xs text-white/30 italic">
+                        No repository
+                      </span>
+                    )}
+                    <span className="hidden truncate text-xs text-white/40 md:block">
+                      {agent.displayName}
+                    </span>
+                  </td>
+
+                  <td
+                    className="hidden px-3 py-2 align-middle md:px-4 md:py-3 md:table-cell"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <SourceBadge
+                      source={agent.source}
+                      issueUrl={agent.issueUrl}
+                      issueNumber={agent.issueNumber}
+                      issueState={agent.issueState}
+                      createdBy={agent.createdBy}
                     />
                   </td>
                 </tr>

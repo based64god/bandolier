@@ -49,7 +49,7 @@ export function TaskRow({
       onClick={() => onOpenLogs(agent.name)}
       className="cursor-pointer hover:bg-white/[0.04]"
     >
-      <td className="px-3 py-2 align-middle md:px-4 md:py-3">
+      <td className="px-3 py-2 text-center align-middle md:px-4 md:py-3">
         <StatusBadge status={agent.status} />
       </td>
 

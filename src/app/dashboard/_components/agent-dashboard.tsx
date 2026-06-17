@@ -570,7 +570,7 @@ export function AgentDashboard({
                       <thead>
                         <tr className="border-b border-white/10 bg-white/5 text-left text-xs font-medium tracking-wider text-white/50 uppercase">
                           {[
-                            { label: "Status", width: "w-[12%]" },
+                            { label: "Status", width: "w-[12%]", center: true },
                             { label: "Output", width: "w-[10%]" },
                             { label: "Task", width: "w-[28%]" },
                             // These secondary columns are dropped on narrow
@@ -583,7 +583,7 @@ export function AgentDashboard({
                           ].map((h, i) => (
                             <th
                               key={i}
-                              className={`px-3 py-2 align-middle md:px-4 md:py-3 ${h.width} ${h.optional ? "hidden md:table-cell" : ""}`}
+                              className={`px-3 py-2 align-middle md:px-4 md:py-3 ${h.width} ${h.center ? "text-center" : ""} ${h.optional ? "hidden md:table-cell" : ""}`}
                             >
                               {h.label}
                             </th>

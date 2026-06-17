@@ -1,19 +1,34 @@
 import "~/styles/globals.css";
 
-import { type Metadata } from "next";
+import { type Metadata, type Viewport } from "next";
 import { Geist } from "next/font/google";
 
+import { PwaRegister } from "~/app/_components/pwa-register";
 import { env } from "~/env";
 import { TRPCReactProvider } from "~/trpc/react";
 
 const title = "Bandolier";
 const description = "Claude agent monitoring & deployment on Kubernetes";
 
+// Brand background, shared with the manifest and icons.
+const THEME_COLOR = "#15162c";
+
+export const viewport: Viewport = {
+  themeColor: THEME_COLOR,
+};
+
 export const metadata: Metadata = {
   metadataBase: new URL(env.BETTER_AUTH_URL),
   title,
   description,
   applicationName: "Bandolier",
+  // The web app manifest is provided by the file convention
+  // (src/app/manifest.ts); Next.js injects <link rel="manifest"> automatically.
+  appleWebApp: {
+    capable: true,
+    title,
+    statusBarStyle: "black-translucent",
+  },
   // Favicon and apple-touch icon are provided by file conventions
   // (src/app/icon.svg and src/app/apple-icon.tsx).
   openGraph: {
@@ -41,6 +56,7 @@ export default function RootLayout({
     <html lang="en" className={`${geist.variable}`}>
       <body>
         <TRPCReactProvider>{children}</TRPCReactProvider>
+        <PwaRegister />
       </body>
     </html>
   );

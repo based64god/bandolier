@@ -27,7 +27,12 @@ import {
   type GitIdentity,
 } from "~/server/agents/github-token";
 import { resolveKubeconfig } from "~/server/agents/kubeconfig";
-import { listModelsForUser, pickLatestSonnet } from "~/server/agents/models";
+import {
+  listModelsForUser,
+  pickLatestGeminiFlash,
+  pickLatestGptMini,
+  pickLatestSonnet,
+} from "~/server/agents/models";
 import {
   pickProvider,
   resolveModelCredentials,
@@ -41,6 +46,8 @@ const LABEL_SELECTOR = env.K8S_LABEL_SELECTOR;
 const INTERACTIVE_LABEL = "bandolier.io/interactive";
 
 const PR_MARKER = /PR_URL=(https:\/\/\S+)/;
+// The harness logs this when an issue-output run opens its GitHub issue.
+const ISSUE_MARKER = /ISSUE_URL=(https:\/\/\S+)/;
 // Harness log markers bracketing an interactive turn: it prints AWAIT when it
 // starts waiting for the next user message and RESUME when one arrives. The most
 // recent of the two tells us whether the agent is currently awaiting input.
@@ -59,6 +66,8 @@ interface PodInspection {
   currently: string | null;
   /** The pull-request URL the harness logged, if any. */
   pullRequestUrl: string | null;
+  /** The URL of the issue an issue-output run created, if any. */
+  createdIssueUrl: string | null;
   /** True when an interactive agent is currently waiting for user input. */
   awaitingInput: boolean;
 }
@@ -111,13 +120,19 @@ async function inspectPod(
     const result: PodInspection = {
       currently,
       pullRequestUrl: PR_MARKER.exec(logs)?.[1] ?? null,
+      createdIssueUrl: ISSUE_MARKER.exec(logs)?.[1] ?? null,
       awaitingInput: !terminal && lastAwait >= 0 && lastAwait > lastResume,
     };
     if (terminal) terminalInspectionCache.set(podName, result);
     return result;
   } catch {
     // transient; retry next poll
-    return { currently: null, pullRequestUrl: null, awaitingInput: false };
+    return {
+      currently: null,
+      pullRequestUrl: null,
+      createdIssueUrl: null,
+      awaitingInput: false,
+    };
   }
 }
 
@@ -183,12 +198,8 @@ async function podToTask(pod: V1Pod, namespace: string, kubeconfig: string) {
       ).toISOString()
     : null;
 
-  const { currently, pullRequestUrl, awaitingInput } = await inspectPod(
-    name,
-    namespace,
-    status,
-    kubeconfig,
-  );
+  const { currently, pullRequestUrl, createdIssueUrl, awaitingInput } =
+    await inspectPod(name, namespace, status, kubeconfig);
 
   const containerEnv = pod.spec?.containers?.[0]?.env ?? [];
   const prompt =
@@ -209,6 +220,11 @@ async function podToTask(pod: V1Pod, namespace: string, kubeconfig: string) {
     currently,
     expiresAt,
     pullRequestUrl,
+    createdIssueUrl,
+    outputType:
+      pod.metadata?.annotations?.["bandolier.io/output-type"] === "issue"
+        ? ("issue" as const)
+        : ("pr" as const),
     interactive,
     awaitingInput: interactive && awaitingInput,
   };
@@ -227,7 +243,8 @@ export const agentsRouter = createTRPCRouter({
         ctx.session.user.id,
         input?.repoFullName,
       );
-      const { aws, anthropicApiKey } = pickProvider(creds);
+      const { aws, anthropicApiKey, openaiApiKey, geminiApiKey } =
+        pickProvider(creds);
       if (aws) {
         return {
           provider: "bedrock" as const,
@@ -238,6 +255,20 @@ export const agentsRouter = createTRPCRouter({
       if (anthropicApiKey) {
         return {
           provider: "anthropic" as const,
+          region: null,
+          source: creds.source,
+        };
+      }
+      if (openaiApiKey) {
+        return {
+          provider: "openai" as const,
+          region: null,
+          source: creds.source,
+        };
+      }
+      if (geminiApiKey) {
+        return {
+          provider: "gemini" as const,
           region: null,
           source: creds.source,
         };
@@ -278,12 +309,8 @@ export const agentsRouter = createTRPCRouter({
 
           // The pull-request URL lives in the harness logs; read it per pod
           // (cheap here — only the user's own agents, and terminal pods cache).
-          const { pullRequestUrl, awaitingInput } = await inspectPod(
-            name,
-            namespace,
-            status,
-            kubeconfig,
-          );
+          const { pullRequestUrl, createdIssueUrl, awaitingInput } =
+            await inspectPod(name, namespace, status, kubeconfig);
           const interactive =
             pod.metadata?.labels?.[INTERACTIVE_LABEL] === "true";
 
@@ -299,6 +326,11 @@ export const agentsRouter = createTRPCRouter({
             createdBy: annotations["bandolier.io/created-by"] ?? null,
             status,
             pullRequestUrl,
+            createdIssueUrl,
+            outputType:
+              annotations["bandolier.io/output-type"] === "issue"
+                ? ("issue" as const)
+                : ("pr" as const),
             interactive,
             awaitingInput: interactive && awaitingInput,
           };
@@ -580,8 +612,14 @@ export const agentsRouter = createTRPCRouter({
           repoUrl: z.string().url().optional().or(z.literal("")),
           repoFullName: z.string().optional(),
           branch: z.string().default("main"),
-          // A model id from the user's provider (see models.list).
+          // A model id from one of the user's providers (see models.list).
           model: z.string().min(1),
+          // The provider the chosen model is served by, so deploy uses the right
+          // credentials when several are configured. Optional: programmatic
+          // clients may omit it, falling back to the primary-provider precedence.
+          modelProvider: z
+            .enum(["anthropic", "bedrock", "openai", "gemini"])
+            .optional(),
           maxTurns: z.number().int().min(1).max(200).optional(),
           // When set, the agent works on this GitHub issue (and the task field
           // becomes additional context).
@@ -589,6 +627,10 @@ export const agentsRouter = createTRPCRouter({
           // Run as a long-lived interactive session that waits for user input
           // between turns instead of a one-shot task.
           interactive: z.boolean().optional(),
+          // What the run produces: a pull request (default) or a GitHub issue.
+          // "issue" runs the agent read-only and opens one issue from its
+          // findings (a sub-task of the selected issue, when one is picked).
+          outputType: z.enum(["pr", "issue"]).optional(),
         })
         .refine(
           (v) => v.task.trim().length > 0 || v.issueNumber !== undefined,
@@ -601,6 +643,15 @@ export const agentsRouter = createTRPCRouter({
     .mutation(async ({ input, ctx }) => {
       // Treat an empty repo URL as "no repository".
       const repoUrl = input.repoUrl?.length ? input.repoUrl : undefined;
+
+      // Issue output needs a repository to open the issue in.
+      const issueOutput = input.outputType === "issue";
+      if (issueOutput && !input.repoFullName) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "A repository is required to create an issue.",
+        });
+      }
 
       console.log("[bandolier:deploy] starting", {
         namespace: input.namespace,
@@ -621,20 +672,53 @@ export const agentsRouter = createTRPCRouter({
         input.repoFullName,
       );
 
-      // Resolve model credentials the same way, then collapse to a single
-      // provider (AWS Bedrock beats an Anthropic key).
+      // Resolve model credentials, then pick the set that matches the provider of
+      // the model the user chose (so a user with several providers configured
+      // gets the right one). When the provider is omitted — e.g. a REST/webhook
+      // client with no picker — fall back to the primary-provider precedence.
       const resolved = await resolveModelCredentials(
         ctx.db,
         userId,
         input.repoFullName,
       );
-      const { aws: awsCredentials, anthropicApiKey } = pickProvider(resolved);
+      const primary = pickProvider(resolved);
+      const provider =
+        input.modelProvider ??
+        (resolved.aws
+          ? "bedrock"
+          : resolved.anthropicApiKey
+            ? "anthropic"
+            : resolved.openaiApiKey
+              ? "openai"
+              : resolved.geminiApiKey
+                ? "gemini"
+                : undefined);
 
-      if (!awsCredentials && !anthropicApiKey) {
+      const awsCredentials =
+        provider === "bedrock" ? (resolved.aws ?? primary.aws) : null;
+      const anthropicApiKey =
+        provider === "anthropic"
+          ? (resolved.anthropicApiKey ?? primary.anthropicApiKey)
+          : null;
+      const openaiApiKey =
+        provider === "openai"
+          ? (resolved.openaiApiKey ?? primary.openaiApiKey)
+          : null;
+      const geminiApiKey =
+        provider === "gemini"
+          ? (resolved.geminiApiKey ?? primary.geminiApiKey)
+          : null;
+
+      if (
+        !awsCredentials &&
+        !anthropicApiKey &&
+        !openaiApiKey &&
+        !geminiApiKey
+      ) {
         throw new TRPCError({
           code: "BAD_REQUEST",
           message:
-            "No model credentials configured. Add AWS Bedrock or an Anthropic API key in settings (or repo configuration) before deploying.",
+            "No model credentials configured for the selected model. Add AWS Bedrock, an Anthropic, OpenAI, or Gemini API key in settings (or repo configuration) before deploying.",
         });
       }
 
@@ -720,35 +804,40 @@ export const agentsRouter = createTRPCRouter({
           ? `#${issue.number}: ${issue.title}`
           : taskPreview;
 
-        // For an issue: generate a unique working branch and build the prompt
-        // here. The instructional framing goes in the system prompt; the issue
-        // context (with the operator's task as additional context) is the user
-        // message stored as CLAUDE_TASK and visible in the dashboard.
-        const agentBranch = issue
-          ? makeIssueBranch(issue.number, issue.title)
-          : undefined;
-        const task =
-          issue && agentBranch
-            ? buildIssueUserMessage(issue, input.task)
-            : input.task;
-        const systemPrompt =
-          issue && agentBranch
-            ? buildIssueSystemPrompt(issue, agentBranch)
-            : undefined;
+        // For an issue PR: generate a unique working branch and build the
+        // instructional (commit-and-open-PR) framing here. For issue output we
+        // skip both — the harness frames the read-only analysis and opens the
+        // issue itself. Either way the issue context (with the operator's task as
+        // additional context) is the user message stored as CLAUDE_TASK.
+        let agentBranch: string | undefined;
+        let systemPrompt: string | undefined;
+        if (issue && !issueOutput) {
+          agentBranch = makeIssueBranch(issue.number, issue.title);
+          systemPrompt = buildIssueSystemPrompt(issue, agentBranch);
+        }
+        const task = issue
+          ? buildIssueUserMessage(issue, input.task)
+          : input.task;
 
         // PR-producing runs (repo or issue mode) get their PR title/description
-        // written by the latest Sonnet, out-of-band of the (possibly non-Sonnet)
-        // task model. Best-effort: a lookup failure falls back to the harness's
-        // commit-based title and must not block the deploy.
+        // written out-of-band of the (possibly larger) task model by a cheap
+        // writer from the same provider: the latest Sonnet for Claude runs, the
+        // latest GPT mini for OpenAI runs. Best-effort: a lookup failure falls
+        // back to the harness's commit-based title and must not block the deploy.
         let prWriterModel: string | undefined;
-        if (repoUrl ?? issue) {
+        if (repoUrl ?? issue ?? issueOutput) {
           try {
             const { models } = await listModelsForUser(
               ctx.db,
               userId,
               input.repoFullName,
             );
-            prWriterModel = pickLatestSonnet(models);
+            prWriterModel =
+              provider === "openai"
+                ? pickLatestGptMini(models)
+                : provider === "gemini"
+                  ? pickLatestGeminiFlash(models)
+                  : pickLatestSonnet(models);
           } catch (err) {
             console.warn("[bandolier:deploy] PR-writer model lookup failed", {
               error: err instanceof Error ? err.message : String(err),
@@ -756,8 +845,8 @@ export const agentsRouter = createTRPCRouter({
           }
         }
 
-        // Per-repo harness image override (falls back to HARNESS_IMAGE when
-        // unset). Best-effort: a lookup failure must not block the deploy.
+        // Per-repo harness image override (falls back to DEFAULT_HARNESS_IMAGE
+        // when unset). Best-effort: a lookup failure must not block the deploy.
         let agentImage: string | undefined;
         if (input.repoFullName) {
           try {
@@ -784,12 +873,15 @@ export const agentsRouter = createTRPCRouter({
           maxTurns: input.maxTurns,
           prWriterModel,
           interactive: input.interactive,
+          outputType: input.outputType,
           issueNumber: issue ? String(issue.number) : undefined,
           issueUrl: issue?.url,
           userId,
           githubToken: githubToken ?? undefined,
           awsCredentials: awsCredentials ?? undefined,
           anthropicApiKey: anthropicApiKey ?? undefined,
+          openaiApiKey: openaiApiKey ?? undefined,
+          geminiApiKey: geminiApiKey ?? undefined,
           kubeconfig,
           agentImage: agentImage ?? undefined,
           createdBy: ctx.session.user.name ?? ctx.session.user.email,

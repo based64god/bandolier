@@ -24,7 +24,7 @@ export async function POST(req: NextRequest) {
   if (
     !jobName ||
     !token ||
-    !verifyIngestToken(jobName, token, env.BETTER_AUTH_SECRET ?? "")
+    !verifyIngestToken(jobName, token, env.BETTER_AUTH_SECRET)
   ) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

@@ -159,8 +159,12 @@ export const repoWebhookConfig = pgTable("repo_webhook_config", {
   // it are acted on. Null = act on all events.
   prefix: text("prefix"),
   // Optional override for the agent harness container image used by agents run
-  // for this repo. Null = use the server-wide default (HARNESS_IMAGE).
+  // for this repo. Null = use the built-in DEFAULT_HARNESS_IMAGE.
   agentImage: text("agent_image"),
+  // Optional default model id for webhook-triggered agents (e.g. issue-opened).
+  // Null = fall back to the provider's default. An issue's `model:<query>` label
+  // overrides this per issue.
+  defaultWebhookModel: text("default_webhook_model"),
   // ── Repo-scoped credentials (admin-only) ──────────────────────────────────
   // Shared infrastructure for everyone working on this repo: a kubeconfig the
   // repo's agents run on and model credentials they authenticate with. Only a
@@ -170,6 +174,8 @@ export const repoWebhookConfig = pgTable("repo_webhook_config", {
   // be trusted with — see the warning surfaced in the repo config UI.
   kubeconfig: text("kubeconfig"),
   anthropicApiKey: text("anthropic_api_key"),
+  openaiApiKey: text("openai_api_key"),
+  geminiApiKey: text("gemini_api_key"),
   awsAccessKeyId: text("aws_access_key_id"),
   awsSecretAccessKey: text("aws_secret_access_key"),
   awsSessionToken: text("aws_session_token"),
@@ -193,6 +199,34 @@ export const repoWebhookConfig = pgTable("repo_webhook_config", {
 });
 
 export const userAnthropicCredentials = pgTable("user_anthropic_credentials", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+  apiKey: text("api_key").notNull(),
+  createdAt: timestamp("created_at")
+    .$defaultFn(() => /* @__PURE__ */ new Date())
+    .notNull(),
+  updatedAt: timestamp("updated_at")
+    .$defaultFn(() => /* @__PURE__ */ new Date())
+    .$onUpdate(() => new Date())
+    .notNull(),
+});
+
+export const userOpenaiCredentials = pgTable("user_openai_credentials", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+  apiKey: text("api_key").notNull(),
+  createdAt: timestamp("created_at")
+    .$defaultFn(() => /* @__PURE__ */ new Date())
+    .notNull(),
+  updatedAt: timestamp("updated_at")
+    .$defaultFn(() => /* @__PURE__ */ new Date())
+    .$onUpdate(() => new Date())
+    .notNull(),
+});
+
+export const userGeminiCredentials = pgTable("user_gemini_credentials", {
   userId: text("user_id")
     .primaryKey()
     .references(() => user.id, { onDelete: "cascade" }),

@@ -8,6 +8,8 @@ import type { RepoCredentials } from "~/server/agents/webhook-config";
 // user/repo/prefer combination without a database.
 const getUserAwsCredentials = vi.fn<() => Promise<AwsCredentials | null>>();
 const getUserAnthropicKey = vi.fn<() => Promise<string | null>>();
+const getUserOpenaiKey = vi.fn<() => Promise<string | null>>();
+const getUserGeminiKey = vi.fn<() => Promise<string | null>>();
 const getRepoCredentials = vi.fn<() => Promise<RepoCredentials | null>>();
 
 vi.mock("~/server/agents/user-aws", () => ({
@@ -15,6 +17,12 @@ vi.mock("~/server/agents/user-aws", () => ({
 }));
 vi.mock("~/server/agents/anthropic", () => ({
   getUserAnthropicKey: () => getUserAnthropicKey(),
+}));
+vi.mock("~/server/agents/openai", () => ({
+  getUserOpenaiKey: () => getUserOpenaiKey(),
+}));
+vi.mock("~/server/agents/gemini", () => ({
+  getUserGeminiKey: () => getUserGeminiKey(),
 }));
 vi.mock("~/server/agents/webhook-config", () => ({
   getRepoCredentials: () => getRepoCredentials(),
@@ -43,6 +51,8 @@ function repo(overrides: Partial<RepoCredentials>): RepoCredentials {
   return {
     kubeconfig: null,
     anthropicApiKey: null,
+    openaiApiKey: null,
+    geminiApiKey: null,
     aws: null,
     preferRepoCredentials: false,
     ...overrides,
@@ -52,6 +62,8 @@ function repo(overrides: Partial<RepoCredentials>): RepoCredentials {
 beforeEach(() => {
   getUserAwsCredentials.mockReset().mockResolvedValue(null);
   getUserAnthropicKey.mockReset().mockResolvedValue(null);
+  getUserOpenaiKey.mockReset().mockResolvedValue(null);
+  getUserGeminiKey.mockReset().mockResolvedValue(null);
   getRepoCredentials.mockReset().mockResolvedValue(null);
 });
 
@@ -115,6 +127,88 @@ describe("resolveModelCredentials", () => {
     expect(r.anthropicApiKey).toBe("sk-repo");
   });
 
+  it("surfaces the user's OpenAI key (user-scoped, no repo equivalent)", async () => {
+    getUserOpenaiKey.mockResolvedValue("sk-openai");
+    const r = await resolveModelCredentials(db, "u1", "owner/repo");
+    expect(r.source).toBe("user");
+    expect(r.openaiApiKey).toBe("sk-openai");
+    expect(r.aws).toBeNull();
+    expect(r.anthropicApiKey).toBeNull();
+  });
+
+  it("keeps the user's OpenAI key available even when a repo set wins for Claude", async () => {
+    getUserOpenaiKey.mockResolvedValue("sk-openai");
+    getRepoCredentials.mockResolvedValue(
+      repo({ anthropicApiKey: "sk-repo", preferRepoCredentials: true }),
+    );
+    const r = await resolveModelCredentials(db, "u1", "owner/repo");
+    expect(r.source).toBe("repo");
+    expect(r.anthropicApiKey).toBe("sk-repo");
+    expect(r.openaiApiKey).toBe("sk-openai");
+  });
+
+  it("prefers the repo's OpenAI key over the user's when the repo set wins", async () => {
+    getUserOpenaiKey.mockResolvedValue("sk-user-openai");
+    getRepoCredentials.mockResolvedValue(
+      repo({ openaiApiKey: "sk-repo-openai", preferRepoCredentials: true }),
+    );
+    const r = await resolveModelCredentials(db, "u1", "owner/repo");
+    expect(r.source).toBe("repo");
+    expect(r.openaiApiKey).toBe("sk-repo-openai");
+  });
+
+  it("uses the repo's OpenAI key for a user with no credentials of their own", async () => {
+    getRepoCredentials.mockResolvedValue(
+      repo({ openaiApiKey: "sk-repo-openai" }),
+    );
+    const r = await resolveModelCredentials(db, "u1", "owner/repo");
+    expect(r.source).toBe("repo");
+    expect(r.openaiApiKey).toBe("sk-repo-openai");
+  });
+
+  it("falls back to the user's Claude set when the repo set wins without a Claude provider", async () => {
+    // Repo prefers its creds and has only a shared OpenAI key (no Claude side);
+    // the user's own Anthropic key should still surface for Claude models.
+    getUserAnthropicKey.mockResolvedValue("sk-user-anthropic");
+    getRepoCredentials.mockResolvedValue(
+      repo({ openaiApiKey: "sk-repo-openai", preferRepoCredentials: true }),
+    );
+    const r = await resolveModelCredentials(db, "u1", "owner/repo");
+    expect(r.source).toBe("repo");
+    expect(r.anthropicApiKey).toBe("sk-user-anthropic");
+    expect(r.openaiApiKey).toBe("sk-repo-openai");
+  });
+
+  it("does NOT mix the repo's AWS with the user's Anthropic (Claude side is atomic)", async () => {
+    // Repo has its own Claude provider (AWS), so the user's Anthropic must not
+    // leak into the repo set even though Anthropic itself is otherwise empty.
+    getUserAnthropicKey.mockResolvedValue("sk-user-anthropic");
+    getRepoCredentials.mockResolvedValue(
+      repo({ aws: repoAws, preferRepoCredentials: true }),
+    );
+    const r = await resolveModelCredentials(db, "u1", "owner/repo");
+    expect(r.source).toBe("repo");
+    expect(r.aws).toBe(repoAws);
+    expect(r.anthropicApiKey).toBeNull();
+  });
+
+  it("surfaces the user's Gemini key (independent provider)", async () => {
+    getUserGeminiKey.mockResolvedValue("sk-gemini");
+    const r = await resolveModelCredentials(db, "u1", "owner/repo");
+    expect(r.source).toBe("user");
+    expect(r.geminiApiKey).toBe("sk-gemini");
+  });
+
+  it("prefers the repo's Gemini key over the user's when the repo set wins", async () => {
+    getUserGeminiKey.mockResolvedValue("sk-user-gemini");
+    getRepoCredentials.mockResolvedValue(
+      repo({ geminiApiKey: "sk-repo-gemini", preferRepoCredentials: true }),
+    );
+    const r = await resolveModelCredentials(db, "u1", "owner/repo");
+    expect(r.source).toBe("repo");
+    expect(r.geminiApiKey).toBe("sk-repo-gemini");
+  });
+
   it("ignores repo credentials entirely when no repo is given", async () => {
     getUserAnthropicKey.mockResolvedValue("sk-user");
     const r = await resolveModelCredentials(db, "u1");
@@ -128,19 +222,53 @@ describe("pickProvider", () => {
     const picked = pickProvider({
       aws: repoAws,
       anthropicApiKey: "sk-both",
+      openaiApiKey: "sk-openai",
+      geminiApiKey: "sk-gemini",
       source: "repo",
     });
     expect(picked.aws).toBe(repoAws);
     expect(picked.anthropicApiKey).toBeNull();
+    expect(picked.openaiApiKey).toBeNull();
+    expect(picked.geminiApiKey).toBeNull();
   });
 
   it("falls back to the Anthropic key when there's no AWS", () => {
     const picked = pickProvider({
       aws: null,
       anthropicApiKey: "sk-only",
+      openaiApiKey: "sk-openai",
+      geminiApiKey: "sk-gemini",
       source: "user",
     });
     expect(picked.aws).toBeNull();
     expect(picked.anthropicApiKey).toBe("sk-only");
+    expect(picked.openaiApiKey).toBeNull();
+    expect(picked.geminiApiKey).toBeNull();
+  });
+
+  it("uses the OpenAI key over Gemini when no Claude provider is set", () => {
+    const picked = pickProvider({
+      aws: null,
+      anthropicApiKey: null,
+      openaiApiKey: "sk-openai",
+      geminiApiKey: "sk-gemini",
+      source: "user",
+    });
+    expect(picked.openaiApiKey).toBe("sk-openai");
+    expect(picked.geminiApiKey).toBeNull();
+  });
+
+  it("uses the Gemini key only when no other provider is set", () => {
+    const picked = pickProvider({
+      aws: null,
+      anthropicApiKey: null,
+      openaiApiKey: null,
+      geminiApiKey: "sk-gemini",
+      source: "user",
+    });
+    expect(picked.aws).toBeNull();
+    expect(picked.anthropicApiKey).toBeNull();
+    expect(picked.openaiApiKey).toBeNull();
+    expect(picked.geminiApiKey).toBe("sk-gemini");
   });
 });

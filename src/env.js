@@ -18,14 +18,7 @@ export const env = createEnv({
     NODE_ENV: z
       .enum(["development", "test", "production"])
       .default("development"),
-    K8S_NAMESPACE: z.string().default("claude-agents"),
     K8S_LABEL_SELECTOR: z.string().default("app=claude-agent"),
-    HARNESS_IMAGE: z
-      .string()
-      .default("ghcr.io/based64god/bandolier-agent-harness:latest"),
-    HARNESS_IMAGE_PULL_POLICY: z
-      .enum(["Always", "IfNotPresent", "Never"])
-      .default("IfNotPresent"),
     // Network isolation for agent pods. When enabled, each agent namespace gets a
     // NetworkPolicy that denies all inbound traffic and restricts egress to DNS +
     // the public internet — blocking lateral movement to other pods/services.
@@ -43,10 +36,6 @@ export const env = createEnv({
     // set, visitors must enter it before reaching anything (the GitHub webhook
     // is exempt — it authenticates via signature). Unset = gate disabled.
     APP_PASSWORD: z.string().optional(),
-    // Optional server-wide kubeconfig: inline YAML, or a path to a kubeconfig
-    // file. When set, all agents deploy to this cluster and users cannot (and
-    // are not asked to) configure their own.
-    SERVER_KUBECONFIG: z.string().optional(),
     // Object storage for persisted run artifacts (transcripts now; workspaces
     // later). Persistence is enabled only when a bucket is set. Credentials fall
     // back to the default AWS provider chain when the explicit pair is unset.
@@ -78,10 +67,7 @@ export const env = createEnv({
       process.env.BETTER_AUTH_GITHUB_CLIENT_SECRET,
     DATABASE_URL: process.env.DATABASE_URL,
     NODE_ENV: process.env.NODE_ENV,
-    K8S_NAMESPACE: process.env.K8S_NAMESPACE,
     K8S_LABEL_SELECTOR: process.env.K8S_LABEL_SELECTOR,
-    HARNESS_IMAGE: process.env.HARNESS_IMAGE,
-    HARNESS_IMAGE_PULL_POLICY: process.env.HARNESS_IMAGE_PULL_POLICY,
     AGENT_NETWORK_POLICY: process.env.AGENT_NETWORK_POLICY,
     AGENT_EGRESS_BLOCKED_CIDRS: process.env.AGENT_EGRESS_BLOCKED_CIDRS,
     GITHUB_WEBHOOK_SECRET: process.env.GITHUB_WEBHOOK_SECRET,
@@ -93,7 +79,6 @@ export const env = createEnv({
     ARTIFACTS_AWS_ACCESS_KEY_ID: process.env.ARTIFACTS_AWS_ACCESS_KEY_ID,
     ARTIFACTS_AWS_SECRET_ACCESS_KEY:
       process.env.ARTIFACTS_AWS_SECRET_ACCESS_KEY,
-    SERVER_KUBECONFIG: process.env.SERVER_KUBECONFIG,
   },
   /**
    * Run `build` or `dev` with `SKIP_ENV_VALIDATION` to skip env validation. This is especially

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { api } from "~/trpc/react";
 import { parseAwsCredentials } from "./parse-aws";
+import { SearchableSelect } from "./searchable-select";
 
 function CredFeedback({
   error,
@@ -92,6 +93,168 @@ function RepoAnthropicSection({
           >
             {save.isPending ? "Verifying…" : "Save"}
           </button>
+        </form>
+      )}
+      <CredFeedback error={save.error?.message} ok={result} />
+    </div>
+  );
+}
+
+// OpenAI key shared by everyone working on this repo (used via the Codex CLI).
+// Admin-only, like the other shared credentials.
+function RepoOpenAISection({
+  repoFullName,
+  status,
+}: {
+  repoFullName: string;
+  status?: { configured: boolean; apiKeyMasked?: string };
+}) {
+  const utils = api.useUtils();
+  const [apiKey, setApiKey] = useState("");
+  const [result, setResult] = useState<string | null>(null);
+
+  const save = api.webhooks.setOpenai.useMutation({
+    onSuccess: () => {
+      void utils.webhooks.getCredentials.invalidate({ repoFullName });
+      setApiKey("");
+      setResult("Saved and verified ✓");
+    },
+  });
+  const remove = api.webhooks.deleteOpenai.useMutation({
+    onSuccess: () => {
+      void utils.webhooks.getCredentials.invalidate({ repoFullName });
+      setResult(null);
+    },
+  });
+
+  return (
+    <div className="space-y-2">
+      <h4 className="text-xs font-semibold text-teal-300">OpenAI API key</h4>
+      {status?.configured ? (
+        <div className="flex items-center justify-between rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm">
+          <code className="text-teal-300">{status.apiKeyMasked}</code>
+          <button
+            onClick={() => remove.mutate({ repoFullName })}
+            disabled={remove.isPending}
+            className="rounded bg-red-500/10 px-2 py-1 text-xs text-red-400 hover:bg-red-500/20 disabled:opacity-50"
+          >
+            Remove
+          </button>
+        </div>
+      ) : (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            setResult(null);
+            save.mutate({ repoFullName, apiKey });
+          }}
+          className="flex gap-2"
+        >
+          <input
+            type="password"
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            placeholder="sk-…"
+            className="flex-1 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 focus:border-teal-500/50 focus:outline-none"
+          />
+          <button
+            type="submit"
+            disabled={save.isPending || !apiKey}
+            className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-medium hover:bg-teal-500 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {save.isPending ? "Verifying…" : "Save"}
+          </button>
+        </form>
+      )}
+      <CredFeedback error={save.error?.message} ok={result} />
+    </div>
+  );
+}
+
+// Gemini project credentials shared by everyone working on this repo (a Google
+// Cloud service-account key, used via the Antigravity CLI). Admin-only, like the
+// other shared credentials.
+function RepoGeminiSection({
+  repoFullName,
+  status,
+}: {
+  repoFullName: string;
+  status?: {
+    configured: boolean;
+    projectId?: string | null;
+    clientEmail?: string | null;
+  };
+}) {
+  const utils = api.useUtils();
+  const [credentials, setCredentials] = useState("");
+  const [result, setResult] = useState<string | null>(null);
+
+  const save = api.webhooks.setGemini.useMutation({
+    onSuccess: () => {
+      void utils.webhooks.getCredentials.invalidate({ repoFullName });
+      setCredentials("");
+      setResult("Saved and verified ✓");
+    },
+  });
+  const remove = api.webhooks.deleteGemini.useMutation({
+    onSuccess: () => {
+      void utils.webhooks.getCredentials.invalidate({ repoFullName });
+      setResult(null);
+    },
+  });
+
+  return (
+    <div className="space-y-2">
+      <h4 className="text-xs font-semibold text-blue-300">
+        Gemini (Google Cloud project credentials)
+      </h4>
+      {status?.configured ? (
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm">
+          <div className="min-w-0">
+            <div className="truncate text-blue-300">
+              {status.clientEmail ?? "service account"}
+            </div>
+            {status.projectId && (
+              <div className="truncate text-xs text-white/40">
+                project: {status.projectId}
+              </div>
+            )}
+          </div>
+          <button
+            onClick={() => remove.mutate({ repoFullName })}
+            disabled={remove.isPending}
+            className="shrink-0 rounded bg-red-500/10 px-2 py-1 text-xs text-red-400 hover:bg-red-500/20 disabled:opacity-50"
+          >
+            Remove
+          </button>
+        </div>
+      ) : (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            setResult(null);
+            save.mutate({ repoFullName, credentials });
+          }}
+          className="space-y-2"
+        >
+          <textarea
+            rows={5}
+            value={credentials}
+            onChange={(e) => setCredentials(e.target.value)}
+            placeholder={
+              '{\n  "type": "service_account",\n  "project_id": "…",\n  "client_email": "…",\n  "private_key": "-----BEGIN PRIVATE KEY-----…"\n}'
+            }
+            className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 font-mono text-xs text-white placeholder-white/25 focus:border-blue-500/50 focus:outline-none"
+          />
+          <div className="flex justify-end">
+            <button
+              type="submit"
+              disabled={save.isPending || !credentials}
+              className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {save.isPending ? "Verifying…" : "Save"}
+            </button>
+          </div>
         </form>
       )}
       <CredFeedback error={save.error?.message} ok={result} />
@@ -238,14 +401,12 @@ function RepoAwsSection({
 }
 
 // Kubeconfig shared by everyone working on this repo — the cluster its agents
-// run on. A server-wide kubeconfig overrides it.
+// run on.
 function RepoKubeconfigSection({
   repoFullName,
-  managedByServer,
   configured,
 }: {
   repoFullName: string;
-  managedByServer: boolean;
   configured: boolean;
 }) {
   const utils = api.useUtils();
@@ -265,18 +426,6 @@ function RepoKubeconfigSection({
       setResult(null);
     },
   });
-
-  if (managedByServer) {
-    return (
-      <div className="space-y-2">
-        <h4 className="text-xs font-semibold text-sky-300">Kubeconfig</h4>
-        <p className="text-xs text-white/40">
-          A server-wide kubeconfig is configured; it can&apos;t be overridden
-          per repo.
-        </p>
-      </div>
-    );
-  }
 
   return (
     <div className="space-y-2">
@@ -323,6 +472,67 @@ function RepoKubeconfigSection({
         </form>
       )}
       <CredFeedback error={save.error?.message} ok={result} />
+    </div>
+  );
+}
+
+// Default model for webhook-triggered agents on this repo, chosen from the models
+// the admin's + repo's credentials unlock. Saved immediately on selection.
+function RepoDefaultModelSection({ repoFullName }: { repoFullName: string }) {
+  const utils = api.useUtils();
+  const { data: config } = api.webhooks.getConfig.useQuery({ repoFullName });
+  const { data: modelData, isLoading: modelsLoading } =
+    api.models.list.useQuery({ repoFullName });
+  const models = modelData?.models ?? [];
+  const [result, setResult] = useState<string | null>(null);
+
+  const setDefault = api.webhooks.setDefaultModel.useMutation({
+    onSuccess: () => {
+      void utils.webhooks.getConfig.invalidate({ repoFullName });
+      setResult("Saved ✓");
+    },
+  });
+
+  return (
+    <div className="space-y-2 border-t border-white/10 pt-5">
+      <h3 className="text-xs font-semibold tracking-wider text-white/50 uppercase">
+        Default webhook model
+      </h3>
+      <p className="text-xs text-white/40">
+        The model webhook-triggered agents use on this repo (e.g. when an issue
+        is opened). An issue label like{" "}
+        <code className="rounded bg-white/10 px-1 text-white/60">
+          model:opus
+        </code>{" "}
+        overrides it per issue — the text after <code>model:</code> is
+        fuzzy-matched to the latest matching model. Leave unset to use the
+        provider default.
+      </p>
+      <SearchableSelect
+        options={models.map((m) => ({
+          value: m.id,
+          searchText: `${m.label} ${m.id} ${m.provider}`.toLowerCase(),
+          label: (
+            <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
+              <span className="truncate">{m.label}</span>
+              <span className="shrink-0 text-[10px] text-white/30">
+                {m.provider}
+              </span>
+            </span>
+          ),
+        }))}
+        value={config?.defaultWebhookModel ?? null}
+        onChange={(v) => {
+          setResult(null);
+          setDefault.mutate({ repoFullName, model: v ?? "" });
+        }}
+        placeholder="Provider default"
+        clearLabel="No default (provider default)"
+        loading={modelsLoading}
+        searchPlaceholder="Search models…"
+        emptyText="No models available — configure credentials below."
+      />
+      <CredFeedback error={setDefault.error?.message} ok={result} />
     </div>
   );
 }
@@ -374,12 +584,19 @@ function RepoCredentialsSection({ repoFullName }: { repoFullName: string }) {
         <>
           <RepoKubeconfigSection
             repoFullName={repoFullName}
-            managedByServer={creds?.kubeconfigManagedByServer ?? false}
             configured={creds?.hasKubeconfig ?? false}
           />
           <RepoAnthropicSection
             repoFullName={repoFullName}
             status={creds?.anthropic}
+          />
+          <RepoOpenAISection
+            repoFullName={repoFullName}
+            status={creds?.openai}
+          />
+          <RepoGeminiSection
+            repoFullName={repoFullName}
+            status={creds?.gemini}
           />
           <RepoAwsSection repoFullName={repoFullName} status={creds?.aws} />
 
@@ -756,6 +973,8 @@ export function RepoConfigModal({
               below.
             </p>
           </div>
+
+          <RepoDefaultModelSection repoFullName={repoFullName} />
 
           <RepoCredentialsSection repoFullName={repoFullName} />
         </div>

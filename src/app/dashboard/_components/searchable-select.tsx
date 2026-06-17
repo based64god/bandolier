@@ -43,8 +43,11 @@ export function SearchableSelect({
 }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
+  // Index into `navValues` (below) of the arrow-key-highlighted row.
+  const [highlight, setHighlight] = useState(0);
   const ref = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -75,9 +78,40 @@ export function SearchableSelect({
 
   const selected = options.find((o) => o.value === value) ?? null;
 
+  // The clear/none row (when present) is keyboard-navigable too, so arrow keys
+  // and Enter walk the same list the user sees, in display order.
+  const showClear = clearLabel !== undefined && !query;
+  const navValues: (string | null)[] = [
+    ...(showClear ? [null] : []),
+    ...filtered.map((o) => o.value),
+  ];
+
+  // Keep the highlighted row scrolled into view as it moves past the fold.
+  useEffect(() => {
+    if (!open) return;
+    listRef.current
+      ?.querySelector(`[data-nav="${highlight}"]`)
+      ?.scrollIntoView({ block: "nearest" });
+  }, [highlight, open]);
+
   function choose(next: string | null) {
     onChange(next);
     setOpen(false);
+  }
+
+  function handleNavKey(e: React.KeyboardEvent) {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setHighlight((h) => Math.min(navValues.length - 1, h + 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setHighlight((h) => Math.max(0, h - 1));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (navValues.length > 0) {
+        choose(navValues[Math.min(highlight, navValues.length - 1)] ?? null);
+      }
+    }
   }
 
   return (
@@ -86,6 +120,7 @@ export function SearchableSelect({
         type="button"
         onClick={() => {
           setSearch("");
+          setHighlight(0);
           setOpen((o) => !o);
         }}
         disabled={loading || disabled}
@@ -123,7 +158,11 @@ export function SearchableSelect({
               ref={searchRef}
               type="text"
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setHighlight(0);
+              }}
+              onKeyDown={handleNavKey}
               placeholder={searchPlaceholder}
               className="w-full rounded-md border border-white/10 bg-white/5 px-2.5 py-1.5 text-sm text-white placeholder-white/30 focus:border-purple-500/50 focus:outline-none"
             />
@@ -132,16 +171,20 @@ export function SearchableSelect({
           {options.length === 0 ? (
             <p className="px-4 py-3 text-xs text-white/30">{emptyText}</p>
           ) : (
-            <ul className="max-h-72 overflow-y-auto py-1">
-              {clearLabel !== undefined && !query && (
+            <ul ref={listRef} className="max-h-72 overflow-y-auto py-1">
+              {showClear && (
                 <li>
                   <button
                     type="button"
+                    data-nav={0}
                     onClick={() => choose(null)}
+                    onMouseEnter={() => setHighlight(0)}
                     className={`flex w-full items-center gap-1.5 px-4 py-2 text-left text-sm transition ${
                       value === null
                         ? "bg-purple-600/40 text-white"
-                        : "text-white/50 hover:bg-white/5"
+                        : highlight === 0
+                          ? "bg-white/10 text-white/80"
+                          : "text-white/50"
                     }`}
                   >
                     <span className="flex-1 truncate">{clearLabel}</span>
@@ -153,15 +196,23 @@ export function SearchableSelect({
                   No matches for &ldquo;{search}&rdquo;.
                 </li>
               ) : (
-                filtered.map((o) => {
+                filtered.map((o, i) => {
                   const isSelected = o.value === value;
+                  const navIndex = i + (showClear ? 1 : 0);
+                  const isHighlighted = highlight === navIndex;
                   return (
                     <li key={o.value}>
                       <button
                         type="button"
+                        data-nav={navIndex}
                         onClick={() => choose(o.value)}
+                        onMouseEnter={() => setHighlight(navIndex)}
                         className={`flex w-full items-center gap-1.5 px-4 py-2 text-left text-sm transition ${
-                          isSelected ? "bg-purple-600/40" : "hover:bg-white/5"
+                          isSelected
+                            ? "bg-purple-600/40"
+                            : isHighlighted
+                              ? "bg-white/10"
+                              : ""
                         }`}
                       >
                         <span className="flex min-w-0 flex-1 items-center">

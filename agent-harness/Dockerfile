@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ── Stage 1: build the Go harness binary ──────────────────────────────────────
-FROM golang:1.23-bookworm AS builder
+FROM golang:1.26 AS builder
 
 WORKDIR /build
 COPY go.mod ./
@@ -11,10 +11,9 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o harness ./cmd/harness
 
 
 # ── Stage 2: runtime image ────────────────────────────────────────────────────
-# node:22-bookworm-slim already includes Node 22, npm, and a "node" user (uid 1000).
-FROM node:22-bookworm-slim
+FROM debian:latest
 
-# System tools: git for repo operations, curl + ca-certs for the gh install
+# System tools: git for repo operations, curl + ca-certs for the installers and gh.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         git \
         curl \
@@ -29,16 +28,23 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
     && apt-get update && apt-get install -y --no-install-recommends gh \
     && rm -rf /var/lib/apt/lists/*
 
-# Claude Code CLI — installs the `claude` binary to /usr/local/bin/claude
-RUN npm install -g @anthropic-ai/claude-code
-
-# Harness binary from the builder stage
+# Harness binary from the builder stage (root-owned, world-executable, on PATH).
 COPY --from=builder /build/harness /usr/local/bin/harness
 
-# Give the pre-existing "node" user (uid 1000) a writable workspace.
-RUN mkdir -p /workspace && chown node:node /workspace
+ENV HOME=/root
+ENV PATH="${HOME}/.local/bin:${PATH}"
+# Agent CLIs — each vendor's official installer drops a self-contained binary
+# into /root/.local/bin (no Node runtime needed); HOME + PATH above put them on
+# the runtime PATH. NOTE: the runtime base must be full debian, not -slim — the
+# Codex installer's checksum step fails on the slim image (it relies on something
+# slim omits), so keep this on debian:latest.
+# Claude Code (Anthropic):
+RUN curl -fsSL https://claude.ai/install.sh | bash 
+# OpenAI Codex:
+RUN curl -fsSL https://chatgpt.com/codex/install.sh | sh 
+# Google Antigravity (`agy`) — used for Gemini models:
+RUN curl -fsSL https://antigravity.google/cli/install.sh | bash 
 
-USER node
 WORKDIR /workspace
 
 ENTRYPOINT ["/usr/local/bin/harness"]

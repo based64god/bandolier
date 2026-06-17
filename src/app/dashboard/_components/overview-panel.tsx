@@ -173,7 +173,23 @@ export function OverviewPanel({ notify }: { notify: boolean }) {
                     className="px-4 py-4 align-top"
                     onClick={(e) => e.stopPropagation()}
                   >
-                    {agent.pullRequestUrl ? (
+                    {agent.createdIssueUrl ? (
+                      <a
+                        href={agent.createdIssueUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-xs text-emerald-300 transition hover:bg-emerald-500/20"
+                      >
+                        <svg
+                          viewBox="0 0 16 16"
+                          fill="currentColor"
+                          className="h-3.5 w-3.5"
+                        >
+                          <path d="M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0Zm0 4a1 1 0 0 1 1 1v3a1 1 0 0 1-2 0V5a1 1 0 0 1 1-1Zm0 7.5a1.1 1.1 0 1 1 0 2.2 1.1 1.1 0 0 1 0-2.2Z" />
+                        </svg>
+                        Issue
+                      </a>
+                    ) : agent.pullRequestUrl ? (
                       <a
                         href={agent.pullRequestUrl}
                         target="_blank"

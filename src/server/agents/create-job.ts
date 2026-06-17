@@ -17,6 +17,19 @@ export const JOB_TTL_SECONDS = 7 * 24 * 3600; // one week
 /** Default cap on Claude agentic turns when the deploy form leaves it blank. */
 export const DEFAULT_MAX_TURNS = 100;
 
+/**
+ * Default agent harness image. A repo's `agentImage` config (DB) overrides it
+ * per repo; there is no server-wide env override.
+ */
+export const DEFAULT_HARNESS_IMAGE =
+  "ghcr.io/based64god/bandolier-agent-harness:latest";
+
+/**
+ * Namespace used when a job spec doesn't carry one. In practice every caller
+ * passes a namespace derived from the repo, so this is just a safety default.
+ */
+const DEFAULT_NAMESPACE = "claude-agents";
+
 // ── Kubernetes resource bootstrap ─────────────────────────────────────────────
 
 export async function ensureNamespace(
@@ -148,7 +161,7 @@ export interface JobSpec {
   systemPrompt?: string;
   /** Human-readable label shown in the dashboard (issue title or task preview). */
   displayName: string;
-  /** Kubernetes namespace to deploy into. Falls back to K8S_NAMESPACE env var. */
+  /** Kubernetes namespace to deploy into. Falls back to the default namespace. */
   namespace?: string;
   repoUrl?: string;
   branch: string;
@@ -166,6 +179,13 @@ export interface JobSpec {
    * dashboard delivers via the input-polling callback.
    */
   interactive?: boolean;
+  /**
+   * What the run produces when it finishes: a pull request (default) or a GitHub
+   * issue. In issue mode the harness runs the agent read-only and opens one issue
+   * written from the transcript — for a webhook/issue-triggered run, a sub-task of
+   * the originating issue. Issue mode requires `repoFullName` (where to open it).
+   */
+  outputType?: "pr" | "issue";
   gitName?: string;
   gitEmail?: string;
   /** Set for issue tasks (dashboard or webhook). */
@@ -196,11 +216,24 @@ export interface JobSpec {
   awsCredentials?: AwsCredentials;
   /** The acting user's Anthropic API key. Used when no AWS credentials are given. */
   anthropicApiKey?: string;
+  /**
+   * The acting user's OpenAI API key. Used when an OpenAI model is selected; the
+   * harness runs these through the OpenAI Codex CLI.
+   */
+  openaiApiKey?: string;
+  /**
+   * The acting user's Google Cloud project credentials JSON (service-account key
+   * or ADC). Used when a Gemini model is selected; the harness runs these through
+   * the Antigravity CLI (agy), which authenticates against the project via
+   * Application Default Credentials. Injected as GOOGLE_PROJECT_CREDENTIALS and
+   * written to ~/.gemini/credentials.json in the harness.
+   */
+  geminiApiKey?: string;
   /** The acting user's kubeconfig — the cluster the agent is deployed into. Required. */
   kubeconfig: string;
   /**
-   * Per-repo override for the harness container image. When unset, the
-   * server-wide default (HARNESS_IMAGE) is used.
+   * Per-repo override for the harness container image. When unset, the built-in
+   * DEFAULT_HARNESS_IMAGE is used.
    */
   agentImage?: string;
 }
@@ -211,18 +244,22 @@ function userSecretName(jobName: string): string {
 }
 
 export async function createAgentJob(spec: JobSpec): Promise<string> {
-  const ns = spec.namespace ?? env.K8S_NAMESPACE;
+  const ns = spec.namespace ?? DEFAULT_NAMESPACE;
   const jobName = `claude-agent-${Date.now()}`;
 
   const useUserAws = !!spec.awsCredentials;
   // Anthropic only applies when AWS isn't set (AWS Bedrock takes precedence).
   const useUserAnthropic = !useUserAws && !!spec.anthropicApiKey;
+  // OpenAI / Gemini are lower precedence — used only when no Claude provider is.
+  const useUserOpenai = !useUserAws && !useUserAnthropic && !!spec.openaiApiKey;
+  const useUserGemini =
+    !useUserAws && !useUserAnthropic && !useUserOpenai && !!spec.geminiApiKey;
   const useUserToken = !!spec.githubToken;
 
   // Only user-provided credentials are ever used — there is no server fallback.
-  if (!useUserAws && !useUserAnthropic) {
+  if (!useUserAws && !useUserAnthropic && !useUserOpenai && !useUserGemini) {
     throw new Error(
-      "No model credentials available. Configure AWS or Anthropic credentials in account settings.",
+      "No model credentials available. Configure AWS, Anthropic, OpenAI, or Gemini credentials in account settings.",
     );
   }
 
@@ -244,7 +281,11 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
   // The model id is chosen by the user from their provider's live model list.
   const provider = useUserAws
     ? { type: "bedrock" as const, model: spec.model }
-    : { type: "anthropic" as const, model: spec.model };
+    : useUserAnthropic
+      ? { type: "anthropic" as const, model: spec.model }
+      : useUserOpenai
+        ? { type: "openai" as const, model: spec.model }
+        : { type: "gemini" as const, model: spec.model };
   console.log("[bandolier:deploy] provider", {
     type: provider.type,
     model: provider.model,
@@ -266,7 +307,11 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
         userRef("AWS_SECRET_ACCESS_KEY"),
         userRef("AWS_SESSION_TOKEN", true),
       ]
-    : [userRef("ANTHROPIC_API_KEY")];
+    : useUserAnthropic
+      ? [userRef("ANTHROPIC_API_KEY")]
+      : useUserOpenai
+        ? [userRef("OPENAI_API_KEY")]
+        : [userRef("GOOGLE_PROJECT_CREDENTIALS")];
 
   const envVars: EnvVar[] = [
     { name: "CLAUDE_TASK", value: spec.task },
@@ -303,6 +348,9 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
   if (spec.systemPrompt) {
     envVars.push({ name: "CLAUDE_SYSTEM_PROMPT", value: spec.systemPrompt });
   }
+  if (spec.outputType === "issue") {
+    envVars.push({ name: "OUTPUT_TYPE", value: "issue" });
+  }
 
   // Both the artifact upload and the interactive input poll are authenticated by
   // the same per-job HMAC token; inject it (and the job name) when either is in
@@ -313,7 +361,7 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
       { name: "BANDOLIER_JOB", value: jobName },
       {
         name: "BANDOLIER_INGEST_TOKEN",
-        value: ingestToken(jobName, env.BETTER_AUTH_SECRET ?? ""),
+        value: ingestToken(jobName, env.BETTER_AUTH_SECRET),
       },
     );
   }
@@ -341,6 +389,9 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
     ...(spec.repoFullName && { "bandolier.io/repo": spec.repoFullName }),
     ...(spec.issueNumber && { "bandolier.io/github-issue": spec.issueNumber }),
     ...(spec.issueUrl && { "bandolier.io/issue-url": spec.issueUrl }),
+    ...(spec.outputType === "issue" && {
+      "bandolier.io/output-type": "issue",
+    }),
     ...(spec.createdBy && { "bandolier.io/created-by": spec.createdBy }),
   };
 
@@ -398,8 +449,8 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
             containers: [
               {
                 name: "harness",
-                image: spec.agentImage ?? env.HARNESS_IMAGE,
-                imagePullPolicy: env.HARNESS_IMAGE_PULL_POLICY,
+                image: spec.agentImage ?? DEFAULT_HARNESS_IMAGE,
+                imagePullPolicy: "Always",
                 env: envVars,
                 resources: {
                   requests: { cpu: "500m", memory: "512Mi" },
@@ -420,6 +471,10 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
   const stringData: Record<string, string> = {};
   if (useUserToken) stringData.GITHUB_TOKEN = spec.githubToken!;
   if (useUserAnthropic) stringData.ANTHROPIC_API_KEY = spec.anthropicApiKey!;
+  if (useUserOpenai) stringData.OPENAI_API_KEY = spec.openaiApiKey!;
+  // agy (Antigravity CLI) authenticates via Application Default Credentials; the
+  // harness writes this project credentials JSON to ~/.gemini/credentials.json.
+  if (useUserGemini) stringData.GOOGLE_PROJECT_CREDENTIALS = spec.geminiApiKey!;
   if (useUserAws) {
     stringData.AWS_ACCESS_KEY_ID = spec.awsCredentials!.accessKeyId;
     stringData.AWS_SECRET_ACCESS_KEY = spec.awsCredentials!.secretAccessKey;
@@ -471,6 +526,8 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
     github: useUserToken,
     aws: useUserAws,
     anthropic: useUserAnthropic,
+    openai: useUserOpenai,
+    gemini: useUserGemini,
   });
   return jobName;
 }

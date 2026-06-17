@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  expiresIn,
+  expiresAtLocal,
   isAgentDone,
   STATUS_ICON_PATHS,
   STATUS_STYLES,
@@ -15,11 +15,11 @@ const KNOWN_STATUSES = [
   "Unknown",
 ];
 
-describe("expiresIn", () => {
+describe("expiresAtLocal", () => {
   beforeEach(() => {
-    // Pin "now" to a fixed instant so relative formatting is deterministic.
+    // Pin "now" to a fixed instant so "today vs. another day" is deterministic.
     vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+    vi.setSystemTime(new Date("2026-01-01T12:00:00.000Z"));
   });
 
   afterEach(() => {
@@ -30,24 +30,35 @@ describe("expiresIn", () => {
     new Date(Date.now() + s * 1000).toISOString();
 
   it("returns an em dash for a null expiry", () => {
-    expect(expiresIn(null)).toBe("—");
+    expect(expiresAtLocal(null)).toBe("—");
   });
 
   it("returns 'expiring…' when already past", () => {
-    expect(expiresIn(inSeconds(-10))).toBe("expiring…");
-    expect(expiresIn(inSeconds(0))).toBe("expiring…");
+    expect(expiresAtLocal(inSeconds(-10))).toBe("expiring…");
+    expect(expiresAtLocal(inSeconds(0))).toBe("expiring…");
   });
 
-  it("formats sub-minute durations in seconds", () => {
-    expect(expiresIn(inSeconds(45))).toBe("45s");
+  it("shows the local clock time for an expiry later today", () => {
+    const iso = inSeconds(2 * 3600);
+    const expected = new Date(iso).toLocaleTimeString(undefined, {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+    expect(expiresAtLocal(iso)).toBe(expected);
   });
 
-  it("formats sub-hour durations in whole minutes", () => {
-    expect(expiresIn(inSeconds(125))).toBe("2m");
-  });
-
-  it("formats multi-hour durations as hours and minutes", () => {
-    expect(expiresIn(inSeconds(3 * 3600 + 25 * 60))).toBe("3h 25m");
+  it("prefixes the date when the expiry falls on another day", () => {
+    const iso = inSeconds(3 * 86_400);
+    const when = new Date(iso);
+    const date = when.toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+    });
+    const time = when.toLocaleTimeString(undefined, {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+    expect(expiresAtLocal(iso)).toBe(`${date}, ${time}`);
   });
 });
 

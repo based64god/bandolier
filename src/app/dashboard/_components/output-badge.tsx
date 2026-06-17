@@ -3,13 +3,16 @@
 // known. The indicator is a compact glyph so it adds state without widening the
 // row; it always sits inline next to the label.
 
-type ItemState = "open" | "closed" | "merged";
+type ItemState = "open" | "closed" | "completed" | "merged";
 
 // Indicators are icon-only to stay small. Colours follow GitHub's conventions
-// (open = green, closed = red, merged = purple) and the glyph distinguishes the
-// state so it reads even against a same-hued badge (e.g. a merged "PR" pill).
-// Paths are 16×16 GitHub Octicons: a filled dot (open), x-circle (closed) and
-// git-merge (merged).
+// (open = green, closed-as-not-planned = grey, completed = purple, merged =
+// purple) and the glyph distinguishes the state so it reads even against a
+// same-hued badge (e.g. a merged "PR" pill). An issue closed as *completed*
+// (e.g. resolved by a pull request) reads as a success — a purple check-circle
+// — rather than the failure-style red x used for "closed as not planned".
+// Paths are 16×16 GitHub Octicons: a filled dot (open), skip/circle-slash
+// (closed as not planned), check-circle (completed) and git-merge (merged).
 const STATE_CONFIG: Record<
   ItemState,
   { label: string; className: string; iconPath: string }
@@ -20,10 +23,16 @@ const STATE_CONFIG: Record<
     iconPath: "M8 4a4 4 0 1 1 0 8 4 4 0 0 1 0-8Z",
   },
   closed: {
-    label: "Closed",
-    className: "text-red-300",
+    label: "Closed as not planned",
+    className: "text-gray-400",
     iconPath:
-      "M2.343 13.657A8 8 0 1 1 13.657 2.343 8 8 0 0 1 2.343 13.657ZM6.03 4.97a.75.75 0 0 0-1.06 1.06L6.94 8 4.97 9.97a.75.75 0 1 0 1.06 1.06L8 9.06l1.97 1.97a.75.75 0 1 0 1.06-1.06L9.06 8l1.97-1.97a.75.75 0 1 0-1.06-1.06L8 6.94 6.03 4.97Z",
+      "M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0ZM4.92 3.857a6.5 6.5 0 0 0-1.063 1.063l7.223 7.223a6.5 6.5 0 0 0 1.063-1.063L4.92 3.857ZM8 1.5a6.47 6.47 0 0 0-4.08 1.446l8.134 8.134A6.5 6.5 0 0 0 8 1.5Z",
+  },
+  completed: {
+    label: "Completed",
+    className: "text-purple-300",
+    iconPath:
+      "M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0Zm3.78 5.97a.75.75 0 0 0-1.06 0L7 9.69 5.28 7.97a.75.75 0 0 0-1.06 1.06l2.25 2.25a.75.75 0 0 0 1.06 0l4.25-4.25a.75.75 0 0 0 0-1.06Z",
   },
   merged: {
     label: "Merged",

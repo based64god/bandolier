@@ -70,18 +70,56 @@ function playChime() {
   });
 }
 
-function systemNotification(agent: AlertAgent) {
+// ── Native system notifications ────────────────────────────────────────────────
+
+/** True when running as an installed PWA (standalone display mode). */
+export function isStandalone(): boolean {
+  if (typeof window === "undefined") return false;
+  return (
+    window.matchMedia?.("(display-mode: standalone)").matches ||
+    // iOS Safari uses a non-standard navigator.standalone flag.
+    (window.navigator as Navigator & { standalone?: boolean }).standalone ===
+      true
+  );
+}
+
+/**
+ * Shows an OS-level notification. Prefers the service worker's showNotification
+ * — required in installed PWAs, where the Notification constructor is
+ * unavailable on some platforms — and falls back to the constructor in a plain
+ * browser tab. No-op without granted permission.
+ */
+async function showNativeNotification(
+  title: string,
+  body: string,
+  tag: string,
+) {
   if (
     typeof Notification === "undefined" ||
     Notification.permission !== "granted"
   ) {
     return;
   }
-  const ok = agent.status === "Succeeded";
-  new Notification(ok ? "Agent finished" : "Agent failed", {
-    body: agent.displayName,
-    icon: "/icon.svg",
-  });
+  const options: NotificationOptions = {
+    body,
+    icon: "/icon-192.png",
+    badge: "/icon-192.png",
+    tag,
+  };
+  try {
+    if ("serviceWorker" in navigator) {
+      const reg = await navigator.serviceWorker.ready;
+      await reg.showNotification(title, options);
+      return;
+    }
+  } catch {
+    // Fall through to the constructor.
+  }
+  try {
+    new Notification(title, options);
+  } catch {
+    // Some installed PWAs forbid the constructor entirely; nothing else to do.
+  }
 }
 
 /** Requests notification permission; call from a user gesture (the toggle). */
@@ -115,8 +153,15 @@ export function useCompletionAlerts(agents: AlertAgent[], enabled: boolean) {
       const newlyDone =
         prev !== undefined && !isTerminal(prev) && isTerminal(a.status);
       if (newlyDone && enabled) {
-        playChime();
-        systemNotification(a);
+        const ok = a.status === "Succeeded";
+        void showNativeNotification(
+          ok ? "Agent finished" : "Agent failed",
+          a.displayName,
+          `complete:${a.name}`,
+        );
+        // Installed PWAs rely on the native notification (and may be
+        // backgrounded, where Web Audio is throttled); chime only in a tab.
+        if (!isStandalone()) playChime();
       }
       seen.current.set(a.name, a.status);
     }
@@ -126,19 +171,6 @@ export function useCompletionAlerts(agents: AlertAgent[], enabled: boolean) {
 // ── Awaiting-input detection (interactive agents) ──────────────────────────────
 
 type InputAgent = { name: string; awaitingInput: boolean; displayName: string };
-
-function inputNotification(agent: InputAgent) {
-  if (
-    typeof Notification === "undefined" ||
-    Notification.permission !== "granted"
-  ) {
-    return;
-  }
-  new Notification("Agent waiting for input", {
-    body: agent.displayName,
-    icon: "/icon.svg",
-  });
-}
 
 /**
  * Fires a chime + system notification when an interactive agent transitions into
@@ -161,8 +193,12 @@ export function useAwaitingInputAlerts(agents: InputAgent[], enabled: boolean) {
       // Alert on a transition into waiting (or an agent that appears already
       // waiting after the initial seed), once per transition.
       if (!prev && a.awaitingInput && enabled) {
-        playChime();
-        inputNotification(a);
+        void showNativeNotification(
+          "Agent waiting for input",
+          a.displayName,
+          `await:${a.name}`,
+        );
+        if (!isStandalone()) playChime();
       }
       seen.current.set(a.name, a.awaitingInput);
     }

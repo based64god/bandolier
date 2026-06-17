@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from "react";
 
 import { api } from "~/trpc/react";
 import type { RouterOutputs } from "~/trpc/react";
-import { expiresIn, STATUS_STYLES } from "./agent-ui";
+import { expiresIn } from "./agent-ui";
+import { StatusBadge } from "./status-badge";
 import { TASK_COLUMNS } from "./task-row";
 
 type Task = RouterOutputs["agents"]["list"][number];
@@ -98,15 +99,15 @@ export function InteractiveRow({
         {/* Status (+ awaiting pill) */}
         <td className="px-4 py-3 align-top">
           <div className="flex flex-col items-start gap-1">
-            <span
-              className={`rounded-full border px-2 py-0.5 text-xs whitespace-nowrap ${STATUS_STYLES[agent.status] ?? STATUS_STYLES.Unknown}`}
-            >
-              {agent.status}
-            </span>
+            <StatusBadge status={agent.status} />
             {awaiting && (
-              <span className="flex items-center gap-1 rounded-full border border-amber-400/50 bg-amber-400/15 px-2 py-0.5 text-xs font-medium whitespace-nowrap text-amber-200">
+              <span
+                title="Waiting"
+                aria-label="Waiting"
+                className="flex items-center justify-center gap-1 rounded-full border border-amber-400/50 bg-amber-400/15 px-1.5 py-0.5 text-xs font-medium whitespace-nowrap text-amber-200 md:px-2"
+              >
                 <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-300" />
-                Waiting
+                <span className="hidden md:inline">Waiting</span>
               </span>
             )}
           </div>
@@ -157,9 +158,9 @@ export function InteractiveRow({
           </div>
         </td>
 
-        {/* Created by */}
+        {/* Created by — dropped on narrow viewports where space is limited. */}
         <td
-          className="px-4 py-3 align-top"
+          className="hidden px-4 py-3 align-top md:table-cell"
           onClick={(e) => e.stopPropagation()}
         >
           {agent.source === "github-issue" && agent.issueUrl ? (
@@ -178,8 +179,9 @@ export function InteractiveRow({
           )}
         </td>
 
-        {/* Currently — clamped to one line, full text on hover. */}
-        <td className="px-4 py-3 align-top">
+        {/* Currently — clamped to one line, full text on hover. Dropped on
+            narrow viewports where space is limited. */}
+        <td className="hidden px-4 py-3 align-top md:table-cell">
           <span
             title={agent.currently ?? undefined}
             className="block max-w-[16rem] truncate text-xs text-white/40 italic"
@@ -188,8 +190,8 @@ export function InteractiveRow({
           </span>
         </td>
 
-        {/* Expires */}
-        <td className="px-4 py-3 align-top whitespace-nowrap text-white/50 tabular-nums">
+        {/* Expires — dropped on narrow viewports where space is limited. */}
+        <td className="hidden px-4 py-3 align-top whitespace-nowrap text-white/50 tabular-nums md:table-cell">
           {expiresIn(agent.expiresAt)}
         </td>
 

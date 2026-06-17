@@ -3,8 +3,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   expiresIn,
   isAgentDone,
+  STATUS_ICON_PATHS,
   STATUS_STYLES,
 } from "~/app/dashboard/_components/agent-ui";
+
+const KNOWN_STATUSES = [
+  "Running",
+  "Pending",
+  "Failed",
+  "Succeeded",
+  "Unknown",
+];
 
 describe("expiresIn", () => {
   beforeEach(() => {
@@ -44,15 +53,23 @@ describe("expiresIn", () => {
 
 describe("STATUS_STYLES", () => {
   it("defines a style for each known pod status", () => {
-    for (const status of [
-      "Running",
-      "Pending",
-      "Failed",
-      "Succeeded",
-      "Unknown",
-    ]) {
+    for (const status of KNOWN_STATUSES) {
       expect(STATUS_STYLES[status]).toBeTruthy();
     }
+  });
+});
+
+describe("STATUS_ICON_PATHS", () => {
+  it("defines a glyph for each known pod status, so the pill can collapse to an icon", () => {
+    for (const status of KNOWN_STATUSES) {
+      expect(STATUS_ICON_PATHS[status]).toBeTruthy();
+    }
+  });
+
+  it("provides an Unknown fallback for unrecognised statuses", () => {
+    // The badge falls back to the Unknown glyph for statuses it doesn't know.
+    expect(STATUS_ICON_PATHS.Unknown).toBeTruthy();
+    expect(STATUS_ICON_PATHS.Sideways).toBe(undefined);
   });
 });
 

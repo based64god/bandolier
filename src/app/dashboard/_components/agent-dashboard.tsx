@@ -429,7 +429,7 @@ export function AgentDashboard({
                           ].map((h, i) => (
                             <th
                               key={i}
-                              className={`px-4 py-3 align-top ${h.optional ? "hidden md:table-cell" : ""}`}
+                              className={`px-3 py-2 align-middle md:px-4 md:py-3 ${h.optional ? "hidden md:table-cell" : ""}`}
                             >
                               {h.label}
                             </th>

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { api } from "~/trpc/react";
 import type { RouterOutputs } from "~/trpc/react";
-import { expiresIn } from "./agent-ui";
+import { expiresAtLocal } from "./agent-ui";
 import { OutputBadge, SourceBadge } from "./output-badge";
 import { StatusBadge } from "./status-badge";
 import { MOBILE_TASK_COLUMNS, TASK_COLUMNS } from "./task-row";
@@ -194,7 +194,7 @@ export function InteractiveRow({
 
         {/* Expires — dropped on narrow viewports where space is limited. */}
         <td className="hidden px-3 py-2 align-middle md:px-4 md:py-3 whitespace-nowrap text-white/50 tabular-nums md:table-cell">
-          {expiresIn(agent.expiresAt)}
+          {expiresAtLocal(agent.expiresAt)}
         </td>
 
         {/* Actions */}

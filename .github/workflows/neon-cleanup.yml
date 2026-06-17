@@ -4,6 +4,7 @@ on:
     types: [closed]
 jobs:
   delete-branch:
+    environment: production
     runs-on: ubuntu-latest
     # Secrets are NOT exposed to pull_request runs triggered from forks. When
     # such a PR is closed, secrets.NEON_API_KEY is empty and neonctl (which the
@@ -19,7 +20,7 @@ jobs:
         id: creds
         env:
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
-          NEON_PROJECT_ID: ${{ vars.NEON_PROJECT_ID }}
+          NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
         run: |
           if [ -z "$NEON_API_KEY" ] || [ -z "$NEON_PROJECT_ID" ]; then
             echo "Neon credentials (NEON_API_KEY / NEON_PROJECT_ID) are not configured; skipping preview-branch cleanup." >&2
@@ -32,6 +33,6 @@ jobs:
         if: steps.creds.outputs.configured == 'true'
         uses: neondatabase/delete-branch-action@v3
         with:
-          project_id: ${{ vars.NEON_PROJECT_ID }}
+          project_id: ${{ secrets.NEON_PROJECT_ID }}
           branch: preview/pr-${{ github.event.number }}-${{ github.head_ref }}
           api_key: ${{ secrets.NEON_API_KEY }}

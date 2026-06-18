@@ -649,7 +649,7 @@ function ApiKeysSection() {
             Copy your new key now — it won&apos;t be shown again.
           </p>
           <div className="flex items-center gap-2">
-            <code className="flex-1 overflow-x-auto rounded bg-black/30 px-2 py-1 text-xs text-emerald-200">
+            <code className="min-w-0 flex-1 overflow-x-auto rounded bg-black/30 px-2 py-1 text-xs text-emerald-200">
               {newToken}
             </code>
             <button
@@ -657,13 +657,13 @@ function ApiKeysSection() {
                 void navigator.clipboard.writeText(newToken);
                 setCopied(true);
               }}
-              className="rounded bg-white/10 px-2 py-1 text-xs hover:bg-white/20"
+              className="shrink-0 rounded bg-white/10 px-2 py-1 text-xs hover:bg-white/20"
             >
               {copied ? "Copied" : "Copy"}
             </button>
             <button
               onClick={() => setNewToken(null)}
-              className="rounded bg-white/10 px-2 py-1 text-xs hover:bg-white/20"
+              className="shrink-0 rounded bg-white/10 px-2 py-1 text-xs hover:bg-white/20"
             >
               Done
             </button>

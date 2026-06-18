@@ -2,6 +2,7 @@ import type { AwsCredentials } from "~/server/agents/aws";
 import { env } from "~/env";
 import { ingestToken } from "~/lib/ingest";
 import { artifactsEnabled } from "~/server/agents/artifacts";
+import { webPushEnabled } from "~/server/agents/web-push";
 import { SPAWNED_BY_LABEL, spawnedByLabelValue } from "~/server/agents/labels";
 import { db } from "~/server/db";
 import { taskRun } from "~/server/db/schema";
@@ -352,11 +353,14 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
     envVars.push({ name: "OUTPUT_TYPE", value: "issue" });
   }
 
-  // Both the artifact upload and the interactive input poll are authenticated by
-  // the same per-job HMAC token; inject it (and the job name) when either is in
-  // play, then add the feature-specific callback URLs.
+  // The artifact upload, interactive input poll, and lifecycle-event callback
+  // are all authenticated by the same per-job HMAC token. Background Web Push
+  // (completion / awaiting-input events) needs the token + events URL even for a
+  // plain one-shot run, so inject them whenever any of the three is in play.
   const persistArtifacts = artifactsEnabled();
-  if (persistArtifacts || spec.interactive) {
+  const pushEnabled = webPushEnabled();
+  const wantCallbacks = persistArtifacts || !!spec.interactive || pushEnabled;
+  if (wantCallbacks) {
     envVars.push(
       { name: "BANDOLIER_JOB", value: jobName },
       {
@@ -369,6 +373,15 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
     envVars.push({
       name: "BANDOLIER_INGEST_URL",
       value: `${env.BETTER_AUTH_URL}/api/agent-runs`,
+    });
+  }
+  // Lifecycle-event callback for background Web Push (completion / awaiting
+  // input). The endpoint no-ops when no VAPID keypair is configured, so it's
+  // safe to wire up; the harness skips posting when the URL is unset.
+  if (wantCallbacks) {
+    envVars.push({
+      name: "BANDOLIER_EVENTS_URL",
+      value: `${env.BETTER_AUTH_URL}/api/agent-events`,
     });
   }
   if (spec.interactive) {
@@ -511,13 +524,16 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
   });
 
   // Record the run so it can be listed/inspected after the Job's TTL deletes
-  // the pod. The harness fills in transcriptKey via the ingest callback.
-  if (persistArtifacts) {
+  // the pod (the harness fills in transcriptKey via the ingest callback), and so
+  // the agent-events callback can map this job back to its owning user to route
+  // background push. Persisted whenever artifacts or push are enabled.
+  if (persistArtifacts || pushEnabled) {
     await db.insert(taskRun).values({
       jobName,
       namespace: ns,
       displayName: spec.displayName,
       createdBy: spec.createdBy ?? null,
+      userId: spec.userId,
       repoFullName: spec.repoFullName ?? null,
       issueNumber: spec.issueNumber ?? null,
     });

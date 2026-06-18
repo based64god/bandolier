@@ -3,6 +3,7 @@ import { agentsRouter } from "~/server/api/routers/agents";
 import { apiKeysRouter } from "~/server/api/routers/api-keys";
 import { modelsRouter } from "~/server/api/routers/models";
 import { postRouter } from "~/server/api/routers/post";
+import { pushRouter } from "~/server/api/routers/push";
 import { reposRouter } from "~/server/api/routers/repos";
 import { webhooksRouter } from "~/server/api/routers/webhooks";
 import { createCallerFactory, createTRPCRouter } from "~/server/api/trpc";
@@ -15,6 +16,7 @@ export const appRouter = createTRPCRouter({
   models: modelsRouter,
   webhooks: webhooksRouter,
   apiKeys: apiKeysRouter,
+  push: pushRouter,
 });
 
 // export type definition of API

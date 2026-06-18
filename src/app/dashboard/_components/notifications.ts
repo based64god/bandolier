@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useSyncExternalStore } from "react";
 
+import { api } from "~/trpc/react";
+
 const PREF_KEY = "bandolier:notify";
 
 type AlertAgent = { name: string; status: string; displayName: string };
@@ -155,6 +157,117 @@ export async function requestNotificationPermission() {
   if (Notification.permission === "default") {
     await Notification.requestPermission();
   }
+}
+
+// ── Web Push subscription (background notifications) ─────────────────────────────
+
+/**
+ * Web Push delivers notifications through the service worker even when no tab is
+ * open — the piece the in-tab alerts above can't do. Subscribing requires a
+ * server VAPID public key; this hook registers the browser's PushSubscription
+ * with the server while notifications are enabled and removes it when they're
+ * turned off. It's a no-op when the browser lacks push support or the server has
+ * no VAPID keypair configured (config.enabled === false).
+ */
+
+/** Decodes a base64url VAPID key into the ArrayBuffer PushManager expects. */
+function urlBase64ToBuffer(base64: string): ArrayBuffer {
+  const padding = "=".repeat((4 - (base64.length % 4)) % 4);
+  const normalized = (base64 + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const raw = atob(normalized);
+  const buffer = new ArrayBuffer(raw.length);
+  const view = new Uint8Array(buffer);
+  for (let i = 0; i < raw.length; i++) view[i] = raw.charCodeAt(i);
+  return buffer;
+}
+
+/** ArrayBuffer → base64url, for the p256dh/auth keys sent to the server. */
+function bufferToBase64Url(buf: ArrayBuffer | null): string {
+  if (!buf) return "";
+  const bytes = new Uint8Array(buf);
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
+function pushSupported(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    "serviceWorker" in navigator &&
+    "PushManager" in window &&
+    typeof Notification !== "undefined"
+  );
+}
+
+/**
+ * Keeps the browser's push subscription in sync with the notification toggle.
+ * Enabling subscribes (creating one with the server's VAPID key if needed) and
+ * registers it server-side; disabling unregisters and unsubscribes. Both are
+ * best-effort — a failure here never blocks the in-tab alerts.
+ */
+export function usePushSubscription(enabled: boolean) {
+  const { data: config } = api.push.config.useQuery(undefined, {
+    // The VAPID key is process-stable; no need to refetch.
+    staleTime: Infinity,
+  });
+  // react-query's mutateAsync is referentially stable across renders, so it's
+  // safe to depend on directly without refs.
+  const { mutateAsync: subscribe } = api.push.subscribe.useMutation();
+  const { mutateAsync: unsubscribe } = api.push.unsubscribe.useMutation();
+  const publicKey = config?.publicKey ?? null;
+  const pushEnabled = config?.enabled ?? false;
+
+  useEffect(() => {
+    if (!pushSupported() || !pushEnabled || !publicKey) return;
+    let cancelled = false;
+
+    async function sync() {
+      const reg = await navigator.serviceWorker.ready;
+      const existing = await reg.pushManager.getSubscription();
+
+      if (!enabled) {
+        // Notifications off — drop the subscription server-side, then locally.
+        if (existing) {
+          try {
+            await unsubscribe({ endpoint: existing.endpoint });
+          } catch {
+            // Best-effort; still unsubscribe the browser below.
+          }
+          await existing.unsubscribe().catch(() => undefined);
+        }
+        return;
+      }
+
+      // Notifications on, but permission not granted — can't subscribe.
+      if (Notification.permission !== "granted") return;
+
+      const sub =
+        existing ??
+        (await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToBuffer(publicKey!),
+        }));
+      if (cancelled) return;
+
+      const json = sub.toJSON();
+      const p256dh =
+        json.keys?.p256dh ?? bufferToBase64Url(sub.getKey("p256dh"));
+      const auth = json.keys?.auth ?? bufferToBase64Url(sub.getKey("auth"));
+      if (!p256dh || !auth) return;
+
+      await subscribe({ endpoint: sub.endpoint, p256dh, auth }).catch(
+        () => undefined,
+      );
+    }
+
+    void sync();
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled, pushEnabled, publicKey, subscribe, unsubscribe]);
 }
 
 // ── Completion detection ───────────────────────────────────────────────────────

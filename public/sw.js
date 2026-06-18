@@ -7,7 +7,7 @@
  *    and the cache stays warm.
  * Bump CACHE_VERSION to invalidate old caches on deploy.
  */
-const CACHE_VERSION = "v2";
+const CACHE_VERSION = "v3";
 const CACHE_NAME = `bandolier-${CACHE_VERSION}`;
 const OFFLINE_URL = "/";
 
@@ -42,17 +42,51 @@ self.addEventListener("message", (event) => {
   if (event.data?.type === "SKIP_WAITING") self.skipWaiting();
 });
 
-// Clicking a task notification focuses an existing app window (or opens one).
+// Web Push: render a server-sent notification even when no tab is open. The
+// payload (JSON) comes from ~/server/agents/web-push; fields are defensive so a
+// malformed/empty push still shows something rather than throwing.
+self.addEventListener("push", (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch {
+    // Non-JSON payload — fall back to its text as the body.
+    data = { body: event.data ? event.data.text() : "" };
+  }
+  const title = data.title || "Bandolier";
+  const options = {
+    body: data.body || "",
+    icon: "/icon-192.png",
+    badge: "/icon-192.png",
+    // Collapse repeats for the same subject (e.g. one per job).
+    tag: data.tag || undefined,
+    // Stash the click target so notificationclick can route to it.
+    data: { url: data.url || "/" },
+  };
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+// Clicking a task notification focuses an existing app window (navigating it to
+// the notification's target when it differs) or opens a new one.
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
+  const targetUrl = event.notification.data?.url || "/";
   event.waitUntil(
     self.clients
       .matchAll({ type: "window", includeUncontrolled: true })
       .then((clients) => {
         for (const client of clients) {
-          if ("focus" in client) return client.focus();
+          if ("focus" in client) {
+            // Best-effort navigate to the target before focusing.
+            if ("navigate" in client && targetUrl) {
+              return client
+                .navigate(targetUrl)
+                .then((c) => (c ?? client).focus());
+            }
+            return client.focus();
+          }
         }
-        return self.clients.openWindow("/");
+        return self.clients.openWindow(targetUrl);
       }),
   );
 });

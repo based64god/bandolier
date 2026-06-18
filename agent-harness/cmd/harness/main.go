@@ -96,6 +96,48 @@ func uploadTranscript() {
 	log.Printf("[harness] transcript persisted (%d bytes)", len(body))
 }
 
+// postEvent best-effort notifies Bandolier of a lifecycle event (the run
+// succeeded/failed, or an interactive agent is awaiting input) so the server can
+// deliver a background Web Push notification to the owning user — the path that
+// reaches them when no dashboard tab is open. No-op when the events env isn't
+// injected (push disabled). Shares the per-job HMAC token with the other
+// callbacks. Failures are logged and swallowed; notifications are never critical.
+func postEvent(eventType string) {
+	url := os.Getenv("BANDOLIER_EVENTS_URL")
+	token := os.Getenv("BANDOLIER_INGEST_TOKEN")
+	job := os.Getenv("BANDOLIER_JOB")
+	if url == "" || token == "" || job == "" {
+		return
+	}
+
+	body, err := json.Marshal(map[string]string{"type": eventType})
+	if err != nil {
+		return
+	}
+	// Fresh context: the run's context may already be canceled (SIGTERM) when a
+	// terminal event fires.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-Bandolier-Job", job)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		log.Printf("[harness] warn: event post failed: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		log.Printf("[harness] warn: event post status %d", resp.StatusCode)
+	}
+}
+
 // ── Provider detection ────────────────────────────────────────────────────────
 
 type providerKind int
@@ -1872,6 +1914,9 @@ func runClaudeInteractive(ctx context.Context, cfg config, first string) error {
 // awaitInput polls Bandolier for the next user message. It returns ended=true on
 // the end sentinel, the idle timeout, or context cancellation.
 func awaitInput(ctx context.Context, cfg config, idle time.Duration) (string, bool) {
+	// The turn just finished and we're now blocked on the user — notify them via
+	// background push (every interactive provider loop funnels through here).
+	postEvent("awaiting-input")
 	deadline := time.Now().Add(idle)
 	for {
 		if ctx.Err() != nil {
@@ -1987,6 +2032,16 @@ func main() {
 	runErr := run(ctx, cfg)
 	// Persist the transcript regardless of success/failure before exiting.
 	uploadTranscript()
+	// Notify the owning user the run reached a terminal state (background push).
+	// Skipped on context cancellation (SIGTERM/pod deletion): that's an operator
+	// terminating the agent, not a result the user asked to be alerted about.
+	if ctx.Err() == nil {
+		if runErr != nil {
+			postEvent("failed")
+		} else {
+			postEvent("succeeded")
+		}
+	}
 	if runErr != nil {
 		log.Fatalf("[harness] error: %v", runErr)
 	}

@@ -66,6 +66,18 @@ export const env = createEnv({
     ARTIFACTS_S3_ENDPOINT: z.string().optional(), // for MinIO / S3-compatible
     ARTIFACTS_AWS_ACCESS_KEY_ID: z.string().optional(),
     ARTIFACTS_AWS_SECRET_ACCESS_KEY: z.string().optional(),
+    // Web Push (VAPID) — enables true background push notifications: the service
+    // worker fires a system notification from a server-sent push event even when
+    // no tab is open. Both keys are required together to enable the feature;
+    // unset = push disabled (the dashboard falls back to in-tab alerts only).
+    // Generate a pair with `node scripts/generate-vapid-keys.mjs`. The public key
+    // is handed to the browser (via the push tRPC router) to create a
+    // subscription; the private key signs the pushes and must stay server-side.
+    WEB_PUSH_VAPID_PUBLIC_KEY: z.string().optional(),
+    WEB_PUSH_VAPID_PRIVATE_KEY: z.string().optional(),
+    // VAPID "subject": a mailto: or https: URL identifying the app to push
+    // services (some require it). Defaults to a placeholder mailto.
+    WEB_PUSH_CONTACT: z.string().default("mailto:admin@bandolier.local"),
   },
 
   /**
@@ -109,6 +121,9 @@ export const env = createEnv({
     ARTIFACTS_AWS_ACCESS_KEY_ID: process.env.ARTIFACTS_AWS_ACCESS_KEY_ID,
     ARTIFACTS_AWS_SECRET_ACCESS_KEY:
       process.env.ARTIFACTS_AWS_SECRET_ACCESS_KEY,
+    WEB_PUSH_VAPID_PUBLIC_KEY: process.env.WEB_PUSH_VAPID_PUBLIC_KEY,
+    WEB_PUSH_VAPID_PRIVATE_KEY: process.env.WEB_PUSH_VAPID_PRIVATE_KEY,
+    WEB_PUSH_CONTACT: process.env.WEB_PUSH_CONTACT,
     NEXT_PUBLIC_GITHUB_APP_SLUG: process.env.NEXT_PUBLIC_GITHUB_APP_SLUG,
   },
   /**

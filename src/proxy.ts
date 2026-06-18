@@ -18,6 +18,7 @@ function isExempt(pathname: string): boolean {
     pathname.startsWith("/api/v1/") ||
     pathname === "/api/agent-runs" ||
     pathname === "/api/agent-input" ||
+    pathname === "/api/agent-events" ||
     pathname === "/api/version" ||
     pathname === "/setup.sh" ||
     pathname === "/gate" ||

@@ -221,6 +221,24 @@ Setting `ARTIFACTS_S3_BUCKET` enables uploading each run's transcript to S3 so i
 | `ARTIFACTS_S3_ENDPOINT`                                           | _(unset)_   | Custom endpoint for MinIO / S3-compatible stores.                      |
 | `ARTIFACTS_AWS_ACCESS_KEY_ID` / `ARTIFACTS_AWS_SECRET_ACCESS_KEY` | _(unset)_   | Explicit S3 credentials; falls back to the default AWS provider chain. |
 
+### Background push notifications (optional)
+
+Bandolier is an installable PWA. With a VAPID keypair configured, it delivers **Web Push** notifications when an agent finishes, fails, or starts waiting for input — through the service worker, so they arrive even when the app is closed or unfocused, on mobile and desktop. Without keys, the dashboard still shows the same alerts (chime + system notification) while a tab is open.
+
+Generate a keypair once and keep it for the life of the deployment (rotating it invalidates every existing subscription):
+
+```bash
+node scripts/generate-vapid-keys.mjs
+```
+
+| Variable                     | Default                      | Description                                                                                        |
+| ---------------------------- | ---------------------------- | -------------------------------------------------------------------------------------------------- |
+| `WEB_PUSH_VAPID_PUBLIC_KEY`  | _(unset)_                    | Public VAPID key handed to browsers to create a push subscription. Both keys enable push together. |
+| `WEB_PUSH_VAPID_PRIVATE_KEY` | _(unset)_                    | Private VAPID key that signs pushes. Keep secret.                                                  |
+| `WEB_PUSH_CONTACT`           | `mailto:admin@bandolier.local` | `mailto:`/`https:` URL identifying the app to push services.                                     |
+
+Users opt in per browser via the notification toggle in the dashboard (it requests permission and registers a subscription); toggling it off unsubscribes. Notifications are routed to the user who owns the agent, so each person only sees their own.
+
 ---
 
 ## Project layout

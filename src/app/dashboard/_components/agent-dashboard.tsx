@@ -21,6 +21,7 @@ import {
   useChimeUnlock,
   useCompletionAlerts,
   useNotifyPref,
+  usePushSubscription,
 } from "./notifications";
 import { OverviewPanel } from "./overview-panel";
 import { RepoConfigModal } from "./repo-config-modal";
@@ -192,6 +193,9 @@ export function AgentDashboard({
   useChimeUnlock(notify);
   useCompletionAlerts(agents, notify);
   useAwaitingInputAlerts(interactiveAgents, notify);
+  // Register a Web Push subscription while notifications are on, so alerts also
+  // arrive in the background (app closed / unfocused) on mobile and desktop.
+  usePushSubscription(notify);
 
   async function toggleNotify() {
     if (!notify) {

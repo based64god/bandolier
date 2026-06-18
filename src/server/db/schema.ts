@@ -116,6 +116,11 @@ export const taskRun = pgTable("task_run", {
   namespace: text("namespace").notNull(),
   displayName: text("display_name").notNull(),
   createdBy: text("created_by"),
+  // Bandolier user id that owns this run, so the agent-events callback (which
+  // authenticates by the job's HMAC token, not a session) can resolve which
+  // user's push subscriptions to notify. Nullable for rows created before this
+  // column existed. No FK so a run row outlives a deleted user for history.
+  userId: text("user_id"),
   repoFullName: text("repo_full_name"),
   issueNumber: text("issue_number"),
   /** Object-storage key for the rendered transcript, set on harness callback. */
@@ -294,6 +299,34 @@ export const githubInstallation = pgTable("github_installation", {
     .$onUpdate(() => new Date())
     .notNull(),
 });
+
+// Web Push subscriptions: one row per browser/device a user has granted push
+// permission on (a user can have several — phone, laptop, etc.). The endpoint is
+// the push service's unique URL for that subscription and is the natural key;
+// the p256dh/auth keys encrypt the payload so only that browser can read it.
+// Rows are pruned when a push service reports the subscription gone (410/404).
+export const pushSubscription = pgTable(
+  "push_subscription",
+  {
+    // The push service endpoint URL — globally unique per subscription.
+    endpoint: text("endpoint").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    // Client encryption keys from the PushSubscription (base64url), required to
+    // encrypt the payload the service worker decrypts.
+    p256dh: text("p256dh").notNull(),
+    auth: text("auth").notNull(),
+    createdAt: timestamp("created_at")
+      .$defaultFn(() => /* @__PURE__ */ new Date())
+      .notNull(),
+    updatedAt: timestamp("updated_at")
+      .$defaultFn(() => /* @__PURE__ */ new Date())
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (t) => [index("push_subscription_user_idx").on(t.userId)],
+);
 
 export const userRelations = relations(user, ({ many }) => ({
   account: many(account),

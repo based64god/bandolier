@@ -111,23 +111,84 @@ export const userAwsCredentials = pgTable("user_aws_credentials", {
 // Durable record of an agent run, surviving the Job's TTL. Artifacts (the
 // transcript now; workspace/session later) live in object storage; columns hold
 // pointers + metadata so runs can be listed and inspected after the pod is gone.
-export const taskRun = pgTable("task_run", {
-  jobName: text("job_name").primaryKey(),
-  namespace: text("namespace").notNull(),
-  displayName: text("display_name").notNull(),
-  createdBy: text("created_by"),
-  repoFullName: text("repo_full_name"),
-  issueNumber: text("issue_number"),
-  /** Object-storage key for the rendered transcript, set on harness callback. */
-  transcriptKey: text("transcript_key"),
-  createdAt: timestamp("created_at")
-    .$defaultFn(() => /* @__PURE__ */ new Date())
-    .notNull(),
-  updatedAt: timestamp("updated_at")
-    .$defaultFn(() => /* @__PURE__ */ new Date())
-    .$onUpdate(() => new Date())
-    .notNull(),
-});
+export const taskRun = pgTable(
+  "task_run",
+  {
+    jobName: text("job_name").primaryKey(),
+    namespace: text("namespace").notNull(),
+    displayName: text("display_name").notNull(),
+    createdBy: text("created_by"),
+    repoFullName: text("repo_full_name"),
+    issueNumber: text("issue_number"),
+    /** Object-storage key for the rendered transcript, set on harness callback. */
+    transcriptKey: text("transcript_key"),
+    /**
+     * Session thread this run belongs to (see `sessionThread`). The agent claims a
+     * thread early in the run via the MCP discovery tools; a human can later
+     * reassign it from the dashboard. Mutable — correcting it reroutes the *next*
+     * task's resume, it does not rewrite this run's completed transcript.
+     */
+    threadId: text("thread_id"),
+    /** The Claude session id used for this run (`--session-id` / `--resume`). */
+    sessionId: text("session_id"),
+    createdAt: timestamp("created_at")
+      .$defaultFn(() => /* @__PURE__ */ new Date())
+      .notNull(),
+    updatedAt: timestamp("updated_at")
+      .$defaultFn(() => /* @__PURE__ */ new Date())
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (t) => [index("task_run_thread_idx").on(t.threadId)],
+);
+
+// A persistent session "thread": a chain of related agent runs in one repo that
+// share Claude session state. Session bytes (`~/.claude/projects/<slug>/`) live
+// on a per-thread PVC mounted into each child pod at /root/.claude; this row is
+// the durable, dashboard-visible index plus the metadata the control plane needs
+// to mount/resume without scanning the cluster. The agent claims a thread via the
+// MCP discovery tools (repo-confined); users never thread tasks themselves.
+export const sessionThread = pgTable(
+  "session_thread",
+  {
+    threadId: text("thread_id").primaryKey(),
+    /** Discovery is confined to this repo — the agent cannot widen scope. */
+    repoFullName: text("repo_full_name").notNull(),
+    /** Deterministic Claude session id seeded into the thread's first run. */
+    sessionId: text("session_id").notNull(),
+    /** PersistentVolumeClaim backing ~/.claude for this thread's pods. */
+    pvcName: text("pvc_name"),
+    /** Namespace the PVC lives in (repo-derived, matches the Job namespace). */
+    namespace: text("namespace"),
+    /**
+     * Access mode the PVC was provisioned with, discovered from the StorageClass
+     * ("ReadWriteOnce" | "ReadWriteMany"). Drives whether a concurrent child can
+     * mount-and-fork (RWX) or must seed via the broker-cp path (RWO).
+     */
+    accessMode: text("access_mode"),
+    /**
+     * Most recent child Job. The PVC's ownerReference is re-parented to this Job
+     * on each new child, so the PVC is GC'd one Job-TTL after the *last* child —
+     * "lives as long as the most recent child".
+     */
+    latestJobName: text("latest_job_name"),
+    /** Claude Code CLI version that wrote the session; resume falls back to a
+     * summary on mismatch (the .jsonl format is version-tied). */
+    claudeCliVersion: text("claude_cli_version"),
+    /** Bumped on every run touching the thread; drives the idle-TTL sweep. */
+    lastUsedAt: timestamp("last_used_at")
+      .$defaultFn(() => /* @__PURE__ */ new Date())
+      .notNull(),
+    createdAt: timestamp("created_at")
+      .$defaultFn(() => /* @__PURE__ */ new Date())
+      .notNull(),
+    updatedAt: timestamp("updated_at")
+      .$defaultFn(() => /* @__PURE__ */ new Date())
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (t) => [index("session_thread_repo_idx").on(t.repoFullName)],
+);
 
 // Queued user input for interactive agents. The dashboard enqueues a row; the
 // harness (which can't hold a session) polls the input endpoint, drains the

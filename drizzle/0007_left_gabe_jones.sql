@@ -1,0 +1,1 @@
+ALTER TABLE "repo_webhook_config" DROP COLUMN "secret";

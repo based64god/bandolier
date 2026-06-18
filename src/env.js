@@ -74,7 +74,10 @@ export const env = createEnv({
    * `NEXT_PUBLIC_`.
    */
   client: {
-    // NEXT_PUBLIC_CLIENTVAR: z.string(),
+    // Slug of the Bandolier GitHub App (the `…/apps/<slug>` part of its public
+    // page). When set, the repo-config UI links straight to the App's install
+    // page; unset = the UI shows generic install guidance instead.
+    NEXT_PUBLIC_GITHUB_APP_SLUG: z.string().optional(),
   },
 
   /**
@@ -106,6 +109,7 @@ export const env = createEnv({
     ARTIFACTS_AWS_ACCESS_KEY_ID: process.env.ARTIFACTS_AWS_ACCESS_KEY_ID,
     ARTIFACTS_AWS_SECRET_ACCESS_KEY:
       process.env.ARTIFACTS_AWS_SECRET_ACCESS_KEY,
+    NEXT_PUBLIC_GITHUB_APP_SLUG: process.env.NEXT_PUBLIC_GITHUB_APP_SLUG,
   },
   /**
    * Run `build` or `dev` with `SKIP_ENV_VALIDATION` to skip env validation. This is especially

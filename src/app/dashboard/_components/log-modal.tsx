@@ -3,33 +3,43 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { api } from "~/trpc/react";
+import { parseSegments } from "./log-segments";
 
 // Lines fetched initially (enough to fill the modal) and per scroll-up page.
 const INITIAL_LINES = 100;
 const PAGE_LINES = 200;
 const MAX_LINES = 10000;
 
-type Segment = { kind: "harness" | "claude"; lines: string[] };
-
-// Groups consecutive log lines by source so runs of [harness] diagnostics can be
-// collapsed away from Claude's output.
-function parseSegments(raw: string): Segment[] {
-  const segments: Segment[] = [];
-  for (const line of raw.split("\n")) {
-    const kind: Segment["kind"] = line.includes("[harness]")
-      ? "harness"
-      : "claude";
-    const last = segments[segments.length - 1];
-    if (last?.kind === kind) {
-      last.lines.push(line);
-    } else {
-      segments.push({ kind, lines: [line] });
-    }
-  }
-  return segments;
+// Renders a user's interactive message as a labeled chat turn, set apart from
+// Claude's responses and harness diagnostics so it's clear what was typed in.
+export function UserSegment({ lines }: { lines: string[] }) {
+  return (
+    <div className="my-1.5 rounded-md border border-purple-400/30 bg-purple-500/10 px-3 py-2">
+      <div className="mb-1 flex items-center gap-1.5 text-purple-300/80">
+        <svg
+          viewBox="0 0 16 16"
+          fill="currentColor"
+          className="h-3 w-3 shrink-0"
+        >
+          <path d="M8 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm0 1.5c-2.67 0-5 1.34-5 3v.5a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V13c0-1.66-2.33-3-5-3Z" />
+        </svg>
+        <span className="text-[10px] font-semibold tracking-wider uppercase">
+          You
+        </span>
+      </div>
+      {lines.map((line, i) => (
+        <div
+          key={i}
+          className="font-mono text-xs leading-5 break-words whitespace-pre-wrap text-purple-50"
+        >
+          {line || " "}
+        </div>
+      ))}
+    </div>
+  );
 }
 
-function HarnessSegment({ lines }: { lines: string[] }) {
+export function HarnessSegment({ lines }: { lines: string[] }) {
   return (
     <details className="group my-1">
       <summary className="flex cursor-pointer list-none items-center gap-1.5 text-white/30 hover:text-white/50 [&::-webkit-details-marker]:hidden">
@@ -271,6 +281,8 @@ export function LogModal({
             {segments.map((seg, i) =>
               seg.kind === "harness" ? (
                 <HarnessSegment key={i} lines={seg.lines} />
+              ) : seg.kind === "user" ? (
+                <UserSegment key={i} lines={seg.lines} />
               ) : (
                 <ClaudeSegment key={i} lines={seg.lines} />
               ),

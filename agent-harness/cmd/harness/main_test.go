@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -410,6 +411,28 @@ func TestHandleCodexEvent(t *testing.T) {
 	handleCodexEvent([]byte(`not json`))
 	if buf.Len() != 0 {
 		t.Errorf("invalid JSON should be ignored, got %q", buf.String())
+	}
+}
+
+func TestLogUserInput(t *testing.T) {
+	// logUserInput writes through the log package; capture that output and drop
+	// the timestamp/flags so we assert only the tagged content.
+	var buf bytes.Buffer
+	origOut := log.Writer()
+	origFlags := log.Flags()
+	log.SetOutput(&buf)
+	log.SetFlags(0)
+	defer func() {
+		log.SetOutput(origOut)
+		log.SetFlags(origFlags)
+	}()
+
+	logUserInput("first line\nsecond line")
+
+	got := buf.String()
+	want := "[user] first line\n[user] second line\n"
+	if got != want {
+		t.Errorf("logUserInput output = %q, want %q", got, want)
 	}
 }
 

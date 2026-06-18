@@ -1718,6 +1718,22 @@ const (
 	resumeMarker     = "BANDOLIER_RESUME"
 )
 
+// userInputMarker tags lines in the transcript that carry a user's interactive
+// message, so the dashboard can render them as chat history distinct from
+// harness diagnostics ([harness]) and Claude's responses (untagged). Each line
+// of a message is tagged so multi-line input stays grouped and a stray newline
+// can't make part of it render as Claude output.
+const userInputMarker = "[user]"
+
+// logUserInput records a user's interactive message into the transcript. It goes
+// through the log package (like [harness] lines) so it's mirrored into the
+// persisted transcript and picked up by the dashboard's live log poll.
+func logUserInput(text string) {
+	for _, line := range strings.Split(text, "\n") {
+		log.Printf("%s %s", userInputMarker, line)
+	}
+}
+
 // interactiveIdleTimeout bounds how long the session waits for the user before
 // ending itself, so an abandoned session doesn't run forever.
 func interactiveIdleTimeout() time.Duration {
@@ -1806,13 +1822,10 @@ func runClaudeInteractive(ctx context.Context, cfg config, first string) error {
 		}
 	}()
 
-	// Log the initial prompt line-by-line so each line keeps the [harness] tag,
-	// mirroring the non-interactive path (the dashboard dims harness lines; an
-	// untagged multi-line block would render as Claude output).
-	log.Printf("[harness] sending initial message:")
-	for _, line := range strings.Split(first, "\n") {
-		log.Printf("[harness]   %s", line)
-	}
+	// Record the seed prompt as user input so it opens the rendered chat history
+	// the same way follow-up messages do (the dashboard renders [user] lines as
+	// the user's turns, distinct from harness diagnostics and Claude's output).
+	logUserInput(first)
 	if err := writeUserMessage(stdin, first); err != nil {
 		_ = stdin.Close()
 		_ = cmd.Wait()
@@ -1837,6 +1850,9 @@ func runClaudeInteractive(ctx context.Context, cfg config, first string) error {
 			break
 		}
 		log.Printf("[harness] %s", resumeMarker)
+		// Record the message so it appears in the rendered chat history as the
+		// user's turn, sitting between Claude's responses.
+		logUserInput(content)
 		if err := writeUserMessage(stdin, content); err != nil {
 			log.Printf("[harness] warn: write message failed: %v", err)
 			break

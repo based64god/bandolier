@@ -18,11 +18,10 @@ function CredFeedback({
   if (!error && !ok) return null;
   return (
     <p
-      className={`rounded-lg border px-3 py-2 text-xs ${
-        error
-          ? "border-red-500/30 bg-red-500/10 text-red-400"
-          : "border-green-500/30 bg-green-500/10 text-green-300"
-      }`}
+      className={`rounded-lg border px-3 py-2 text-xs ${error
+        ? "border-red-500/30 bg-red-500/10 text-red-400"
+        : "border-green-500/30 bg-green-500/10 text-green-300"
+        }`}
     >
       {error ?? ok}
     </p>
@@ -616,11 +615,10 @@ function RepoCredentialsSection({ repoFullName }: { repoFullName: string }) {
                   setPrefer.mutate({ repoFullName, prefer: false })
                 }
                 disabled={setPrefer.isPending}
-                className={`flex-1 rounded-lg border px-3 py-2 text-xs font-medium disabled:opacity-50 ${
-                  !creds?.preferRepoCredentials
-                    ? "border-purple-500/50 bg-purple-500/15 text-purple-200"
-                    : "border-white/10 bg-white/5 text-white/60 hover:bg-white/10"
-                }`}
+                className={`flex-1 rounded-lg border px-3 py-2 text-xs font-medium disabled:opacity-50 ${!creds?.preferRepoCredentials
+                  ? "border-purple-500/50 bg-purple-500/15 text-purple-200"
+                  : "border-white/10 bg-white/5 text-white/60 hover:bg-white/10"
+                  }`}
               >
                 Prefer user credentials
               </button>
@@ -628,11 +626,10 @@ function RepoCredentialsSection({ repoFullName }: { repoFullName: string }) {
                 type="button"
                 onClick={() => setPrefer.mutate({ repoFullName, prefer: true })}
                 disabled={setPrefer.isPending}
-                className={`flex-1 rounded-lg border px-3 py-2 text-xs font-medium disabled:opacity-50 ${
-                  creds?.preferRepoCredentials
-                    ? "border-purple-500/50 bg-purple-500/15 text-purple-200"
-                    : "border-white/10 bg-white/5 text-white/60 hover:bg-white/10"
-                }`}
+                className={`flex-1 rounded-lg border px-3 py-2 text-xs font-medium disabled:opacity-50 ${creds?.preferRepoCredentials
+                  ? "border-purple-500/50 bg-purple-500/15 text-purple-200"
+                  : "border-white/10 bg-white/5 text-white/60 hover:bg-white/10"
+                  }`}
               >
                 Prefer repo credentials
               </button>
@@ -680,9 +677,7 @@ export function RepoConfigModal({
   // The GitHub App install page; null when no slug is configured (self-hosters
   // who haven't set NEXT_PUBLIC_GITHUB_APP_SLUG), in which case we show generic
   // guidance instead of a broken link.
-  const installUrl = env.NEXT_PUBLIC_GITHUB_APP_SLUG
-    ? `https://github.com/apps/${env.NEXT_PUBLIC_GITHUB_APP_SLUG}/installations/new`
-    : null;
+  const installUrl = env.NEXT_PUBLIC_GITHUB_APP_SLUG;
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {

@@ -25,6 +25,7 @@ import {
   DEFAULT_MAX_TURNS,
   JOB_TTL_SECONDS,
 } from "~/server/agents/create-job";
+import { getRepoBotToken } from "~/server/agents/github-app";
 import {
   getGithubIdentity,
   getUserGithubToken,
@@ -43,6 +44,7 @@ import {
   resolveModelCredentials,
 } from "~/server/agents/resolve-credentials";
 import { getRepoAgentImage } from "~/server/agents/webhook-config";
+import { type db } from "~/server/db";
 import { agentInput, taskRun } from "~/server/db/schema";
 import { getBatchV1Api, getCoreV1Api } from "~/server/k8s/client";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
@@ -188,6 +190,26 @@ async function assertOwnsInteractiveJob(
 }
 
 /**
+ * The token to read PR/issue state with. Prefers the repo's GitHub App
+ * installation token (a bot-voice read that doesn't depend on the viewer having
+ * a GitHub account or spend their rate limit), falling back to the viewer's own
+ * token when the App isn't installed on the repo. Returns null when neither is
+ * available, so polling degrades to no state badge rather than failing.
+ */
+async function resolvePollToken(
+  database: typeof db,
+  repoFullName: string | null,
+  userGithubToken: string | null,
+  nowMs: number,
+): Promise<string | null> {
+  if (repoFullName) {
+    const botToken = await getRepoBotToken(database, repoFullName, nowMs);
+    if (botToken) return botToken;
+  }
+  return userGithubToken;
+}
+
+/**
  * Resolves the open/closed/merged state of a created PR, created issue, and
  * source issue for a task. Best-effort: without a GitHub token (or on an API
  * failure) the states stay null and the badges render without an indicator.
@@ -228,7 +250,9 @@ async function podToTask(
   pod: V1Pod,
   namespace: string,
   kubeconfig: string,
-  githubToken: string | null,
+  database: typeof db,
+  userGithubToken: string | null,
+  nowMs: number,
 ) {
   const annotations = pod.metadata?.annotations ?? {};
   const name = pod.metadata?.name ?? "unknown";
@@ -254,9 +278,16 @@ async function podToTask(
 
   const creationTimestamp = pod.metadata?.creationTimestamp;
 
+  const repoFullName = annotations["bandolier.io/repo"] ?? null;
   const issueUrl = annotations["bandolier.io/issue-url"] ?? null;
+  const pollToken = await resolvePollToken(
+    database,
+    repoFullName,
+    userGithubToken,
+    nowMs,
+  );
   const { pullRequestState, createdIssueState, issueState } =
-    await resolveItemStates(githubToken, {
+    await resolveItemStates(pollToken, {
       pullRequestUrl,
       createdIssueUrl,
       issueUrl,
@@ -265,7 +296,7 @@ async function podToTask(
   return {
     name,
     jobName: pod.metadata?.labels?.["bandolier.io/job"] ?? name,
-    repoFullName: annotations["bandolier.io/repo"] ?? null,
+    repoFullName,
     displayName: annotations["bandolier.io/display-name"] ?? name,
     // Pod creation time, used to sort the task list reverse-chronologically.
     createdAt: creationTimestamp
@@ -358,6 +389,7 @@ export const agentsRouter = createTRPCRouter({
     const userId = ctx.session.user.id;
     const kubeconfig = await requireKubeconfig(ctx.db, userId);
     const githubToken = await getUserGithubToken(ctx.db, userId);
+    const nowMs = Date.now();
 
     try {
       const res = await getCoreV1Api(kubeconfig).listPodForAllNamespaces({
@@ -378,9 +410,16 @@ export const agentsRouter = createTRPCRouter({
           const interactive =
             pod.metadata?.labels?.[INTERACTIVE_LABEL] === "true";
 
+          const repoFullName = annotations["bandolier.io/repo"] ?? null;
           const issueUrl = annotations["bandolier.io/issue-url"] ?? null;
+          const pollToken = await resolvePollToken(
+            ctx.db,
+            repoFullName,
+            githubToken,
+            nowMs,
+          );
           const { pullRequestState, createdIssueState, issueState } =
-            await resolveItemStates(githubToken, {
+            await resolveItemStates(pollToken, {
               pullRequestUrl,
               createdIssueUrl,
               issueUrl,
@@ -389,7 +428,7 @@ export const agentsRouter = createTRPCRouter({
           return {
             name,
             namespace,
-            repoFullName: annotations["bandolier.io/repo"] ?? null,
+            repoFullName,
             displayName: annotations["bandolier.io/display-name"] ?? name,
             // Pod creation time, used to sort the overview reverse-chronologically.
             createdAt: pod.metadata?.creationTimestamp
@@ -438,10 +477,8 @@ export const agentsRouter = createTRPCRouter({
         ctx.session.user.id,
         input.repoFullName,
       );
-      const githubToken = await getUserGithubToken(
-        ctx.db,
-        ctx.session.user.id,
-      );
+      const githubToken = await getUserGithubToken(ctx.db, ctx.session.user.id);
+      const nowMs = Date.now();
       try {
         const res = await getCoreV1Api(kubeconfig).listNamespacedPod({
           namespace: input.namespace,
@@ -449,7 +486,14 @@ export const agentsRouter = createTRPCRouter({
         });
         return await Promise.all(
           res.items.map((pod) =>
-            podToTask(pod, input.namespace, kubeconfig, githubToken),
+            podToTask(
+              pod,
+              input.namespace,
+              kubeconfig,
+              ctx.db,
+              githubToken,
+              nowMs,
+            ),
           ),
         );
       } catch (err) {
@@ -492,7 +536,14 @@ export const agentsRouter = createTRPCRouter({
           ctx.db,
           ctx.session.user.id,
         );
-        return await podToTask(pod, input.namespace, kubeconfig, githubToken);
+        return await podToTask(
+          pod,
+          input.namespace,
+          kubeconfig,
+          ctx.db,
+          githubToken,
+          Date.now(),
+        );
       } catch (err) {
         if (err instanceof TRPCError) throw err;
         throw new TRPCError({

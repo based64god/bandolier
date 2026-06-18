@@ -148,13 +148,12 @@ export const agentInput = pgTable(
 );
 
 // Per-repository configuration (one row per repo, shared across any Bandolier
-// user with admin on that repo). Holds the incoming-webhook secret/prefix plus
-// other repo-level settings such as the agent harness image.
+// user with admin on that repo). Holds the webhook trigger prefix plus other
+// repo-level settings such as the agent harness image and shared credentials.
+// Webhook delivery + signature verification is handled by the GitHub App at the
+// app level (one GITHUB_WEBHOOK_SECRET), so no per-repo secret lives here.
 export const repoWebhookConfig = pgTable("repo_webhook_config", {
   repoFullName: text("repo_full_name").primaryKey(),
-  // Null when the repo has other config (e.g. an agent image) but no per-repo
-  // webhook secret — webhook verification then falls back to GITHUB_WEBHOOK_SECRET.
-  secret: text("secret"),
   // Optional trigger phrase: when set, only webhook events whose text contains
   // it are acted on. Null = act on all events.
   prefix: text("prefix"),

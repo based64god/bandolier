@@ -421,7 +421,9 @@ async function handleInstallation(
     action: payload.action,
     installation: installationId,
     added: added.length,
-    removed: removed.length + (fullUninstall ? (payload.repositories?.length ?? 0) : 0),
+    removed:
+      removed.length +
+      (fullUninstall ? (payload.repositories?.length ?? 0) : 0),
   });
 }
 
@@ -440,16 +442,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  // Select the verification secret by the repo named in the (still-untrusted)
-  // payload: the per-repo secret if configured, else the global env secret. The
-  // signature check below is what actually authenticates — a forged repo name
-  // can't produce a valid signature without that repo's secret.
+  // The GitHub App delivers every repo's events to this one endpoint signed with
+  // a single app-level secret, so verification uses GITHUB_WEBHOOK_SECRET for
+  // all events. The signature check below is what authenticates the payload.
   const repoFullName: string | undefined = (payload as IssuePayload)?.repository
     ?.full_name;
-  const repoConfig = repoFullName
-    ? await getRepoWebhookConfig(db, repoFullName)
-    : null;
-  const secret = repoConfig?.secret ?? env.GITHUB_WEBHOOK_SECRET;
+  const secret = env.GITHUB_WEBHOOK_SECRET;
 
   if (!secret) {
     console.warn("[bandolier:webhook] no webhook secret configured", {
@@ -469,6 +467,9 @@ export async function POST(req: NextRequest) {
 
   try {
     if (event === "issues" && (payload as IssuePayload).action === "opened") {
+      const repoConfig = repoFullName
+        ? await getRepoWebhookConfig(db, repoFullName)
+        : null;
       await handleIssueOpened(
         payload as IssuePayload,
         repoConfig?.prefix ?? null,
@@ -476,10 +477,7 @@ export async function POST(req: NextRequest) {
         repoConfig?.defaultWebhookModel ?? null,
       );
     } else if (event === "installation") {
-      // App installed/uninstalled, or (action add/remove) repos changed for an
-      // installation. These carry no single `repository`, so the secret above
-      // resolves to the global GITHUB_WEBHOOK_SECRET — which must be set to the
-      // GitHub App's webhook secret for these to verify.
+      // App installed/uninstalled, or repos added/removed for an installation.
       const p = payload as InstallationPayload;
       await handleInstallation(p, p.action === "deleted");
     } else if (event === "installation_repositories") {

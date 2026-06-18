@@ -5,8 +5,6 @@ import { type db } from "~/server/db";
 import { repoWebhookConfig } from "~/server/db/schema";
 
 export interface RepoWebhookConfig {
-  /** Per-repo webhook secret; null means fall back to GITHUB_WEBHOOK_SECRET. */
-  secret: string | null;
   /** Trigger phrase events must contain; null means act on all events. */
   prefix: string | null;
   /** Agent harness image override; null means use the server-wide default. */
@@ -73,14 +71,13 @@ export async function getRepoCredentials(
   };
 }
 
-/** Returns a repo's config (secret + prefix + agent image), or null. */
+/** Returns a repo's config (prefix + agent image + default model), or null. */
 export async function getRepoWebhookConfig(
   database: typeof db,
   repoFullName: string,
 ): Promise<RepoWebhookConfig | null> {
   const [row] = await database
     .select({
-      secret: repoWebhookConfig.secret,
       prefix: repoWebhookConfig.prefix,
       agentImage: repoWebhookConfig.agentImage,
       defaultWebhookModel: repoWebhookConfig.defaultWebhookModel,
@@ -90,7 +87,6 @@ export async function getRepoWebhookConfig(
     .limit(1);
   if (!row) return null;
   return {
-    secret: row.secret ?? null,
     prefix: row.prefix ?? null,
     agentImage: row.agentImage ?? null,
     defaultWebhookModel: row.defaultWebhookModel ?? null,
@@ -114,11 +110,11 @@ export async function getRepoAgentImage(
 }
 
 /**
- * Whether the user (via their GitHub token) has admin on the repo — the
- * permission GitHub requires to create/modify webhooks. Returns false on any
- * API error so callers fail closed.
+ * Whether the user (via their GitHub token) has admin on the repo. Gates the
+ * repo-scoped configuration (trigger prefix, agent image, shared credentials).
+ * Returns false on any API error so callers fail closed.
  */
-export async function canManageWebhooks(
+export async function isRepoAdmin(
   token: string,
   repoFullName: string,
 ): Promise<boolean> {

@@ -530,6 +530,8 @@ function KubeconfigSection() {
             verified against the cluster&apos;s API before saving.
           </p>
 
+          <KubeconfigSetupHelp />
+
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -567,6 +569,53 @@ function KubeconfigSection() {
         }
         ok={result && !result.startsWith("Invalid") ? result : null}
       />
+    </div>
+  );
+}
+
+function KubeconfigSetupHelp() {
+  const [copied, setCopied] = useState(false);
+
+  // Resolve the real host on the client so the command is ready to paste.
+  const origin = useSyncExternalStore(
+    () => () => undefined,
+    () => window.location.origin,
+    () => "https://<your-host>",
+  );
+
+  const command = `curl -fsSL ${origin}/setup.sh | bash`;
+
+  return (
+    <div className="space-y-2 rounded-lg border border-sky-500/30 bg-sky-500/5 px-3 py-2.5">
+      <p className="text-xs text-white/50">
+        Bandolier runs the Kubernetes client on its server, so it needs a
+        self-contained, token-based kubeconfig — not one that shells out to{" "}
+        <code className="text-white/60">aws</code>/
+        <code className="text-white/60">gcloud</code> or references local cert
+        files. Run this against your cluster (you need{" "}
+        <code className="text-white/60">kubectl</code> admin access) to
+        provision a ServiceAccount and print a kubeconfig you can paste below:
+      </p>
+      <div className="flex items-center gap-2">
+        <code className="min-w-0 flex-1 overflow-x-auto rounded bg-black/30 px-2 py-1.5 font-mono text-[11px] text-sky-200">
+          {command}
+        </code>
+        <button
+          onClick={() => {
+            void navigator.clipboard.writeText(command);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1500);
+          }}
+          className="shrink-0 rounded bg-white/10 px-2 py-1 text-xs hover:bg-white/20"
+        >
+          {copied ? "Copied ✓" : "Copy"}
+        </button>
+      </div>
+      <p className="text-xs text-white/40">
+        Add <code className="text-white/60">| bash -s -- --scoped</code> to bind
+        a least-privilege role instead of cluster-admin, or{" "}
+        <code className="text-white/60">--help</code> for more options.
+      </p>
     </div>
   );
 }

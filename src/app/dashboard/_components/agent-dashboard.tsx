@@ -81,7 +81,7 @@ function RepoSelector({
             <span className="text-white/40 @max-[220px]:hidden">{owner}/</span>
             <span className="text-white">{name}</span>
           </span>
-          <span className="ml-auto shrink-0 @max-[150px]:hidden">
+          <span className="ml-auto flex shrink-0 items-center @max-[150px]:hidden">
             <VisibilityBadge isPrivate={r.private} />
           </span>
         </span>

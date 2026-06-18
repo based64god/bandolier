@@ -94,7 +94,10 @@ function useWaitingWorker(): {
         const installing = reg.installing;
         if (!installing) return;
         installing.addEventListener("statechange", () => {
-          if (installing.state === "installed" && navigator.serviceWorker.controller) {
+          if (
+            installing.state === "installed" &&
+            navigator.serviceWorker.controller
+          ) {
             track(reg.waiting ?? installing);
           }
         });

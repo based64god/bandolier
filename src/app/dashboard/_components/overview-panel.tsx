@@ -172,7 +172,7 @@ export function OverviewPanel({ notify }: { notify: boolean }) {
                   </td>
 
                   <td
-                    className="hidden px-3 py-2 align-middle md:px-4 md:py-3 md:table-cell"
+                    className="hidden px-3 py-2 align-middle md:table-cell md:px-4 md:py-3"
                     onClick={(e) => e.stopPropagation()}
                   >
                     <SourceBadge

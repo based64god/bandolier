@@ -403,10 +403,22 @@ const maxPRDiffBytes = 60_000
 // model turns into a title and description. Shared by the Claude and Codex
 // writers so both produce identical copy from the same inputs.
 func buildPRPrompt(ctx context.Context, cfg config, branchName string) string {
-	rng := fmt.Sprintf("origin/%s..%s", cfg.baseBranch, branchName)
-	gitLog, _ := captureCmd(ctx, cfg.workDir, "git", "log", rng, "--pretty=format:- %s%n%b")
-	diffstat, _ := captureCmd(ctx, cfg.workDir, "git", "diff", "--stat", rng)
-	diff, _ := captureCmd(ctx, cfg.workDir, "git", "diff", rng)
+	// The commit list is the symmetric "reachable from branch but not base"
+	// (two-dot) range — exactly the commits this branch adds.
+	logRange := fmt.Sprintf("origin/%s..%s", cfg.baseBranch, branchName)
+	gitLog, _ := captureCmd(ctx, cfg.workDir, "git", "log", logRange, "--pretty=format:- %s%n%b")
+
+	// The diff and diffstat use a three-dot range so they are computed against
+	// the merge-base of the base and working branches, not the base branch tip.
+	// A two-dot `git diff` compares the tips directly, so if the base branch has
+	// moved on since this branch forked (e.g. the agent fetched/pulled during the
+	// run), unrelated base-only commits leak in as spurious reversed changes and
+	// can swamp or truncate the real changes — which is what made PR copy
+	// generation sometimes fail. The three-dot form diffs only what this branch
+	// introduced relative to where it diverged.
+	diffRange := fmt.Sprintf("origin/%s...%s", cfg.baseBranch, branchName)
+	diffstat, _ := captureCmd(ctx, cfg.workDir, "git", "diff", "--stat", diffRange)
+	diff, _ := captureCmd(ctx, cfg.workDir, "git", "diff", diffRange)
 	if len(diff) > maxPRDiffBytes {
 		diff = diff[:maxPRDiffBytes] + "\n…(diff truncated)…"
 	}

@@ -40,7 +40,7 @@ type Repo = {
 function VisibilityBadge({ isPrivate }: { isPrivate: boolean }) {
   return (
     <span
-      className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] font-medium tracking-wide uppercase ${
+      className={`inline-flex shrink-0 items-center rounded-full border px-1.5 py-0.5 text-[10px] leading-none font-medium tracking-wide uppercase ${
         isPrivate
           ? "border-amber-500/30 bg-amber-500/10 text-amber-300/80"
           : "border-green-500/30 bg-green-500/10 text-green-300/80"

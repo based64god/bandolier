@@ -5,16 +5,25 @@
 
 type ItemState = "open" | "closed" | "completed" | "merged";
 
+// "closed" carries different meaning for an issue than a PR, so the badge picks
+// the glyph from a presentation key rather than the raw state: a closed *issue*
+// was closed as not planned (grey circle-slash), but a closed *PR* is one that
+// was rejected/abandoned without merging — a failure, shown as a red x. The kind
+// the badge renders (`pull` vs `issue`) selects between them.
+type PresentationState = ItemState | "closedPull";
+
 // Indicators are icon-only to stay small. Colours follow GitHub's conventions
-// (open = green, closed-as-not-planned = grey, completed = purple, merged =
-// purple) and the glyph distinguishes the state so it reads even against a
-// same-hued badge (e.g. a merged "PR" pill). An issue closed as *completed*
-// (e.g. resolved by a pull request) reads as a success — a purple check-circle
-// — rather than the failure-style red x used for "closed as not planned".
+// (open = green, closed-as-not-planned issue = grey, closed-unmerged PR = red,
+// completed = purple, merged = purple) and the glyph distinguishes the state so
+// it reads even against a same-hued badge (e.g. a merged "PR" pill). An issue
+// closed as *completed* (e.g. resolved by a pull request) reads as a success — a
+// purple check-circle — rather than the failure-style red x used for a closed,
+// unmerged pull request.
 // Paths are 16×16 GitHub Octicons: a filled dot (open), skip/circle-slash
-// (closed as not planned), check-circle (completed) and git-merge (merged).
+// (closed as not planned), x-circle (closed-unmerged PR), check-circle
+// (completed) and git-merge (merged).
 const STATE_CONFIG: Record<
-  ItemState,
+  PresentationState,
   { label: string; className: string; iconPath: string }
 > = {
   open: {
@@ -27,6 +36,12 @@ const STATE_CONFIG: Record<
     className: "text-gray-400",
     iconPath:
       "M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0ZM4.92 3.857a6.5 6.5 0 0 0-1.063 1.063l7.223 7.223a6.5 6.5 0 0 0 1.063-1.063L4.92 3.857ZM8 1.5a6.47 6.47 0 0 0-4.08 1.446l8.134 8.134A6.5 6.5 0 0 0 8 1.5Z",
+  },
+  closedPull: {
+    label: "Closed (unmerged)",
+    className: "text-red-400",
+    iconPath:
+      "M2.343 13.657A8 8 0 1 1 13.658 2.343 8 8 0 0 1 2.343 13.657ZM6.03 4.97a.751.751 0 0 0-1.042.018.751.751 0 0 0-.018 1.042L6.94 8 4.97 9.97a.749.749 0 0 0 .326 1.275.749.749 0 0 0 .734-.215L8 9.06l1.97 1.97a.749.749 0 0 0 1.275-.326.749.749 0 0 0-.215-.734L9.06 8l1.97-1.97a.749.749 0 0 0-.326-1.275.749.749 0 0 0-.734.215L8 6.94Z",
   },
   completed: {
     label: "Completed",
@@ -42,9 +57,21 @@ const STATE_CONFIG: Record<
   },
 };
 
-/** Small open/closed/merged glyph shown alongside a PR or issue badge. */
-function StateIndicator({ state }: { state: ItemState }) {
-  const cfg = STATE_CONFIG[state];
+/**
+ * Small open/closed/merged glyph shown alongside a PR or issue badge. `kind`
+ * disambiguates "closed": a closed PR (unmerged) shows the red x, an issue keeps
+ * the grey not-planned circle-slash.
+ */
+function StateIndicator({
+  state,
+  kind = "issue",
+}: {
+  state: ItemState;
+  kind?: "pull" | "issue";
+}) {
+  const key: PresentationState =
+    state === "closed" && kind === "pull" ? "closedPull" : state;
+  const cfg = STATE_CONFIG[key];
   return (
     <svg
       viewBox="0 0 16 16"
@@ -76,6 +103,7 @@ function LinkedBadge({
   className,
   iconPath,
   state,
+  kind,
   onClick,
 }: {
   href: string;
@@ -83,6 +111,7 @@ function LinkedBadge({
   className: string;
   iconPath?: string;
   state: ItemState | null;
+  kind?: "pull" | "issue";
   onClick?: (e: React.MouseEvent) => void;
 }) {
   return (
@@ -104,7 +133,7 @@ function LinkedBadge({
         </svg>
       )}
       {label}
-      {state && <StateIndicator state={state} />}
+      {state && <StateIndicator state={state} kind={kind} />}
     </a>
   );
 }
@@ -147,6 +176,7 @@ export function OutputBadge({
         label={prLabel}
         iconPath={showIcon ? PR_ICON : undefined}
         state={pullRequestState}
+        kind="pull"
         className="border-purple-500/30 bg-purple-500/10 text-purple-300 hover:bg-purple-500/20"
       />
     );

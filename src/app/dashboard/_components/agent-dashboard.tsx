@@ -34,7 +34,7 @@ type Repo = {
   defaultBranch: string;
   namespace: string;
   private: boolean;
-  canManageWebhooks: boolean;
+  isAdmin: boolean;
 };
 
 function VisibilityBadge({ isPrivate }: { isPrivate: boolean }) {
@@ -116,7 +116,7 @@ export function AgentDashboard({
   const [logPod, setLogPod] = useState<string | null>(null);
   const [showDeploy, setShowDeploy] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [showWebhooks, setShowWebhooks] = useState(false);
+  const [showRepoConfig, setShowRepoConfig] = useState(false);
   // Mobile-only: the secondary header controls collapse into this menu so the
   // bar stays within the viewport on narrow screens.
   const [menuOpen, setMenuOpen] = useState(false);
@@ -252,11 +252,7 @@ export function AgentDashboard({
               aria-haspopup="menu"
               className="rounded-lg p-1.5 text-white/60 hover:bg-white/10 hover:text-white"
             >
-              <svg
-                viewBox="0 0 20 20"
-                fill="currentColor"
-                className="h-5 w-5"
-              >
+              <svg viewBox="0 0 20 20" fill="currentColor" className="h-5 w-5">
                 <path
                   fillRule="evenodd"
                   d="M3 5.75A.75.75 0 0 1 3.75 5h12.5a.75.75 0 0 1 0 1.5H3.75A.75.75 0 0 1 3 5.75Zm0 4.25A.75.75 0 0 1 3.75 9.25h12.5a.75.75 0 0 1 0 1.5H3.75A.75.75 0 0 1 3 10Zm.75 3.5a.75.75 0 0 0 0 1.5h12.5a.75.75 0 0 0 0-1.5H3.75Z"
@@ -290,12 +286,12 @@ export function AgentDashboard({
                       {user.name}
                     </span>
                   </div>
-                  {selectedRepo?.canManageWebhooks && (
+                  {selectedRepo?.isAdmin && (
                     <button
                       role="menuitem"
                       onClick={() => {
                         setMenuOpen(false);
-                        setShowWebhooks(true);
+                        setShowRepoConfig(true);
                       }}
                       className="mt-1 block w-full rounded-lg px-2 py-2 text-left text-sm text-white/70 hover:bg-white/10 hover:text-white"
                     >
@@ -310,9 +306,7 @@ export function AgentDashboard({
                     }}
                     className="block w-full rounded-lg px-2 py-2 text-left text-sm text-white/70 hover:bg-white/10 hover:text-white"
                   >
-                    {notify
-                      ? "Disable notifications"
-                      : "Enable notifications"}
+                    {notify ? "Disable notifications" : "Enable notifications"}
                   </button>
                   <button
                     role="menuitem"
@@ -361,9 +355,9 @@ export function AgentDashboard({
             {/* Repo config (webhooks + agent image) — only when the user can
                 manage this repo (admin on GitHub). Kept on the left so toggling
                 it doesn't shift the Deploy button. */}
-            {selectedRepo?.canManageWebhooks && (
+            {selectedRepo?.isAdmin && (
               <button
-                onClick={() => setShowWebhooks(true)}
+                onClick={() => setShowRepoConfig(true)}
                 className="hidden rounded-lg border border-white/10 px-3 py-1.5 text-sm font-medium text-white/70 hover:bg-white/10 hover:text-white sm:inline-flex"
               >
                 Repo config
@@ -576,10 +570,22 @@ export function AgentDashboard({
                             // These secondary columns are dropped on narrow
                             // viewports where space is limited — the row stays
                             // readable with Status/Output/Task alone.
-                            { label: "Created by", width: "w-[15%]", optional: true },
-                            { label: "Currently", width: "w-[16%]", optional: true },
-                            { label: "Expires", width: "w-[9%]", optional: true },
-                            { label: "", width: "w-[10%]" },
+                            {
+                              label: "Created by",
+                              width: "w-[15%]",
+                              optional: true,
+                            },
+                            {
+                              label: "Currently",
+                              width: "w-[18%]",
+                              optional: true,
+                            },
+                            {
+                              label: "Expires",
+                              width: "w-[9%]",
+                              optional: true,
+                            },
+                            { label: "", width: "w-[8%]" },
                           ].map((h, i) => (
                             <th
                               key={i}
@@ -664,10 +670,10 @@ export function AgentDashboard({
         />
       )}
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
-      {showWebhooks && selectedRepo?.canManageWebhooks && (
+      {showRepoConfig && selectedRepo?.isAdmin && (
         <RepoConfigModal
           repoFullName={selectedRepo.fullName}
-          onClose={() => setShowWebhooks(false)}
+          onClose={() => setShowRepoConfig(false)}
         />
       )}
     </div>

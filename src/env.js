@@ -32,10 +32,27 @@ export const env = createEnv({
       .default("10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"),
     GITHUB_WEBHOOK_SECRET: z.string().optional(),
     GITHUB_TRIGGER_LABEL: z.string().optional(),
-    // OAuth/PAT token for the dedicated Bandolier GitHub service user. When set,
-    // automated issue comments ("Bando picked up this issue…") are posted as
-    // this user instead of the issue author, so the notice is clearly attributed
-    // to the bot. Falls back to the triggering user's token when unset.
+    // ── GitHub App (bot identity) ─────────────────────────────────────────────
+    // Credentials for the Bandolier GitHub App, which owns every action that
+    // speaks *as the bot* rather than as a user — issue/PR comments and other UX
+    // tie-ins. The user OAuth token still drives all attribution-sensitive work
+    // (clone/push/PR authorship); the App never touches those. All three are
+    // required together to enable bot actions; unset = bot actions are skipped.
+    //
+    // GITHUB_APP_ID:          the numeric App id from the App's settings page.
+    // GITHUB_APP_PRIVATE_KEY: a PEM private key generated for the App. Multi-line
+    //                         PEMs survive in env as `\n`-escaped strings; the
+    //                         broker un-escapes them before signing.
+    // GITHUB_APP_CLIENT_ID:   the App's OAuth client id, used (with the secret)
+    //                         to authorize users via the App rather than the
+    //                         legacy OAuth app. Optional until login is moved.
+    GITHUB_APP_ID: z.string().optional(),
+    GITHUB_APP_PRIVATE_KEY: z.string().optional(),
+    GITHUB_APP_CLIENT_ID: z.string().optional(),
+    GITHUB_APP_CLIENT_SECRET: z.string().optional(),
+    // DEPRECATED: superseded by the GitHub App above. When the App is configured,
+    // bot comments are posted as the App installation and this is ignored. Kept
+    // as a fallback so deployments without the App configured keep working.
     BANDOLIER_GITHUB_TOKEN: z.string().optional(),
     // Optional shared password gate in front of the whole app (UI + API). When
     // set, visitors must enter it before reaching anything (the GitHub webhook
@@ -57,7 +74,10 @@ export const env = createEnv({
    * `NEXT_PUBLIC_`.
    */
   client: {
-    // NEXT_PUBLIC_CLIENTVAR: z.string(),
+    // Slug of the Bandolier GitHub App (the `…/apps/<slug>` part of its public
+    // page). When set, the repo-config UI links straight to the App's install
+    // page; unset = the UI shows generic install guidance instead.
+    NEXT_PUBLIC_GITHUB_APP_SLUG: z.string().optional(),
   },
 
   /**
@@ -77,6 +97,10 @@ export const env = createEnv({
     AGENT_EGRESS_BLOCKED_CIDRS: process.env.AGENT_EGRESS_BLOCKED_CIDRS,
     GITHUB_WEBHOOK_SECRET: process.env.GITHUB_WEBHOOK_SECRET,
     GITHUB_TRIGGER_LABEL: process.env.GITHUB_TRIGGER_LABEL,
+    GITHUB_APP_ID: process.env.GITHUB_APP_ID,
+    GITHUB_APP_PRIVATE_KEY: process.env.GITHUB_APP_PRIVATE_KEY,
+    GITHUB_APP_CLIENT_ID: process.env.GITHUB_APP_CLIENT_ID,
+    GITHUB_APP_CLIENT_SECRET: process.env.GITHUB_APP_CLIENT_SECRET,
     BANDOLIER_GITHUB_TOKEN: process.env.BANDOLIER_GITHUB_TOKEN,
     APP_PASSWORD: process.env.APP_PASSWORD,
     ARTIFACTS_S3_BUCKET: process.env.ARTIFACTS_S3_BUCKET,
@@ -85,6 +109,7 @@ export const env = createEnv({
     ARTIFACTS_AWS_ACCESS_KEY_ID: process.env.ARTIFACTS_AWS_ACCESS_KEY_ID,
     ARTIFACTS_AWS_SECRET_ACCESS_KEY:
       process.env.ARTIFACTS_AWS_SECRET_ACCESS_KEY,
+    NEXT_PUBLIC_GITHUB_APP_SLUG: process.env.NEXT_PUBLIC_GITHUB_APP_SLUG,
   },
   /**
    * Run `build` or `dev` with `SKIP_ENV_VALIDATION` to skip env validation. This is especially

@@ -11,7 +11,7 @@ import {
 import { getUserGithubToken } from "~/server/agents/github-token";
 import { validateOpenaiKey } from "~/server/agents/openai";
 import { validateKubeconfig } from "~/server/agents/kubeconfig";
-import { canManageWebhooks } from "~/server/agents/webhook-config";
+import { isRepoAdmin } from "~/server/agents/webhook-config";
 import { type db } from "~/server/db";
 import { repoWebhookConfig } from "~/server/db/schema";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
@@ -43,7 +43,7 @@ async function upsertRepoConfig(
 
 /**
  * Loads the user's GitHub token and confirms they have admin on the repo —
- * required to view or change incoming-webhook configuration. Throws otherwise.
+ * required to view or change repo-scoped configuration. Throws otherwise.
  */
 async function requireRepoAdmin(
   ctx: {
@@ -59,17 +59,17 @@ async function requireRepoAdmin(
       message: "A linked GitHub account is required.",
     });
   }
-  if (!(await canManageWebhooks(token, repoFullName))) {
+  if (!(await isRepoAdmin(token, repoFullName))) {
     throw new TRPCError({
       code: "FORBIDDEN",
       message:
-        "You need admin permission on this repository to manage webhooks.",
+        "You need admin permission on this repository to change its configuration.",
     });
   }
 }
 
 export const webhooksRouter = createTRPCRouter({
-  // Non-secret status of a repo's incoming-webhook config.
+  // Non-secret status of a repo's webhook/agent configuration.
   getConfig: protectedProcedure
     .input(z.object({ repoFullName: z.string().min(1) }))
     .query(async ({ ctx, input }) => {
@@ -78,7 +78,6 @@ export const webhooksRouter = createTRPCRouter({
         .select({
           updatedAt: repoWebhookConfig.updatedAt,
           prefix: repoWebhookConfig.prefix,
-          secret: repoWebhookConfig.secret,
           agentImage: repoWebhookConfig.agentImage,
           defaultWebhookModel: repoWebhookConfig.defaultWebhookModel,
         })
@@ -88,8 +87,6 @@ export const webhooksRouter = createTRPCRouter({
       return {
         // Whether a config row exists at all (any setting saved).
         configured: !!row,
-        // Whether a per-repo webhook secret is set (separate from other config).
-        hasSecret: !!row?.secret,
         updatedAt: row?.updatedAt ?? null,
         prefix: row?.prefix ?? "",
         agentImage: row?.agentImage ?? "",
@@ -101,8 +98,6 @@ export const webhooksRouter = createTRPCRouter({
     .input(
       z.object({
         repoFullName: z.string().min(1),
-        // Optional: when a row already exists, omitting keeps the current secret.
-        secret: z.string().optional(),
         // Optional trigger phrase; blank clears it (act on all events).
         prefix: z.string().optional(),
         // Optional agent harness image override; blank clears it (use default).
@@ -112,65 +107,15 @@ export const webhooksRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       await requireRepoAdmin(ctx, input.repoFullName);
 
-      const [existing] = await ctx.db
-        .select({ repoFullName: repoWebhookConfig.repoFullName })
-        .from(repoWebhookConfig)
-        .where(eq(repoWebhookConfig.repoFullName, input.repoFullName))
-        .limit(1);
-
-      const secret = input.secret?.trim();
-      if (secret && secret.length < 8) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "Use a secret of at least 8 characters.",
-        });
-      }
-
       const prefix = input.prefix?.trim() ? input.prefix.trim() : null;
       const agentImage = input.agentImage?.trim()
         ? input.agentImage.trim()
         : null;
 
-      if (existing) {
-        await ctx.db
-          .update(repoWebhookConfig)
-          .set({
-            prefix,
-            agentImage,
-            configuredBy: ctx.session.user.id,
-            updatedAt: new Date(),
-            ...(secret ? { secret } : {}),
-          })
-          .where(eq(repoWebhookConfig.repoFullName, input.repoFullName));
-      } else {
-        await ctx.db.insert(repoWebhookConfig).values({
-          repoFullName: input.repoFullName,
-          secret: secret ?? null,
-          prefix,
-          agentImage,
-          configuredBy: ctx.session.user.id,
-        });
-      }
-      return { success: true };
-    }),
-
-  // Clears the per-repo webhook secret only. The config row also carries shared
-  // credentials (kubeconfig, model keys, AWS), the default webhook model, and the
-  // prefer flag, so it is never deleted here — only the secret is nulled — to
-  // avoid wiping that other config as collateral.
-  deleteConfig: protectedProcedure
-    .input(z.object({ repoFullName: z.string().min(1) }))
-    .mutation(async ({ ctx, input }) => {
-      await requireRepoAdmin(ctx, input.repoFullName);
-
-      await ctx.db
-        .update(repoWebhookConfig)
-        .set({
-          secret: null,
-          configuredBy: ctx.session.user.id,
-          updatedAt: new Date(),
-        })
-        .where(eq(repoWebhookConfig.repoFullName, input.repoFullName));
+      await upsertRepoConfig(ctx.db, input.repoFullName, ctx.session.user.id, {
+        prefix,
+        agentImage,
+      });
       return { success: true };
     }),
 

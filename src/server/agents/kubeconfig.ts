@@ -145,23 +145,46 @@ export async function getUserKubeconfig(
 }
 
 /**
- * Resolves the kubeconfig to use. The repo-scoped one and the user's own are
- * ordered by the repo's `preferRepoCredentials` flag (repo first when set, user
- * first otherwise), falling back to whichever is present; null when neither is.
- * `repoFullName` is optional — omit it for contexts with no repo (e.g. the
- * cross-repo overview), which then only considers the user's config.
+ * Resolves the kubeconfig to use along with where it came from. The repo-scoped
+ * one and the user's own are ordered by the repo's `preferRepoCredentials` flag
+ * (repo first when set, user first otherwise), falling back to whichever is
+ * present; `source` is "none" when neither is. `repoFullName` is optional — omit
+ * it for contexts with no repo (e.g. the cross-repo overview), which then only
+ * consider the user's config.
+ *
+ * The source is used to gate runs: a "repo" kubeconfig is shared infrastructure,
+ * so only maintainers may execute against it (see repo-credential-gate).
  */
-export async function resolveKubeconfig(
+export async function resolveKubeconfigWithSource(
   database: typeof db,
   userId: string,
   repoFullName?: string,
-): Promise<string | null> {
+): Promise<{ kubeconfig: string | null; source: "user" | "repo" | "none" }> {
   const userKc = await getUserKubeconfig(database, userId);
   const repo = repoFullName
     ? await getRepoCredentials(database, repoFullName)
     : null;
   const repoKc = repo?.kubeconfig ?? null;
 
-  if (repo?.preferRepoCredentials) return repoKc ?? userKc;
-  return userKc ?? repoKc;
+  if (repo?.preferRepoCredentials) {
+    if (repoKc) return { kubeconfig: repoKc, source: "repo" };
+    if (userKc) return { kubeconfig: userKc, source: "user" };
+    return { kubeconfig: null, source: "none" };
+  }
+  if (userKc) return { kubeconfig: userKc, source: "user" };
+  if (repoKc) return { kubeconfig: repoKc, source: "repo" };
+  return { kubeconfig: null, source: "none" };
+}
+
+/**
+ * Resolves the kubeconfig to use (see resolveKubeconfigWithSource), discarding
+ * the source. Convenience for the many callers that only need the config.
+ */
+export async function resolveKubeconfig(
+  database: typeof db,
+  userId: string,
+  repoFullName?: string,
+): Promise<string | null> {
+  return (await resolveKubeconfigWithSource(database, userId, repoFullName))
+    .kubeconfig;
 }

@@ -57,6 +57,13 @@
       "when": 1781741876386,
       "tag": "0007_left_gabe_jones",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1781816741782,
+      "tag": "0008_vengeful_klaw",
+      "breakpoints": true
     }
   ]
 }

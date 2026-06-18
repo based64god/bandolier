@@ -136,11 +136,13 @@ docker push <your-registry>/bandolier-agent-harness:latest
 
 To have agents launch automatically when issues are opened, install the Bandolier GitHub App:
 
-1. Create a GitHub App (Settings → Developer settings → GitHub Apps). Give it a webhook URL of `https://<your-host>/api/webhooks/github`, a webhook secret, and these repository permissions: **Issues** (read & write), **Pull requests** (read & write), **Contents** (read), **Metadata** (read). Subscribe to the **Issues** event. Generate a private key.
+1. Create a GitHub App (Settings → Developer settings → GitHub Apps). Give it a webhook URL of `https://<your-host>/api/webhooks/github`, a webhook secret, and these repository permissions: **Issues** (read & write), **Pull requests** (read & write), **Contents** (read), **Metadata** (read). Subscribe to the **Issues** and **Issue comment** events (the latter powers the `@bando approve` approval reply below). Generate a private key.
 2. Set `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY` (PEM, `\n`-escaped), and `GITHUB_WEBHOOK_SECRET` (the App's webhook secret) in the app's environment. Optionally set `NEXT_PUBLIC_GITHUB_APP_SLUG` so the repo-config UI links to the App's install page.
 3. Install the App on the repos you want Bandolier to act on. The App delivers events automatically — there's no per-repo webhook to add.
 
 When an issue is opened, Bandolier verifies the App's signature, finds the Bandolier user linked to the GitHub account that opened it, and deploys an agent under that user's credentials — so clone/push and the resulting PR are attributed to the issue author. The "Bando picked up this issue…" comment is posted by the App itself (as `bandolier[bot]`), not the user.
+
+**Repo-credential maintainer gate.** When a run would use a repo's _shared_ credentials (a repo kubeconfig or repo AI API keys, configured per-repo in the dashboard's repo-config UI) rather than the triggering user's own, it executes only if that user has **maintainer** (or admin) access on the repo. A less-privileged issue opener instead gets a bot comment asking a maintainer to approve; a maintainer approves by reacting to that comment (👍/❤️/🎉/🚀) or replying `@bando approve`, and the agent is then dispatched. The same gate applies to dashboard deploys (a non-maintainer is refused when the run would draw on shared credentials). Runs on a user's own credentials are never gated.
 
 Optional env knobs: `GITHUB_TRIGGER_LABEL` (only act on issues carrying a specific label) and, per repo, a trigger phrase that issue text must contain (set in the repo-config UI). `BANDOLIER_GITHUB_TOKEN` is a deprecated fallback used for the bot comment only when the App is not configured.
 
@@ -291,6 +293,7 @@ Both suites run in CI on every push and pull request (see
 ## Security notes
 
 - **Per-user credentials.** Agents only ever run with the deploying (or issue-opening) user's own GitHub, model-provider, and cluster credentials. There is no server-side provider identity to fall back on.
+- **Repo-credential maintainer gate.** When a run would instead draw on a repo's shared credentials (a repo kubeconfig or repo AI API keys), it requires the triggering user to have maintainer (or admin) access. Dashboard deploys by a non-maintainer are refused; webhook-triggered runs are held for a maintainer to approve (a reaction on the bot comment, or an `@bando approve` reply). Permission checks fail closed — any GitHub API error denies the run.
 - **Per-job secrets.** A run's credentials live in a Kubernetes Secret owned by its Job, so they're deleted when the Job is (manually or via its TTL). Finished Jobs are retained for one week.
 - **Stored credentials are not encrypted at rest.** User AWS/Anthropic keys and kubeconfigs are stored in Postgres in plaintext; API key tokens are stored only as SHA-256 hashes. The GitHub App private key and webhook secret live in the app's environment, not the database. Protect the database accordingly and serve the app over HTTPS.
 - **Network isolation** for agent pods is on by default but requires a policy-enforcing CNI to take effect.

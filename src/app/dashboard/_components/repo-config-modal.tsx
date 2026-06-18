@@ -18,10 +18,11 @@ function CredFeedback({
   if (!error && !ok) return null;
   return (
     <p
-      className={`rounded-lg border px-3 py-2 text-xs ${error
-        ? "border-red-500/30 bg-red-500/10 text-red-400"
-        : "border-green-500/30 bg-green-500/10 text-green-300"
-        }`}
+      className={`rounded-lg border px-3 py-2 text-xs ${
+        error
+          ? "border-red-500/30 bg-red-500/10 text-red-400"
+          : "border-green-500/30 bg-green-500/10 text-green-300"
+      }`}
     >
       {error ?? ok}
     </p>
@@ -569,11 +570,17 @@ function RepoCredentialsSection({ repoFullName }: { repoFullName: string }) {
           <span className="font-semibold">
             Repo-scoped credentials are shared infrastructure — secure them.
           </span>{" "}
-          Every Bandolier user with access to this repo, and anyone whose GitHub
-          activity triggers an agent, can run workloads with these credentials.
-          Scope the cluster and model keys to only what this group should be
-          trusted with, prefer short-lived/least-privilege credentials, and
-          rotate them when collaborators change.
+          A run that uses these credentials can only be dispatched by a
+          collaborator with <span className="font-semibold">maintainer</span>{" "}
+          (or admin) access — both from the dashboard and via webhooks. A
+          less-privileged user who opens an issue gets a bot comment asking a
+          maintainer to approve it (by reacting 👍/❤️/🎉/🚀 or replying{" "}
+          <code className="rounded bg-white/10 px-1 text-amber-100">
+            @bando approve
+          </code>
+          ). Still, scope the cluster and model keys to only what this group
+          should be trusted with, prefer short-lived/least-privilege
+          credentials, and rotate them when collaborators change.
         </p>
       </div>
 
@@ -615,10 +622,11 @@ function RepoCredentialsSection({ repoFullName }: { repoFullName: string }) {
                   setPrefer.mutate({ repoFullName, prefer: false })
                 }
                 disabled={setPrefer.isPending}
-                className={`flex-1 rounded-lg border px-3 py-2 text-xs font-medium disabled:opacity-50 ${!creds?.preferRepoCredentials
-                  ? "border-purple-500/50 bg-purple-500/15 text-purple-200"
-                  : "border-white/10 bg-white/5 text-white/60 hover:bg-white/10"
-                  }`}
+                className={`flex-1 rounded-lg border px-3 py-2 text-xs font-medium disabled:opacity-50 ${
+                  !creds?.preferRepoCredentials
+                    ? "border-purple-500/50 bg-purple-500/15 text-purple-200"
+                    : "border-white/10 bg-white/5 text-white/60 hover:bg-white/10"
+                }`}
               >
                 Prefer user credentials
               </button>
@@ -626,10 +634,11 @@ function RepoCredentialsSection({ repoFullName }: { repoFullName: string }) {
                 type="button"
                 onClick={() => setPrefer.mutate({ repoFullName, prefer: true })}
                 disabled={setPrefer.isPending}
-                className={`flex-1 rounded-lg border px-3 py-2 text-xs font-medium disabled:opacity-50 ${creds?.preferRepoCredentials
-                  ? "border-purple-500/50 bg-purple-500/15 text-purple-200"
-                  : "border-white/10 bg-white/5 text-white/60 hover:bg-white/10"
-                  }`}
+                className={`flex-1 rounded-lg border px-3 py-2 text-xs font-medium disabled:opacity-50 ${
+                  creds?.preferRepoCredentials
+                    ? "border-purple-500/50 bg-purple-500/15 text-purple-200"
+                    : "border-white/10 bg-white/5 text-white/60 hover:bg-white/10"
+                }`}
               >
                 Prefer repo credentials
               </button>

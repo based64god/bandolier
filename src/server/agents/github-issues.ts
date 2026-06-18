@@ -148,13 +148,16 @@ export async function getGithubItemState(
   }
 }
 
-/** Posts a comment on a GitHub issue. Best-effort: failures are logged but not thrown. */
+/**
+ * Posts a comment on a GitHub issue and returns the created comment's id. Throws
+ * on failure (callers that treat commenting as best-effort wrap it in try/catch).
+ */
 export async function postIssueComment(
   token: string,
   repoFullName: string,
   issueNumber: number,
   body: string,
-): Promise<void> {
+): Promise<number> {
   const res = await fetch(
     `https://api.github.com/repos/${repoFullName}/issues/${issueNumber}/comments`,
     {
@@ -169,6 +172,8 @@ export async function postIssueComment(
   if (!res.ok) {
     throw new Error(`GitHub API ${res.status}: ${res.statusText}`);
   }
+  const created = (await res.json()) as { id: number };
+  return created.id;
 }
 
 /** Fetches a single issue, or null if not found. */

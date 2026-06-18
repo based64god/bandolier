@@ -32,7 +32,9 @@ import {
   githubGitIdentity,
   type GitIdentity,
 } from "~/server/agents/github-token";
+import { tokenHasMaintainerAccess } from "~/server/agents/github-permissions";
 import { resolveKubeconfig } from "~/server/agents/kubeconfig";
+import { usesRepoCredentials } from "~/server/agents/repo-credential-gate";
 import {
   listModelsForUser,
   pickLatestGeminiFlash,
@@ -889,6 +891,31 @@ export const agentsRouter = createTRPCRouter({
           console.warn("[bandolier:deploy] user has no linked GitHub token");
         }
 
+        // Repo-credential maintainer gate: when this run would execute with the
+        // repo's shared credentials (kubeconfig or AI API keys), only a
+        // collaborator with maintainer+ access may dispatch it — the same bar
+        // the webhook path enforces. Runs on the user's own credentials are not
+        // gated.
+        if (input.repoFullName) {
+          const gated = await usesRepoCredentials(
+            ctx.db,
+            userId,
+            input.repoFullName,
+          );
+          if (gated) {
+            const allowed =
+              !!githubToken &&
+              (await tokenHasMaintainerAccess(githubToken, input.repoFullName));
+            if (!allowed) {
+              throw new TRPCError({
+                code: "FORBIDDEN",
+                message:
+                  "This run would use the repository's shared credentials, which require maintainer (or admin) access. Use your own model and cluster credentials, or ask a maintainer to run it.",
+              });
+            }
+          }
+        }
+
         // Attribute commits to the deploying user. Prefer their GitHub no-reply
         // address (guarantees GitHub links the commits to that account); fall
         // back to the account email if there's no token or the lookup fails.
@@ -1061,6 +1088,9 @@ export const agentsRouter = createTRPCRouter({
 
         return { jobName };
       } catch (err) {
+        // Preserve explicit tRPC errors (e.g. the maintainer gate's FORBIDDEN)
+        // rather than flattening them into a 500.
+        if (err instanceof TRPCError) throw err;
         console.error("[bandolier:deploy] failed", {
           error: err instanceof Error ? err.message : String(err),
         });

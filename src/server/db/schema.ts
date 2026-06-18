@@ -295,6 +295,41 @@ export const githubInstallation = pgTable("github_installation", {
     .notNull(),
 });
 
+// A webhook-triggered run that would execute with repo-level shared credentials
+// (a repo kubeconfig or repo AI API keys) but was opened by a GitHub user who
+// lacks maintainer access. Rather than run it, the bot leaves a comment asking a
+// maintainer to approve; this row holds everything needed to dispatch the agent
+// once a maintainer does (by reacting to that comment or replying to approve).
+// Rows are deleted once dispatched or denied.
+export const pendingApproval = pgTable(
+  "pending_approval",
+  {
+    id: text("id").primaryKey(),
+    repoFullName: text("repo_full_name").notNull(),
+    issueNumber: text("issue_number").notNull(),
+    issueUrl: text("issue_url").notNull(),
+    issueTitle: text("issue_title").notNull(),
+    issueBody: text("issue_body"),
+    // JSON-encoded array of issue label names, preserved so the model:<query>
+    // and output:issue label semantics still apply when the run is dispatched.
+    issueLabels: text("issue_labels").notNull().default("[]"),
+    cloneUrl: text("clone_url").notNull(),
+    defaultBranch: text("default_branch").notNull(),
+    // The GitHub account that opened the issue (numeric id, as text) and its
+    // login — used to re-resolve the Bandolier user whose credentials run it.
+    requestedByGithubId: text("requested_by_github_id").notNull(),
+    requestedByLogin: text("requested_by_login").notNull(),
+    // The id of the bot comment whose reactions signal a maintainer's approval.
+    commentId: text("comment_id"),
+    createdAt: timestamp("created_at")
+      .$defaultFn(() => /* @__PURE__ */ new Date())
+      .notNull(),
+  },
+  (t) => [
+    index("pending_approval_repo_issue_idx").on(t.repoFullName, t.issueNumber),
+  ],
+);
+
 export const userRelations = relations(user, ({ many }) => ({
   account: many(account),
   session: many(session),

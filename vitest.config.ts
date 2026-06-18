@@ -36,6 +36,7 @@ export default defineConfig({
         "src/server/api/rest.ts",
         "src/app/dashboard/_components/parse-aws.ts",
         "src/app/dashboard/_components/agent-ui.ts",
+        "src/app/dashboard/_components/log-segments.ts",
       ],
     },
   },

@@ -9,6 +9,7 @@ import {
 } from "~/lib/issue-prompt";
 import { api } from "~/trpc/react";
 import { usePreferredModel } from "./preferred-model";
+import { ProviderTag } from "./provider-tag";
 import { SearchableSelect } from "./searchable-select";
 
 const PROVIDER_LABELS = {
@@ -33,39 +34,6 @@ const PROVIDER_LABELS = {
     style: "border-red-500/40 bg-red-500/10 text-red-400",
   },
 } as const;
-
-// Compact source tag shown next to each model in the picker so it's clear which
-// provider it comes from.
-const PROVIDER_TAGS: Record<string, { label: string; style: string }> = {
-  anthropic: {
-    label: "Anthropic",
-    style: "border-purple-500/40 bg-purple-500/10 text-purple-300",
-  },
-  bedrock: {
-    label: "Bedrock",
-    style: "border-orange-500/40 bg-orange-500/10 text-orange-300",
-  },
-  openai: {
-    label: "OpenAI",
-    style: "border-teal-500/40 bg-teal-500/10 text-teal-300",
-  },
-  gemini: {
-    label: "Gemini",
-    style: "border-blue-500/40 bg-blue-500/10 text-blue-300",
-  },
-};
-
-function ProviderTag({ provider }: { provider: string }) {
-  const tag = PROVIDER_TAGS[provider];
-  if (!tag) return null;
-  return (
-    <span
-      className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] ${tag.style}`}
-    >
-      {tag.label}
-    </span>
-  );
-}
 
 export function DeployModal({
   onClose,

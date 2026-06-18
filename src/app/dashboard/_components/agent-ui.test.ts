@@ -7,13 +7,7 @@ import {
   STATUS_STYLES,
 } from "~/app/dashboard/_components/agent-ui";
 
-const KNOWN_STATUSES = [
-  "Running",
-  "Pending",
-  "Failed",
-  "Succeeded",
-  "Unknown",
-];
+const KNOWN_STATUSES = ["Running", "Pending", "Failed", "Succeeded", "Unknown"];
 
 describe("expiresAtLocal", () => {
   beforeEach(() => {

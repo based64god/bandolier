@@ -77,7 +77,7 @@ export function TaskRow({
       </td>
 
       <td
-        className="hidden px-3 py-2 align-middle md:px-4 md:py-3 md:table-cell"
+        className="hidden px-3 py-2 align-middle md:table-cell md:px-4 md:py-3"
         onClick={(e) => e.stopPropagation()}
       >
         <SourceBadge
@@ -92,7 +92,7 @@ export function TaskRow({
       {/* Live "currently" line — clamped to one line so a long output can't
           grow the row height; the full text is available on hover. Dropped on
           narrow viewports where space is limited. */}
-      <td className="hidden px-3 py-2 align-middle md:px-4 md:py-3 md:table-cell">
+      <td className="hidden px-3 py-2 align-middle md:table-cell md:px-4 md:py-3">
         <span
           title={agent.currently ?? undefined}
           className="block max-w-[16rem] truncate text-xs text-white/40 italic"
@@ -101,7 +101,7 @@ export function TaskRow({
         </span>
       </td>
 
-      <td className="hidden px-3 py-2 align-middle md:px-4 md:py-3 whitespace-nowrap text-white/50 tabular-nums md:table-cell">
+      <td className="hidden px-3 py-2 align-middle whitespace-nowrap text-white/50 tabular-nums md:table-cell md:px-4 md:py-3">
         {expiresAtLocal(agent.expiresAt)}
       </td>
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 
 import { api } from "~/trpc/react";
 import { parseAwsCredentials } from "./parse-aws";
@@ -573,12 +573,13 @@ function KubeconfigSection() {
 
 function ApiKeyUsageExample({ token }: { token: string | null }) {
   const [copied, setCopied] = useState(false);
-  const [origin, setOrigin] = useState("https://<your-host>");
 
   // Resolve the real host on the client so the snippet is ready to paste.
-  useEffect(() => {
-    if (typeof window !== "undefined") setOrigin(window.location.origin);
-  }, []);
+  const origin = useSyncExternalStore(
+    () => () => undefined,
+    () => window.location.origin,
+    () => "https://<your-host>",
+  );
 
   const authToken = token ?? "bnd_…";
   const example = `# List tasks for a repo

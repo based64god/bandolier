@@ -28,7 +28,10 @@ export function PwaRegister() {
         .then((reg) => {
           // Nudge the browser to look for a new sw.js now and on an interval.
           void reg.update();
-          updateTimer = setInterval(() => void reg.update(), SW_UPDATE_INTERVAL_MS);
+          updateTimer = setInterval(
+            () => void reg.update(),
+            SW_UPDATE_INTERVAL_MS,
+          );
         })
         .catch((error) => {
           console.error("Service worker registration failed:", error);

@@ -571,6 +571,49 @@ function KubeconfigSection() {
   );
 }
 
+function ApiKeyUsageExample({ token }: { token: string | null }) {
+  const [copied, setCopied] = useState(false);
+  const [origin, setOrigin] = useState("https://<your-host>");
+
+  // Resolve the real host on the client so the snippet is ready to paste.
+  useEffect(() => {
+    if (typeof window !== "undefined") setOrigin(window.location.origin);
+  }, []);
+
+  const authToken = token ?? "bnd_…";
+  const example = `# List tasks for a repo
+curl -H "Authorization: Bearer ${authToken}" \\
+  ${origin}/api/v1/repos/<owner>/<repo>/tasks
+
+# Launch a task
+curl -X POST -H "Authorization: Bearer ${authToken}" -H "Content-Type: application/json" \\
+  -d '{"task":"Fix the flaky test in auth.spec.ts"}' \\
+  ${origin}/api/v1/repos/<owner>/<repo>/tasks`;
+
+  return (
+    <div className="space-y-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2.5">
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-white/40">
+          Use your key against the REST API under{" "}
+          <code className="text-white/60">/api/v1</code>:
+        </p>
+        <button
+          onClick={() => {
+            void navigator.clipboard.writeText(example);
+            setCopied(true);
+          }}
+          className="rounded bg-white/10 px-2 py-1 text-xs hover:bg-white/20"
+        >
+          {copied ? "Copied" : "Copy"}
+        </button>
+      </div>
+      <pre className="overflow-x-auto rounded bg-black/30 px-2 py-2 font-mono text-[11px] leading-relaxed text-white/70">
+        {example}
+      </pre>
+    </div>
+  );
+}
+
 function ApiKeysSection() {
   const utils = api.useUtils();
   const { data: keys = [] } = api.apiKeys.list.useQuery();
@@ -695,6 +738,8 @@ function ApiKeysSection() {
       </form>
 
       <StatusFeedback error={create.error?.message ?? revoke.error?.message} />
+
+      <ApiKeyUsageExample token={newToken} />
     </div>
   );
 }

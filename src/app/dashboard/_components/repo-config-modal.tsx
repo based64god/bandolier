@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { env } from "~/env";
 import { api } from "~/trpc/react";
 import { parseAwsCredentials } from "./parse-aws";
+import { ProviderTag } from "./provider-tag";
 import { SearchableSelect } from "./searchable-select";
 
 function CredFeedback({
@@ -516,9 +517,7 @@ function RepoDefaultModelSection({ repoFullName }: { repoFullName: string }) {
           label: (
             <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
               <span className="truncate text-white">{m.label}</span>
-              <span className="shrink-0 text-[10px] text-white/30">
-                {m.provider}
-              </span>
+              <ProviderTag provider={m.provider} />
             </span>
           ),
         }))}

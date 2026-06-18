@@ -5,6 +5,8 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "~/trpc/react";
 import type { RouterOutputs } from "~/trpc/react";
 import { expiresAtLocal } from "./agent-ui";
+import { HarnessSegment, UserSegment } from "./log-modal";
+import { parseSegments } from "./log-segments";
 import { OutputBadge, SourceBadge } from "./output-badge";
 import { StatusBadge } from "./status-badge";
 import { MOBILE_TASK_COLUMNS, TASK_COLUMNS } from "./task-row";
@@ -153,7 +155,7 @@ export function InteractiveRow({
 
         {/* Task (chevron + name) */}
         <td className="px-3 py-2 align-middle md:px-4 md:py-3">
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 items-center gap-2">
             <svg
               viewBox="0 0 16 16"
               fill="currentColor"
@@ -164,13 +166,20 @@ export function InteractiveRow({
             >
               <path d="M4.22 6.22a.75.75 0 0 1 1.06 0L8 8.94l2.72-2.72a.75.75 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 7.28a.75.75 0 0 1 0-1.06Z" />
             </svg>
-            <span className="text-sm text-white/90">{agent.displayName}</span>
+            {/* Clamped to one line so a long description can't bleed past the
+                fixed column width into the End session button alongside it. */}
+            <span
+              title={agent.displayName}
+              className="truncate text-sm text-white/90"
+            >
+              {agent.displayName}
+            </span>
           </div>
         </td>
 
         {/* Created by — dropped on narrow viewports where space is limited. */}
         <td
-          className="hidden px-3 py-2 align-middle md:px-4 md:py-3 md:table-cell"
+          className="hidden px-3 py-2 align-middle md:table-cell md:px-4 md:py-3"
           onClick={(e) => e.stopPropagation()}
         >
           <SourceBadge
@@ -184,7 +193,7 @@ export function InteractiveRow({
 
         {/* Currently — clamped to one line, full text on hover. Dropped on
             narrow viewports where space is limited. */}
-        <td className="hidden px-3 py-2 align-middle md:px-4 md:py-3 md:table-cell">
+        <td className="hidden px-3 py-2 align-middle md:table-cell md:px-4 md:py-3">
           <span
             title={agent.currently ?? undefined}
             className="block max-w-[16rem] truncate text-xs text-white/40 italic"
@@ -194,7 +203,7 @@ export function InteractiveRow({
         </td>
 
         {/* Expires — dropped on narrow viewports where space is limited. */}
-        <td className="hidden px-3 py-2 align-middle md:px-4 md:py-3 whitespace-nowrap text-white/50 tabular-nums md:table-cell">
+        <td className="hidden px-3 py-2 align-middle whitespace-nowrap text-white/50 tabular-nums md:table-cell md:px-4 md:py-3">
           {expiresAtLocal(agent.expiresAt)}
         </td>
 
@@ -386,7 +395,9 @@ function LogView({ text }: { text: string }) {
     setPinned(true);
   }
 
-  const lines = text ? text.split("\n") : [];
+  // Group lines so runs of [harness] diagnostics collapse the same way they do
+  // in the non-interactive LogModal, keeping Claude's output front and center.
+  const segments = text ? parseSegments(text) : [];
 
   return (
     <div className="relative">
@@ -401,19 +412,25 @@ function LogView({ text }: { text: string }) {
         }}
         className="h-72 overflow-auto bg-black/30 px-4 py-3 font-mono text-[11px] leading-5"
       >
-        {lines.length === 0 ? (
+        {segments.length === 0 ? (
           <span className="text-white/30">Waiting for output…</span>
         ) : (
-          lines.map((line, i) => (
-            <div
-              key={i}
-              className={`break-words whitespace-pre-wrap ${
-                line.includes("[harness]") ? "text-white/35" : "text-white/80"
-              }`}
-            >
-              {line || " "}
-            </div>
-          ))
+          segments.map((seg, i) =>
+            seg.kind === "harness" ? (
+              <HarnessSegment key={i} lines={seg.lines} />
+            ) : seg.kind === "user" ? (
+              <UserSegment key={i} lines={seg.lines} />
+            ) : (
+              seg.lines.map((line, j) => (
+                <div
+                  key={`${i}-${j}`}
+                  className="break-words whitespace-pre-wrap text-white/80"
+                >
+                  {line || " "}
+                </div>
+              ))
+            ),
+          )
         )}
       </div>
       {!pinned && (

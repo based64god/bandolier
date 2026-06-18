@@ -803,7 +803,7 @@ export function RepoConfigModal({
                 ref={agentImageRef}
                 type="text"
                 defaultValue={config?.agentImage ?? ""}
-                placeholder="e.g. ghcr.io/acme/bandolier-agent-harness:latest"
+                placeholder="e.g. ghcr.io/based64god/bandolier-agent-harness:latest"
                 className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 font-mono text-sm text-white placeholder-white/30 placeholder:font-sans focus:border-purple-500/50 focus:outline-none"
               />
               <p className="text-xs text-white/30">

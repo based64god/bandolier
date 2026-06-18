@@ -132,16 +132,17 @@ docker push <your-registry>/bandolier-agent-harness:latest
 
 ---
 
-## GitHub webhooks (optional)
+## GitHub App (optional)
 
-To have agents launch automatically when issues are opened:
+To have agents launch automatically when issues are opened, install the Bandolier GitHub App:
 
-1. In the app, open a repo you have admin on and configure its webhook (sets a per-repo secret, and optionally a trigger phrase that issue text must contain).
-2. In the GitHub repo → **Settings → Webhooks**, add a webhook pointing at `https://<your-host>/api/webhooks/github` with content type `application/json`, the **Issues** event, and the same secret.
+1. Create a GitHub App (Settings → Developer settings → GitHub Apps). Give it a webhook URL of `https://<your-host>/api/webhooks/github`, a webhook secret, and these repository permissions: **Issues** (read & write), **Pull requests** (read & write), **Contents** (read), **Metadata** (read). Subscribe to the **Issues** event. Generate a private key.
+2. Set `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY` (PEM, `\n`-escaped), and `GITHUB_WEBHOOK_SECRET` (the App's webhook secret) in the app's environment. Optionally set `NEXT_PUBLIC_GITHUB_APP_SLUG` so the repo-config UI links to the App's install page.
+3. Install the App on the repos you want Bandolier to act on. The App delivers events automatically — there's no per-repo webhook to add.
 
-When an issue is opened, Bandolier verifies the signature, finds the Bandolier user linked to the GitHub account that opened it, and deploys an agent under that user's credentials. The resulting PR is attributed to the issue author.
+When an issue is opened, Bandolier verifies the App's signature, finds the Bandolier user linked to the GitHub account that opened it, and deploys an agent under that user's credentials — so clone/push and the resulting PR are attributed to the issue author. The "Bando picked up this issue…" comment is posted by the App itself (as `bandolier[bot]`), not the user.
 
-Optional env knobs: `GITHUB_WEBHOOK_SECRET` (a global fallback secret) and `GITHUB_TRIGGER_LABEL` (only act on issues carrying a specific label).
+Optional env knobs: `GITHUB_TRIGGER_LABEL` (only act on issues carrying a specific label) and, per repo, a trigger phrase that issue text must contain (set in the repo-config UI). `BANDOLIER_GITHUB_TOKEN` is a deprecated fallback used for the bot comment only when the App is not configured.
 
 ---
 
@@ -168,53 +169,57 @@ All server configuration is validated in `src/env.js`.
 
 ### Required
 
-| Variable | Description |
-| --- | --- |
-| `BETTER_AUTH_SECRET` | Secret for signing sessions and tokens. Required in production. |
-| `BETTER_AUTH_GITHUB_CLIENT_ID` | GitHub OAuth app client ID. |
-| `BETTER_AUTH_GITHUB_CLIENT_SECRET` | GitHub OAuth app client secret. |
-| `DATABASE_URL` | PostgreSQL connection string. |
+| Variable                           | Description                                                     |
+| ---------------------------------- | --------------------------------------------------------------- |
+| `BETTER_AUTH_SECRET`               | Secret for signing sessions and tokens. Required in production. |
+| `BETTER_AUTH_GITHUB_CLIENT_ID`     | GitHub OAuth app client ID.                                     |
+| `BETTER_AUTH_GITHUB_CLIENT_SECRET` | GitHub OAuth app client secret.                                 |
+| `DATABASE_URL`                     | PostgreSQL connection string.                                   |
 
 ### Common
 
-| Variable | Default | Description |
-| --- | --- | --- |
-| `BETTER_AUTH_URL` | `http://localhost:3000` | Public base URL of the app. |
-| `K8S_LABEL_SELECTOR` | `app=bandolier-agent` | Label selector identifying Bandolier-managed agent pods. |
+| Variable             | Default                 | Description                                              |
+| -------------------- | ----------------------- | -------------------------------------------------------- |
+| `BETTER_AUTH_URL`    | `http://localhost:3000` | Public base URL of the app.                              |
+| `K8S_LABEL_SELECTOR` | `app=bandolier-agent`   | Label selector identifying Bandolier-managed agent pods. |
 
 The harness image (`ghcr.io/based64god/bandolier-agent-harness:latest`, always pulled) is a built-in default, overridable per repo in repo settings. The agent namespace is derived from the repo (default `bandolier-agents`). Neither is configured via environment variables.
 
 ### Agent isolation
 
-| Variable | Default | Description |
-| --- | --- | --- |
-| `AGENT_NETWORK_POLICY` | `true` | Apply a `NetworkPolicy` denying inbound and limiting egress to DNS + the public internet. Needs a policy-enforcing CNI (Calico/Cilium); a no-op under kindnet. |
-| `AGENT_EGRESS_BLOCKED_CIDRS` | RFC-1918 ranges | Comma-separated CIDRs agents cannot reach (blocks lateral movement to in-cluster services). |
+| Variable                     | Default         | Description                                                                                                                                                    |
+| ---------------------------- | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AGENT_NETWORK_POLICY`       | `true`          | Apply a `NetworkPolicy` denying inbound and limiting egress to DNS + the public internet. Needs a policy-enforcing CNI (Calico/Cilium); a no-op under kindnet. |
+| `AGENT_EGRESS_BLOCKED_CIDRS` | RFC-1918 ranges | Comma-separated CIDRs agents cannot reach (blocks lateral movement to in-cluster services).                                                                    |
 
-### Webhooks
+### GitHub App / webhooks
 
-| Variable | Description |
-| --- | --- |
-| `GITHUB_WEBHOOK_SECRET` | Global fallback secret for verifying webhook signatures (per-repo secrets take precedence). |
-| `GITHUB_TRIGGER_LABEL` | If set, only act on issues that carry this label. |
-| `BANDOLIER_GITHUB_TOKEN` | OAuth/PAT token for a dedicated Bandolier GitHub service user. When set, the automated "Bando picked up this issue…" comment is posted as this user rather than the issue author. Falls back to the triggering user's token when unset. |
+| Variable                                            | Description                                                                                                                                                                |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GITHUB_APP_ID`                                     | Numeric id of the Bandolier GitHub App. Required (with the key) for bot-voice actions and event delivery.                                                                  |
+| `GITHUB_APP_PRIVATE_KEY`                            | The App's PEM private key (`\n`-escaped). Used to mint installation tokens for bot comments.                                                                               |
+| `GITHUB_APP_CLIENT_ID` / `GITHUB_APP_CLIENT_SECRET` | The App's OAuth credentials. Optional until login is moved to the App.                                                                                                     |
+| `NEXT_PUBLIC_GITHUB_APP_SLUG`                       | The App's public slug, used to link the repo-config UI to its install page.                                                                                                |
+| `GITHUB_WEBHOOK_SECRET`                             | Secret for verifying webhook signatures. With the GitHub App, set this to the App's webhook secret (delivery is app-level — there are no per-repo secrets).                |
+| `GITHUB_TRIGGER_LABEL`                              | If set, only act on issues that carry this label.                                                                                                                          |
+| `BANDOLIER_GITHUB_TOKEN`                            | **Deprecated** — superseded by the GitHub App. OAuth/PAT for a dedicated bot user, used for the "Bando picked up this issue…" comment only when the App is not configured. |
 
 ### Access gate (optional)
 
-| Variable | Description |
-| --- | --- |
+| Variable       | Description                                                                                                                                      |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `APP_PASSWORD` | When set, a shared password is required before reaching any page or API (webhooks and the REST API are exempt — they authenticate on their own). |
 
 ### Run artifacts (optional)
 
 Setting `ARTIFACTS_S3_BUCKET` enables uploading each run's transcript to S3 so it survives the Job's one-week TTL.
 
-| Variable | Default | Description |
-| --- | --- | --- |
-| `ARTIFACTS_S3_BUCKET` | _(unset)_ | Enables artifact persistence when set. |
-| `ARTIFACTS_S3_REGION` | `us-east-1` | Bucket region. |
-| `ARTIFACTS_S3_ENDPOINT` | _(unset)_ | Custom endpoint for MinIO / S3-compatible stores. |
-| `ARTIFACTS_AWS_ACCESS_KEY_ID` / `ARTIFACTS_AWS_SECRET_ACCESS_KEY` | _(unset)_ | Explicit S3 credentials; falls back to the default AWS provider chain. |
+| Variable                                                          | Default     | Description                                                            |
+| ----------------------------------------------------------------- | ----------- | ---------------------------------------------------------------------- |
+| `ARTIFACTS_S3_BUCKET`                                             | _(unset)_   | Enables artifact persistence when set.                                 |
+| `ARTIFACTS_S3_REGION`                                             | `us-east-1` | Bucket region.                                                         |
+| `ARTIFACTS_S3_ENDPOINT`                                           | _(unset)_   | Custom endpoint for MinIO / S3-compatible stores.                      |
+| `ARTIFACTS_AWS_ACCESS_KEY_ID` / `ARTIFACTS_AWS_SECRET_ACCESS_KEY` | _(unset)_   | Explicit S3 credentials; falls back to the default AWS provider chain. |
 
 ---
 
@@ -245,19 +250,19 @@ agent-harness/
 
 ## Scripts
 
-| Command | What it does |
-| --- | --- |
-| `pnpm dev` | Run the app in development (Turbopack). |
-| `pnpm build` / `pnpm start` | Production build / serve. |
-| `pnpm db:push` | Sync the Drizzle schema to the database (used instead of migration files). |
-| `pnpm db:studio` | Open Drizzle Studio. |
-| `pnpm typecheck` | `tsc --noEmit`. |
-| `pnpm lint` / `pnpm lint:fix` | ESLint. |
-| `pnpm format:write` / `pnpm format:check` | Prettier. |
-| `pnpm check` | Lint + typecheck together. |
-| `pnpm test` | Run the unit-test suite once (Vitest). |
-| `pnpm test:watch` | Run Vitest in watch mode. |
-| `pnpm test:coverage` | Run the suite and emit a coverage report under `coverage/`. |
+| Command                                   | What it does                                                               |
+| ----------------------------------------- | -------------------------------------------------------------------------- |
+| `pnpm dev`                                | Run the app in development (Turbopack).                                    |
+| `pnpm build` / `pnpm start`               | Production build / serve.                                                  |
+| `pnpm db:push`                            | Sync the Drizzle schema to the database (used instead of migration files). |
+| `pnpm db:studio`                          | Open Drizzle Studio.                                                       |
+| `pnpm typecheck`                          | `tsc --noEmit`.                                                            |
+| `pnpm lint` / `pnpm lint:fix`             | ESLint.                                                                    |
+| `pnpm format:write` / `pnpm format:check` | Prettier.                                                                  |
+| `pnpm check`                              | Lint + typecheck together.                                                 |
+| `pnpm test`                               | Run the unit-test suite once (Vitest).                                     |
+| `pnpm test:watch`                         | Run Vitest in watch mode.                                                  |
+| `pnpm test:coverage`                      | Run the suite and emit a coverage report under `coverage/`.                |
 
 ---
 
@@ -287,7 +292,7 @@ Both suites run in CI on every push and pull request (see
 
 - **Per-user credentials.** Agents only ever run with the deploying (or issue-opening) user's own GitHub, model-provider, and cluster credentials. There is no server-side provider identity to fall back on.
 - **Per-job secrets.** A run's credentials live in a Kubernetes Secret owned by its Job, so they're deleted when the Job is (manually or via its TTL). Finished Jobs are retained for one week.
-- **Stored credentials are not encrypted at rest.** User AWS/Anthropic keys, kubeconfigs, and webhook secrets are stored in Postgres in plaintext; API key tokens are stored only as SHA-256 hashes. Protect the database accordingly and serve the app over HTTPS.
+- **Stored credentials are not encrypted at rest.** User AWS/Anthropic keys and kubeconfigs are stored in Postgres in plaintext; API key tokens are stored only as SHA-256 hashes. The GitHub App private key and webhook secret live in the app's environment, not the database. Protect the database accordingly and serve the app over HTTPS.
 - **Network isolation** for agent pods is on by default but requires a policy-enforcing CNI to take effect.
 
 ---

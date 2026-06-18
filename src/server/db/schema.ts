@@ -148,13 +148,12 @@ export const agentInput = pgTable(
 );
 
 // Per-repository configuration (one row per repo, shared across any Bandolier
-// user with admin on that repo). Holds the incoming-webhook secret/prefix plus
-// other repo-level settings such as the agent harness image.
+// user with admin on that repo). Holds the webhook trigger prefix plus other
+// repo-level settings such as the agent harness image and shared credentials.
+// Webhook delivery + signature verification is handled by the GitHub App at the
+// app level (one GITHUB_WEBHOOK_SECRET), so no per-repo secret lives here.
 export const repoWebhookConfig = pgTable("repo_webhook_config", {
   repoFullName: text("repo_full_name").primaryKey(),
-  // Null when the repo has other config (e.g. an agent image) but no per-repo
-  // webhook secret — webhook verification then falls back to GITHUB_WEBHOOK_SECRET.
-  secret: text("secret"),
   // Optional trigger phrase: when set, only webhook events whose text contains
   // it are acted on. Null = act on all events.
   prefix: text("prefix"),
@@ -264,6 +263,29 @@ export const userKubeconfig = pgTable("user_kubeconfig", {
     .primaryKey()
     .references(() => user.id, { onDelete: "cascade" }),
   kubeconfig: text("kubeconfig").notNull(),
+  createdAt: timestamp("created_at")
+    .$defaultFn(() => /* @__PURE__ */ new Date())
+    .notNull(),
+  updatedAt: timestamp("updated_at")
+    .$defaultFn(() => /* @__PURE__ */ new Date())
+    .$onUpdate(() => new Date())
+    .notNull(),
+});
+
+// Where the Bandolier GitHub App is installed. One row per repo the App can act
+// on; the bot's installation access token (for issue/PR comments and other
+// bot-voice actions) is minted on demand from the App key + this installationId.
+// Rows are maintained by the App's `installation` / `installation_repositories`
+// webhook events: added on install/added, removed on uninstall/removed. This is
+// distinct from per-user OAuth tokens, which remain the source of attribution.
+export const githubInstallation = pgTable("github_installation", {
+  repoFullName: text("repo_full_name").primaryKey(),
+  // GitHub's numeric installation id; the unit a bot token is scoped to. Stored
+  // as text for parity with the other GitHub ids kept as text (account.accountId).
+  installationId: text("installation_id").notNull(),
+  // The account (org or user login) the App is installed under, for display and
+  // debugging; not used for token minting.
+  accountLogin: text("account_login"),
   createdAt: timestamp("created_at")
     .$defaultFn(() => /* @__PURE__ */ new Date())
     .notNull(),

@@ -7,8 +7,9 @@ export interface AccessibleRepo {
   cloneUrl: string;
   defaultBranch: string;
   namespace: string;
-  // Admin permission is what GitHub requires to manage webhooks.
-  canManageWebhooks: boolean;
+  // Admin permission on the repo, which gates repo-scoped configuration
+  // (trigger prefix, agent image, shared credentials).
+  isAdmin: boolean;
 }
 
 interface GitHubRepo {
@@ -72,6 +73,6 @@ export async function fetchAccessibleRepos(
     cloneUrl: r.clone_url,
     defaultBranch: r.default_branch,
     namespace: repoToNamespace(r.full_name),
-    canManageWebhooks: r.permissions?.admin === true,
+    isAdmin: r.permissions?.admin === true,
   }));
 }

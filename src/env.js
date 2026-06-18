@@ -49,6 +49,30 @@ export const env = createEnv({
     ARTIFACTS_S3_ENDPOINT: z.string().optional(), // for MinIO / S3-compatible
     ARTIFACTS_AWS_ACCESS_KEY_ID: z.string().optional(),
     ARTIFACTS_AWS_SECRET_ACCESS_KEY: z.string().optional(),
+    // Cross-task session persistence. When enabled, related runs in a repo share
+    // Claude session state via a per-thread PVC mounted at ~/.claude, and the
+    // agent resumes prior context (claimed via the MCP discovery tools). Off =
+    // today's stateless behaviour (an emptyDir ~/.claude per pod).
+    SESSION_PERSISTENCE: z.enum(["true", "false"]).default("false"),
+    // StorageClass for per-thread session PVCs. Empty = the cluster default SC.
+    // Its access modes are probed to decide whether concurrent children can
+    // mount-and-fork (RWX) or must seed via the broker-cp path (RWO).
+    SESSION_PVC_STORAGE_CLASS: z.string().optional(),
+    // Size requested for each per-thread session PVC.
+    SESSION_PVC_SIZE: z.string().default("1Gi"),
+    // Optional explicit override for the access mode probe, when the StorageClass
+    // provisioner isn't in the built-in capability map. "ReadWriteOnce" |
+    // "ReadWriteMany". Unset = probe by provisioner, defaulting to RWO.
+    SESSION_PVC_ACCESS_MODES: z
+      .enum(["ReadWriteOnce", "ReadWriteMany"])
+      .optional(),
+    // Container image for the transient read-only broker pod the API spawns to
+    // cp session bytes out of another thread's PVC (MCP discovery reads). Unset =
+    // the agent harness image (it already has tar + a shell).
+    SESSION_BROKER_IMAGE: z.string().optional(),
+    // Idle window (seconds) before a thread's PVC is eligible for the GC sweep,
+    // independent of the owning Job's TTL. Defaults to one week.
+    SESSION_THREAD_TTL_SECONDS: z.coerce.number().int().default(604800),
   },
 
   /**
@@ -85,6 +109,12 @@ export const env = createEnv({
     ARTIFACTS_AWS_ACCESS_KEY_ID: process.env.ARTIFACTS_AWS_ACCESS_KEY_ID,
     ARTIFACTS_AWS_SECRET_ACCESS_KEY:
       process.env.ARTIFACTS_AWS_SECRET_ACCESS_KEY,
+    SESSION_PERSISTENCE: process.env.SESSION_PERSISTENCE,
+    SESSION_PVC_STORAGE_CLASS: process.env.SESSION_PVC_STORAGE_CLASS,
+    SESSION_PVC_SIZE: process.env.SESSION_PVC_SIZE,
+    SESSION_PVC_ACCESS_MODES: process.env.SESSION_PVC_ACCESS_MODES,
+    SESSION_BROKER_IMAGE: process.env.SESSION_BROKER_IMAGE,
+    SESSION_THREAD_TTL_SECONDS: process.env.SESSION_THREAD_TTL_SECONDS,
   },
   /**
    * Run `build` or `dev` with `SKIP_ENV_VALIDATION` to skip env validation. This is especially

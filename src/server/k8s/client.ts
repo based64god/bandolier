@@ -69,3 +69,17 @@ export function getVersionApi(kubeconfig: string): k8s.VersionApi {
 export function getNetworkingV1Api(kubeconfig: string): k8s.NetworkingV1Api {
   return buildKubeConfig(kubeconfig).makeApiClient(k8s.NetworkingV1Api);
 }
+
+export function getStorageV1Api(kubeconfig: string): k8s.StorageV1Api {
+  return buildKubeConfig(kubeconfig).makeApiClient(k8s.StorageV1Api);
+}
+
+/**
+ * An `Exec` client for streaming `kubectl exec`-style commands into a running
+ * pod (used to `tar` session bytes out of a thread's PVC via a transient broker
+ * pod — the only API-mediated way to read a volume's contents, since the
+ * kube-apiserver exposes PVC *objects* but not their file bytes).
+ */
+export function getExec(kubeconfig: string): k8s.Exec {
+  return new k8s.Exec(buildKubeConfig(kubeconfig));
+}

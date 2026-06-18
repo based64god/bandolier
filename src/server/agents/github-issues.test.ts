@@ -30,10 +30,7 @@ describe("getGithubItemState", () => {
   it("reports a merged PR as merged even when its state is closed", async () => {
     mockFetchOnce({ state: "closed", merged_at: "2024-01-01T00:00:00Z" });
     expect(
-      await getGithubItemState(
-        "tok",
-        "https://github.com/o/r/pull/1",
-      ),
+      await getGithubItemState("tok", "https://github.com/o/r/pull/1"),
     ).toBe("merged");
   });
 

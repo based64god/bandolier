@@ -125,7 +125,9 @@ export function PullToRefresh() {
           style={
             refreshing
               ? undefined
-              : { transform: `rotate(${Math.min(pull / MAX_PULL, 1) * 270}deg)` }
+              : {
+                  transform: `rotate(${Math.min(pull / MAX_PULL, 1) * 270}deg)`,
+                }
           }
           aria-hidden="true"
         >
@@ -141,7 +143,11 @@ export function PullToRefresh() {
         </svg>
       </div>
       <span className="sr-only">
-        {refreshing ? "Refreshing" : ready ? "Release to refresh" : "Pull to refresh"}
+        {refreshing
+          ? "Refreshing"
+          : ready
+            ? "Release to refresh"
+            : "Pull to refresh"}
       </span>
     </div>
   );

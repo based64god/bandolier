@@ -1035,10 +1035,15 @@ export const agentsRouter = createTRPCRouter({
 
         // When a task is spawned from a GitHub issue (via the dashboard or the
         // REST API), leave a comment so the issue author knows it was received.
-        // Post as the Bandolier service user when its token is configured so the
-        // comment is attributed to the bot; otherwise fall back to the deploying
-        // user's token.
-        const commentToken = env.BANDOLIER_GITHUB_TOKEN ?? githubToken;
+        // This is a bot-voice action, so prefer the GitHub App installation
+        // token (comment is attributed to bandolier[bot]); fall back to the
+        // legacy service user PAT, then to the deploying user's token, for
+        // deployments without the App installed.
+        const botToken = input.repoFullName
+          ? await getRepoBotToken(ctx.db, input.repoFullName, Date.now())
+          : null;
+        const commentToken =
+          botToken ?? env.BANDOLIER_GITHUB_TOKEN ?? githubToken;
         if (issue && commentToken && input.repoFullName) {
           const taskUrl = `${env.BETTER_AUTH_URL}/repo/${input.repoFullName}`;
           const commentBody =

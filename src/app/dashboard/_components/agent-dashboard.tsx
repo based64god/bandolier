@@ -577,9 +577,9 @@ export function AgentDashboard({
                             // viewports where space is limited — the row stays
                             // readable with Status/Output/Task alone.
                             { label: "Created by", width: "w-[15%]", optional: true },
-                            { label: "Currently", width: "w-[18%]", optional: true },
+                            { label: "Currently", width: "w-[16%]", optional: true },
                             { label: "Expires", width: "w-[9%]", optional: true },
-                            { label: "", width: "w-[8%]" },
+                            { label: "", width: "w-[10%]" },
                           ].map((h, i) => (
                             <th
                               key={i}

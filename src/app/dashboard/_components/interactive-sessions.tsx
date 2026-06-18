@@ -5,7 +5,8 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "~/trpc/react";
 import type { RouterOutputs } from "~/trpc/react";
 import { expiresAtLocal } from "./agent-ui";
-import { HarnessSegment, parseSegments } from "./log-modal";
+import { HarnessSegment, UserSegment } from "./log-modal";
+import { parseSegments } from "./log-segments";
 import { OutputBadge, SourceBadge } from "./output-badge";
 import { StatusBadge } from "./status-badge";
 import { MOBILE_TASK_COLUMNS, TASK_COLUMNS } from "./task-row";
@@ -178,7 +179,7 @@ export function InteractiveRow({
 
         {/* Created by — dropped on narrow viewports where space is limited. */}
         <td
-          className="hidden px-3 py-2 align-middle md:px-4 md:py-3 md:table-cell"
+          className="hidden px-3 py-2 align-middle md:table-cell md:px-4 md:py-3"
           onClick={(e) => e.stopPropagation()}
         >
           <SourceBadge
@@ -192,7 +193,7 @@ export function InteractiveRow({
 
         {/* Currently — clamped to one line, full text on hover. Dropped on
             narrow viewports where space is limited. */}
-        <td className="hidden px-3 py-2 align-middle md:px-4 md:py-3 md:table-cell">
+        <td className="hidden px-3 py-2 align-middle md:table-cell md:px-4 md:py-3">
           <span
             title={agent.currently ?? undefined}
             className="block max-w-[16rem] truncate text-xs text-white/40 italic"
@@ -202,7 +203,7 @@ export function InteractiveRow({
         </td>
 
         {/* Expires — dropped on narrow viewports where space is limited. */}
-        <td className="hidden px-3 py-2 align-middle md:px-4 md:py-3 whitespace-nowrap text-white/50 tabular-nums md:table-cell">
+        <td className="hidden px-3 py-2 align-middle whitespace-nowrap text-white/50 tabular-nums md:table-cell md:px-4 md:py-3">
           {expiresAtLocal(agent.expiresAt)}
         </td>
 
@@ -417,6 +418,8 @@ function LogView({ text }: { text: string }) {
           segments.map((seg, i) =>
             seg.kind === "harness" ? (
               <HarnessSegment key={i} lines={seg.lines} />
+            ) : seg.kind === "user" ? (
+              <UserSegment key={i} lines={seg.lines} />
             ) : (
               seg.lines.map((line, j) => (
                 <div

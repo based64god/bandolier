@@ -293,7 +293,7 @@ export function InteractiveRow({
                 <button
                   onClick={send}
                   disabled={!running || !draft.trim() || sendInput.isPending}
-                  className="rounded-lg bg-purple-600 px-3 py-2 text-sm font-medium hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-40"
+                  className="rounded-lg bg-purple-600 px-3 py-2 text-sm font-medium text-black hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   {sendInput.isPending ? "Sending…" : "Send"}
                 </button>

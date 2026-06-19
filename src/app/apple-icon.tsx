@@ -14,7 +14,7 @@ export default function AppleIcon() {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        background: "#15162c",
+        background: "#020a04",
       }}
     >
       <img src={bandolierDataUri} width={132} height={132} alt="" />

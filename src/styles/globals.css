@@ -67,6 +67,18 @@ body {
      glows. No gradient — the only lighting is the CRT edge glow below. */
   background-color: #000000;
   color: var(--color-purple-300);
+
+  /* With viewport-fit=cover (see layout.tsx) the web view runs edge-to-edge and
+     the black bezel below (body::before) paints the safe-area insets solid
+     black. Pad the content in by those same insets so the top bar and the rest
+     of the UI stay inside the *visible* viewport instead of scrolling up under
+     the notch / Dynamic Island / status bar where the bezel would cover them.
+     The body background is already black, so this just shrinks the live area to
+     match the bezel — devices that report zero insets are unaffected. */
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
 }
 
 /*

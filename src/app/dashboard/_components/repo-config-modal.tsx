@@ -699,18 +699,18 @@ export function RepoConfigModal({
         className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-xl border border-white/20 bg-[#0a2014]"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
-          <div className="flex items-center gap-2">
-            <h2 className="text-sm font-semibold text-white">
+        <div className="flex items-center justify-between gap-3 border-b border-white/10 px-5 py-4">
+          <div className="flex min-w-0 items-center gap-2">
+            <h2 className="shrink-0 text-sm font-semibold text-white">
               Repository configuration
             </h2>
-            <code className="rounded bg-purple-500/20 px-2 py-0.5 text-xs text-purple-300">
+            <code className="truncate rounded bg-purple-500/20 px-2 py-0.5 text-xs text-purple-300">
               {repoFullName}
             </code>
           </div>
           <button
             onClick={onClose}
-            className="text-white/40 hover:text-white"
+            className="shrink-0 text-white/40 hover:text-white"
             aria-label="Close"
           >
             ✕

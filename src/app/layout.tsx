@@ -17,6 +17,13 @@ const THEME_COLOR = "#000000";
 
 export const viewport: Viewport = {
   themeColor: THEME_COLOR,
+  // Extend the web view edge-to-edge so it fills the whole screen, including
+  // the regions around a notch / Dynamic Island / home indicator. This is what
+  // makes env(safe-area-inset-*) report non-zero values; without it the insets
+  // are always 0 and the black bezel mask in globals.css would collapse. The
+  // black-translucent iOS status bar (see metadata.appleWebApp) already puts
+  // content under the status bar, so cover keeps both platforms consistent.
+  viewportFit: "cover",
 };
 
 export const metadata: Metadata = {

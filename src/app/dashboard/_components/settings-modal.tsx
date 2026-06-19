@@ -99,7 +99,7 @@ function AnthropicSection() {
           <button
             type="submit"
             disabled={setAnthropic.isPending || !apiKey}
-            className="rounded-lg bg-purple-600 px-3 py-2 text-sm font-medium hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-lg bg-purple-600 px-3 py-2 text-sm font-medium text-black hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {setAnthropic.isPending ? "Verifying…" : "Save"}
           </button>
@@ -295,7 +295,7 @@ function GeminiSection() {
             <button
               type="submit"
               disabled={setGemini.isPending || !credentials}
-              className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-black hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {setGemini.isPending ? "Verifying…" : "Save"}
             </button>
@@ -554,7 +554,7 @@ function KubeconfigSection() {
               <button
                 type="submit"
                 disabled={save.isPending || !kubeconfig}
-                className="rounded-lg bg-sky-600 px-3 py-2 text-sm font-medium hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded-lg bg-sky-600 px-3 py-2 text-sm font-medium text-black hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {save.isPending ? "Verifying…" : "Save & verify"}
               </button>
@@ -781,7 +781,7 @@ function ApiKeysSection() {
         <button
           type="submit"
           disabled={create.isPending || !name}
-          className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-black hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {create.isPending ? "Creating…" : "Create"}
         </button>
@@ -809,7 +809,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       onClick={onClose}
     >
       <div
-        className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-xl border border-white/20 bg-[#0a0a1a]"
+        className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-xl border border-white/20 bg-[#020a04]"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">

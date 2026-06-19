@@ -11,7 +11,7 @@ export default async function GatePage({
   const { from, error } = await searchParams;
 
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-b from-[#2e026d] to-[#15162c] p-4 text-white">
+    <main className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-b from-[#04210f] to-[#020a04] p-4 text-white">
       <div className="flex w-full max-w-sm flex-col items-center gap-8">
         <div className="flex flex-col items-center gap-4">
           <BandolierIcon className="h-14 w-14 text-purple-300" />
@@ -36,7 +36,7 @@ export default async function GatePage({
           {error && <p className="text-xs text-red-400">Incorrect password.</p>}
           <button
             type="submit"
-            className="rounded-lg bg-purple-600 px-4 py-2.5 text-sm font-medium hover:bg-purple-500"
+            className="rounded-lg bg-purple-600 px-4 py-2.5 text-sm font-medium text-black hover:bg-purple-500"
           >
             Continue
           </button>

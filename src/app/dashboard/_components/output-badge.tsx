@@ -13,12 +13,12 @@ type ItemState = "open" | "closed" | "completed" | "merged";
 type PresentationState = ItemState | "closedPull";
 
 // Indicators are icon-only to stay small. Colours follow GitHub's conventions
-// (open = green, closed-as-not-planned issue = grey, closed-unmerged PR = red,
-// completed = purple, merged = purple) and the glyph distinguishes the state so
-// it reads even against a same-hued badge (e.g. a merged "PR" pill). An issue
-// closed as *completed* (e.g. resolved by a pull request) reads as a success — a
-// purple check-circle — rather than the failure-style red x used for a closed,
-// unmerged pull request.
+// (open = green, closed-as-not-planned issue = grey, closed-unmerged PR = blue
+// — matching the in-flight spinner, completed = purple, merged = purple) and the
+// glyph distinguishes the state so it reads even against a same-hued badge (e.g.
+// a merged "PR" pill). An issue closed as *completed* (e.g. resolved by a pull
+// request) reads as a success — a purple check-circle — rather than the
+// x-circle used for a closed, unmerged pull request.
 // Paths are 16×16 GitHub Octicons: a filled dot (open), skip/circle-slash
 // (closed as not planned), x-circle (closed-unmerged PR), check-circle
 // (completed) and git-merge (merged).
@@ -39,7 +39,7 @@ const STATE_CONFIG: Record<
   },
   closedPull: {
     label: "Closed (unmerged)",
-    className: "text-red-400",
+    className: "text-blue-300",
     iconPath:
       "M2.343 13.657A8 8 0 1 1 13.658 2.343 8 8 0 0 1 2.343 13.657ZM6.03 4.97a.751.751 0 0 0-1.042.018.751.751 0 0 0-.018 1.042L6.94 8 4.97 9.97a.749.749 0 0 0 .326 1.275.749.749 0 0 0 .734-.215L8 9.06l1.97 1.97a.749.749 0 0 0 1.275-.326.749.749 0 0 0-.215-.734L9.06 8l1.97-1.97a.749.749 0 0 0-.326-1.275.749.749 0 0 0-.734.215L8 6.94Z",
   },
@@ -59,8 +59,8 @@ const STATE_CONFIG: Record<
 
 /**
  * Small open/closed/merged glyph shown alongside a PR or issue badge. `kind`
- * disambiguates "closed": a closed PR (unmerged) shows the red x, an issue keeps
- * the grey not-planned circle-slash.
+ * disambiguates "closed": a closed PR (unmerged) shows the blue x, an issue
+ * keeps the grey not-planned circle-slash.
  */
 function StateIndicator({
   state,

@@ -17,7 +17,7 @@ export async function DashboardEntry({
 
   if (!session) {
     return (
-      <main className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-b from-[#04210f] to-[#020a04] text-white">
+      <main className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-b from-[#04210f] to-black text-white">
         <div className="flex flex-col items-center gap-8">
           <div className="flex flex-col items-center gap-4">
             <BandolierIcon className="h-16 w-16 text-purple-300" />

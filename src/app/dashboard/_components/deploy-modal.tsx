@@ -167,7 +167,7 @@ export function DeployModal({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-lg overflow-hidden rounded-xl border border-white/20 bg-[#020a04]"
+        className="w-full max-w-lg overflow-hidden rounded-xl border border-white/20 bg-[#0a2014]"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">

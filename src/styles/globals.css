@@ -63,7 +63,24 @@ html {
 }
 
 body {
-  /* Jet black base, like a powered-down CRT, so the phosphor-green text glows. */
+  /* Plain jet black base, like a powered-down CRT, so the phosphor-green text
+     glows. No gradient — the only lighting is the CRT edge glow below. */
   background-color: #000000;
   color: var(--color-purple-300);
+}
+
+/*
+ * Subtle CRT glow hugging the edge of the viewport. A fixed, non-interactive
+ * overlay paints a soft phosphor-green halo just inside the border using inset
+ * box-shadows, mimicking the way light bleeds from the edges of a CRT tube.
+ */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  box-shadow:
+    inset 0 0 60px 4px rgba(56, 226, 113, 0.12),
+    inset 0 0 160px 20px rgba(56, 226, 113, 0.06);
 }

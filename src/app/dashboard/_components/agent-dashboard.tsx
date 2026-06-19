@@ -222,7 +222,7 @@ export function AgentDashboard({
   );
 
   return (
-    <div className="flex min-h-screen flex-col bg-gradient-to-b from-[#04210f] to-[#020a04] text-white">
+    <div className="flex min-h-screen flex-col bg-gradient-to-b from-[#04210f] to-black text-white">
       {/* Header */}
       <header className="border-b border-white/10 px-4 py-3 sm:px-6 sm:py-4">
         {/* A single row at every width. The hamburger sits far left. The
@@ -271,7 +271,7 @@ export function AgentDashboard({
                 />
                 <div
                   role="menu"
-                  className="absolute left-0 z-20 mt-2 w-56 origin-top-left rounded-xl border border-white/10 bg-[#06180d] p-2 shadow-xl"
+                  className="absolute left-0 z-20 mt-2 w-56 origin-top-left rounded-xl border border-white/10 bg-[#0a2014] p-2 shadow-xl"
                 >
                   <div className="flex items-center gap-2 border-b border-white/10 px-2 pb-2">
                     {user.image && (

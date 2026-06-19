@@ -3,7 +3,7 @@ import { ImageResponse } from "next/og";
 import { bandolierDataUri } from "./bandolier";
 
 // Brand background shared with the favicon (src/app/icon.svg) and apple-icon.
-const BACKGROUND = "#020a04";
+const BACKGROUND = "#000000";
 
 /**
  * Renders a square PWA icon: the bandolier glyph centered on the brand

@@ -113,7 +113,7 @@ export function PullToRefresh() {
       className="pointer-events-none fixed inset-x-0 top-0 z-50 flex justify-center"
       style={{ transform: `translateY(${offset - 44}px)` }}
     >
-      <div className="mt-[max(0.5rem,env(safe-area-inset-top))] flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-[#020a04]/95 text-white shadow-lg backdrop-blur">
+      <div className="mt-[max(0.5rem,env(safe-area-inset-top))] flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-[#0a2014]/95 text-white shadow-lg backdrop-blur">
         <svg
           viewBox="0 0 24 24"
           fill="none"

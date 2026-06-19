@@ -17,9 +17,9 @@ export default function OpengraphImage() {
         alignItems: "center",
         justifyContent: "center",
         gap: 32,
-        background: "linear-gradient(to bottom, #2e026d, #15162c)",
-        color: "white",
-        fontFamily: "sans-serif",
+        background: "linear-gradient(to bottom, #04210f, #020a04)",
+        color: "#5cf58c",
+        fontFamily: "monospace",
       }}
     >
       <img src={bandolierDataUri} width={180} height={180} alt="" />
@@ -36,7 +36,7 @@ export default function OpengraphImage() {
         >
           Bandolier
         </div>
-        <div style={{ fontSize: 32, color: "rgba(255,255,255,0.55)" }}>
+        <div style={{ fontSize: 32, color: "rgba(92,245,140,0.6)" }}>
           Claude agent monitoring &amp; deployment
         </div>
       </div>

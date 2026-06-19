@@ -222,7 +222,7 @@ export function AgentDashboard({
   );
 
   return (
-    <div className="flex min-h-screen flex-col bg-gradient-to-b from-[#04210f] to-black text-white">
+    <div className="flex min-h-screen flex-col bg-black text-white">
       {/* Header */}
       <header className="border-b border-white/10 px-4 py-3 sm:px-6 sm:py-4">
         {/* A single row at every width. The hamburger sits far left. The

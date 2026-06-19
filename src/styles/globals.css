@@ -63,6 +63,7 @@ html {
 }
 
 body {
-  background-color: #020a04;
+  /* Jet black base, like a powered-down CRT, so the phosphor-green text glows. */
+  background-color: #000000;
   color: var(--color-purple-300);
 }

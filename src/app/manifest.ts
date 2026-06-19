@@ -1,7 +1,7 @@
 import { type MetadataRoute } from "next";
 
 // Brand colors shared with the favicon (src/app/icon.svg) and apple-icon.
-const BACKGROUND = "#020a04";
+const BACKGROUND = "#000000";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {

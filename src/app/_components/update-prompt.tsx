@@ -141,7 +141,7 @@ export function UpdatePrompt() {
 
   return (
     <div className="fixed inset-x-0 bottom-0 z-50 flex justify-center px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-      <div className="flex w-full max-w-md items-center gap-3 rounded-xl border border-white/10 bg-[#020a04]/95 px-4 py-3 text-sm text-white shadow-lg backdrop-blur">
+      <div className="flex w-full max-w-md items-center gap-3 rounded-xl border border-white/10 bg-[#0a2014]/95 px-4 py-3 text-sm text-white shadow-lg backdrop-blur">
         <svg
           viewBox="0 0 24 24"
           fill="none"

@@ -194,7 +194,7 @@ export function LogModal({
       onClick={onClose}
     >
       <div
-        className="flex h-[80vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-white/20 bg-[#0a0a1a]"
+        className="flex h-[80vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-white/20 bg-[#020a04]"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -293,7 +293,7 @@ export function LogModal({
           {!pinned && (
             <button
               onClick={jumpToLatest}
-              className="absolute right-4 bottom-4 flex items-center gap-1 rounded-full border border-white/15 bg-[#1a1a30] px-3 py-1.5 text-xs text-white/80 shadow-lg hover:bg-[#24244a]"
+              className="absolute right-4 bottom-4 flex items-center gap-1 rounded-full border border-white/15 bg-[#0a2414] px-3 py-1.5 text-xs text-white/80 shadow-lg hover:bg-[#0f3a1f]"
             >
               <svg
                 viewBox="0 0 16 16"

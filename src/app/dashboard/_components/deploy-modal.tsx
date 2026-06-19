@@ -167,7 +167,7 @@ export function DeployModal({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-lg overflow-hidden rounded-xl border border-white/20 bg-[#0a0a1a]"
+        className="w-full max-w-lg overflow-hidden rounded-xl border border-white/20 bg-[#020a04]"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
@@ -246,7 +246,7 @@ export function DeployModal({
                     </button>
                     {showContext && (
                       <div className="absolute top-full right-0 left-0 z-30 mt-1">
-                        <div className="max-h-72 overflow-auto rounded-lg border border-white/10 bg-[#0d0d20] p-3 shadow-2xl">
+                        <div className="max-h-72 overflow-auto rounded-lg border border-white/10 bg-[#04120a] p-3 shadow-2xl">
                           <p className="mb-1.5 text-[10px] font-medium tracking-wider text-white/40 uppercase">
                             System prompt
                           </p>
@@ -518,7 +518,7 @@ export function DeployModal({
                 !effectiveModel ||
                 (!hasIssue && !task.trim())
               }
-              className="rounded-lg bg-purple-600 px-4 py-2 text-sm font-medium hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-lg bg-purple-600 px-4 py-2 text-sm font-medium text-black hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {deploy.isPending ? "Deploying…" : "Deploy"}
             </button>

@@ -1,6 +1,68 @@
 @import "tailwindcss";
 
+/*
+ * Old-school computer terminal theme: black background, phosphor-green text.
+ *
+ * The app was originally purple/gray. Rather than touch every component, we
+ * remap the Tailwind color tokens those components already use (purple, sky,
+ * gray, and white) onto a green CRT palette. A handful of hardcoded hex
+ * backgrounds are updated in the components themselves.
+ */
 @theme {
-  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif,
-    "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  /* Monospaced everywhere for the terminal feel. */
+  --font-sans:
+    var(--font-geist-sans), ui-monospace, SFMono-Regular, Menlo, Consolas,
+    "Liberation Mono", monospace;
+
+  /* "white" is used for text, borders, and translucent surfaces throughout the
+     app. Mapping it to a light phosphor green tints all of it green at once. */
+  --color-white: #c6ffd6;
+
+  /* Neutral grays become dark green-tinted charcoals. */
+  --color-gray-50: #eafff0;
+  --color-gray-100: #c6ffd6;
+  --color-gray-200: #9bf5b6;
+  --color-gray-300: #74e89a;
+  --color-gray-400: #4cba74;
+  --color-gray-500: #2f8a52;
+  --color-gray-600: #1f5e38;
+  --color-gray-700: #143f26;
+  --color-gray-800: #0c2718;
+  --color-gray-900: #07160e;
+  --color-gray-950: #040b07;
+
+  /* The purple brand/accent scale becomes the primary phosphor-green scale. */
+  --color-purple-50: #eaffef;
+  --color-purple-100: #c9ffd6;
+  --color-purple-200: #9bffb6;
+  --color-purple-300: #5cf58c;
+  --color-purple-400: #38e271;
+  --color-purple-500: #1fc65a;
+  --color-purple-600: #16a34a;
+  --color-purple-700: #11823b;
+  --color-purple-800: #0d5f2c;
+  --color-purple-900: #08401e;
+
+  /* Secondary "sky" accents fold into a slightly teal-leaning green so they
+     stay distinct from the primary green without leaving the palette. */
+  --color-sky-200: #b6ffe0;
+  --color-sky-300: #6cf2c4;
+  --color-sky-500: #18c98f;
+  --color-sky-600: #11a877;
+
+  /* "blue" accents (status badges, GitHub App sections) become a deeper,
+     slightly teal green so they stay readable against the black background. */
+  --color-blue-300: #58e6a6;
+  --color-blue-400: #34d68d;
+  --color-blue-500: #15b673;
+  --color-blue-600: #0e9760;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background-color: #020a04;
+  color: var(--color-purple-300);
 }

@@ -13,7 +13,7 @@ const title = "Bandolier";
 const description = "Claude agent monitoring & deployment on Kubernetes";
 
 // Brand background, shared with the manifest and icons.
-const THEME_COLOR = "#15162c";
+const THEME_COLOR = "#020a04";
 
 export const viewport: Viewport = {
   themeColor: THEME_COLOR,

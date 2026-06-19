@@ -18,10 +18,11 @@ function CredFeedback({
   if (!error && !ok) return null;
   return (
     <p
-      className={`rounded-lg border px-3 py-2 text-xs ${error
-        ? "border-red-500/30 bg-red-500/10 text-red-400"
-        : "border-green-500/30 bg-green-500/10 text-green-300"
-        }`}
+      className={`rounded-lg border px-3 py-2 text-xs ${
+        error
+          ? "border-red-500/30 bg-red-500/10 text-red-400"
+          : "border-green-500/30 bg-green-500/10 text-green-300"
+      }`}
     >
       {error ?? ok}
     </p>
@@ -90,7 +91,7 @@ function RepoAnthropicSection({
           <button
             type="submit"
             disabled={save.isPending || !apiKey}
-            className="rounded-lg bg-purple-600 px-3 py-2 text-sm font-medium hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-lg bg-purple-600 px-3 py-2 text-sm font-medium text-black hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {save.isPending ? "Verifying…" : "Save"}
           </button>
@@ -251,7 +252,7 @@ function RepoGeminiSection({
             <button
               type="submit"
               disabled={save.isPending || !credentials}
-              className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-black hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {save.isPending ? "Verifying…" : "Save"}
             </button>
@@ -465,7 +466,7 @@ function RepoKubeconfigSection({
             <button
               type="submit"
               disabled={save.isPending || !kubeconfig}
-              className="rounded-lg bg-sky-600 px-3 py-2 text-sm font-medium hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-lg bg-sky-600 px-3 py-2 text-sm font-medium text-black hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {save.isPending ? "Verifying…" : "Save & verify"}
             </button>
@@ -615,10 +616,11 @@ function RepoCredentialsSection({ repoFullName }: { repoFullName: string }) {
                   setPrefer.mutate({ repoFullName, prefer: false })
                 }
                 disabled={setPrefer.isPending}
-                className={`flex-1 rounded-lg border px-3 py-2 text-xs font-medium disabled:opacity-50 ${!creds?.preferRepoCredentials
-                  ? "border-purple-500/50 bg-purple-500/15 text-purple-200"
-                  : "border-white/10 bg-white/5 text-white/60 hover:bg-white/10"
-                  }`}
+                className={`flex-1 rounded-lg border px-3 py-2 text-xs font-medium disabled:opacity-50 ${
+                  !creds?.preferRepoCredentials
+                    ? "border-purple-500/50 bg-purple-500/15 text-purple-200"
+                    : "border-white/10 bg-white/5 text-white/60 hover:bg-white/10"
+                }`}
               >
                 Prefer user credentials
               </button>
@@ -626,10 +628,11 @@ function RepoCredentialsSection({ repoFullName }: { repoFullName: string }) {
                 type="button"
                 onClick={() => setPrefer.mutate({ repoFullName, prefer: true })}
                 disabled={setPrefer.isPending}
-                className={`flex-1 rounded-lg border px-3 py-2 text-xs font-medium disabled:opacity-50 ${creds?.preferRepoCredentials
-                  ? "border-purple-500/50 bg-purple-500/15 text-purple-200"
-                  : "border-white/10 bg-white/5 text-white/60 hover:bg-white/10"
-                  }`}
+                className={`flex-1 rounded-lg border px-3 py-2 text-xs font-medium disabled:opacity-50 ${
+                  creds?.preferRepoCredentials
+                    ? "border-purple-500/50 bg-purple-500/15 text-purple-200"
+                    : "border-white/10 bg-white/5 text-white/60 hover:bg-white/10"
+                }`}
               >
                 Prefer repo credentials
               </button>
@@ -693,7 +696,7 @@ export function RepoConfigModal({
       onClick={onClose}
     >
       <div
-        className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-xl border border-white/20 bg-[#0a0a1a]"
+        className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-xl border border-white/20 bg-[#020a04]"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
@@ -739,7 +742,7 @@ export function RepoConfigModal({
                 href={installUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 rounded-lg bg-purple-600 px-3 py-2 text-sm font-medium text-white hover:bg-purple-500"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-purple-600 px-3 py-2 text-sm font-medium text-black hover:bg-purple-500"
               >
                 Install or configure on GitHub
               </a>
@@ -816,7 +819,7 @@ export function RepoConfigModal({
               <button
                 type="submit"
                 disabled={save.isPending}
-                className="rounded-lg bg-purple-600 px-3 py-2 text-sm font-medium hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded-lg bg-purple-600 px-3 py-2 text-sm font-medium text-black hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {save.isPending ? "Saving…" : "Save settings"}
               </button>

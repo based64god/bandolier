@@ -215,14 +215,14 @@ export function AgentDashboard({
     <button
       onClick={() => setShowDeploy(true)}
       disabled={!selectedRepo || !kubeConfigured}
-      className="rounded-lg bg-purple-600 px-3 py-1.5 text-sm font-medium hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-40"
+      className="rounded-lg bg-purple-600 px-3 py-1.5 text-sm font-medium text-black hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-40"
     >
       +<span className="hidden sm:inline"> Deploy Agent</span>
     </button>
   );
 
   return (
-    <div className="flex min-h-screen flex-col bg-gradient-to-b from-[#2e026d] to-[#15162c] text-white">
+    <div className="flex min-h-screen flex-col bg-gradient-to-b from-[#04210f] to-[#020a04] text-white">
       {/* Header */}
       <header className="border-b border-white/10 px-4 py-3 sm:px-6 sm:py-4">
         {/* A single row at every width. The hamburger sits far left. The
@@ -271,7 +271,7 @@ export function AgentDashboard({
                 />
                 <div
                   role="menu"
-                  className="absolute left-0 z-20 mt-2 w-56 origin-top-left rounded-xl border border-white/10 bg-[#1b1340] p-2 shadow-xl"
+                  className="absolute left-0 z-20 mt-2 w-56 origin-top-left rounded-xl border border-white/10 bg-[#06180d] p-2 shadow-xl"
                 >
                   <div className="flex items-center gap-2 border-b border-white/10 px-2 pb-2">
                     {user.image && (
@@ -493,7 +493,7 @@ export function AgentDashboard({
             </div>
             <button
               onClick={() => setShowSettings(true)}
-              className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium hover:bg-sky-500"
+              className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-black hover:bg-sky-500"
             >
               Configure kubeconfig
             </button>

@@ -1,12 +1,18 @@
 // Shared presentation helpers for agent tables (per-repo view + overview panel).
 
 export const STATUS_STYLES: Record<string, string> = {
-  Running: "border-green-500/40 bg-green-500/20 text-green-300",
+  // Classic palette: a running agent is blue (in-flight), a finished one green.
+  Running: "border-blue-500/40 bg-blue-500/20 text-blue-300",
   Pending: "border-yellow-500/40 bg-yellow-500/20 text-yellow-300",
   Failed: "border-red-500/40 bg-red-500/20 text-red-300",
-  Succeeded: "border-blue-500/40 bg-blue-500/20 text-blue-300",
+  Succeeded: "border-green-500/40 bg-green-500/20 text-green-300",
   Unknown: "border-gray-500/40 bg-gray-500/20 text-gray-400",
 };
+
+// Statuses that read better as motion than a static glyph. An in-flight agent
+// renders as a small spinner (the old blue "Running" pill) so the activity is
+// visible at a glance; everything else keeps its fixed icon.
+export const SPINNER_STATUSES = new Set(["Running"]);
 
 // Single-path glyphs (Heroicons mini, 20×20 viewBox, fill-rule evenodd) that
 // mirror each status. They let the status pill collapse from text to comparable

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   expiresAtLocal,
   isAgentDone,
+  SPINNER_STATUSES,
   STATUS_ICON_PATHS,
   STATUS_STYLES,
 } from "~/app/dashboard/_components/agent-ui";
@@ -75,6 +76,18 @@ describe("STATUS_ICON_PATHS", () => {
     // The badge falls back to the Unknown glyph for statuses it doesn't know.
     expect(STATUS_ICON_PATHS.Unknown).toBeTruthy();
     expect(STATUS_ICON_PATHS.Sideways).toBe(undefined);
+  });
+});
+
+describe("SPINNER_STATUSES", () => {
+  it("spins the in-flight Running status", () => {
+    expect(SPINNER_STATUSES.has("Running")).toBe(true);
+  });
+
+  it("leaves terminal and unknown statuses as static glyphs", () => {
+    for (const status of ["Pending", "Failed", "Succeeded", "Unknown"]) {
+      expect(SPINNER_STATUSES.has(status)).toBe(false);
+    }
   });
 });
 

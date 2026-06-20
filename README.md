@@ -142,7 +142,9 @@ To have agents launch automatically when issues are opened, install the Bandolie
 
 When an issue is opened, Bandolier verifies the App's signature, finds the Bandolier user linked to the GitHub account that opened it, and deploys an agent under that user's credentials — so clone/push and the resulting PR are attributed to the issue author. The "Bando picked up this issue…" comment is posted by the App itself (as `bandolier[bot]`), not the user.
 
-Optional env knobs: `GITHUB_TRIGGER_LABEL` (only act on issues carrying a specific label) and, per repo, a trigger phrase that issue text must contain (set in the repo-config UI). `BANDOLIER_GITHUB_TOKEN` is a deprecated fallback used for the bot comment only when the App is not configured.
+The "Bando picked up this issue…" comment is posted exclusively via the App installation token, so it is always attributed to `bandolier[bot]`. On a repo where the App isn't installed there's no bot identity to comment as, so the comment is skipped rather than posted under a user or service token.
+
+Optional env knobs: `GITHUB_TRIGGER_LABEL` (only act on issues carrying a specific label) and, per repo, a trigger phrase that issue text must contain (set in the repo-config UI).
 
 ---
 
@@ -202,7 +204,6 @@ The harness image (`ghcr.io/based64god/bandolier-agent-harness:latest`, always p
 | `NEXT_PUBLIC_GITHUB_APP_SLUG`                       | The App's public slug, used to link the repo-config UI to its install page.                                                                                                |
 | `GITHUB_WEBHOOK_SECRET`                             | Secret for verifying webhook signatures. With the GitHub App, set this to the App's webhook secret (delivery is app-level — there are no per-repo secrets).                |
 | `GITHUB_TRIGGER_LABEL`                              | If set, only act on issues that carry this label.                                                                                                                          |
-| `BANDOLIER_GITHUB_TOKEN`                            | **Deprecated** — superseded by the GitHub App. OAuth/PAT for a dedicated bot user, used for the "Bando picked up this issue…" comment only when the App is not configured. |
 
 ### Access gate (optional)
 

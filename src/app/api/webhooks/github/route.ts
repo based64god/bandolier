@@ -353,13 +353,15 @@ async function handleIssueOpened(
   });
 
   // Notify the issue author that the task was received and is being worked on.
-  // This is a bot-voice action, so prefer the GitHub App installation token
-  // (comment is attributed to bandolier[bot]); fall back to the legacy service
-  // user PAT, then to the triggering user's token, for deployments without the
-  // App installed.
-  const botToken = await getRepoBotToken(db, repository.full_name, Date.now());
-  const commentToken =
-    botToken ?? env.BANDOLIER_GITHUB_TOKEN ?? linked.accessToken;
+  // This is a bot-voice action, so it is only ever posted via the GitHub App
+  // installation token (the comment is attributed to bandolier[bot]). When the
+  // App isn't installed on the repo there's no bot identity to comment as, so
+  // the notification is skipped rather than posted under a user/service PAT.
+  const commentToken = await getRepoBotToken(
+    db,
+    repository.full_name,
+    Date.now(),
+  );
   if (commentToken) {
     const taskUrl = `${env.BETTER_AUTH_URL}/repo/${repository.full_name}`;
     const commentBody =

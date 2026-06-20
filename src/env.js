@@ -50,10 +50,6 @@ export const env = createEnv({
     GITHUB_APP_PRIVATE_KEY: z.string().optional(),
     GITHUB_APP_CLIENT_ID: z.string().optional(),
     GITHUB_APP_CLIENT_SECRET: z.string().optional(),
-    // DEPRECATED: superseded by the GitHub App above. When the App is configured,
-    // bot comments are posted as the App installation and this is ignored. Kept
-    // as a fallback so deployments without the App configured keep working.
-    BANDOLIER_GITHUB_TOKEN: z.string().optional(),
     // Optional shared password gate in front of the whole app (UI + API). When
     // set, visitors must enter it before reaching anything (the GitHub webhook
     // is exempt — it authenticates via signature). Unset = gate disabled.
@@ -101,7 +97,6 @@ export const env = createEnv({
     GITHUB_APP_PRIVATE_KEY: process.env.GITHUB_APP_PRIVATE_KEY,
     GITHUB_APP_CLIENT_ID: process.env.GITHUB_APP_CLIENT_ID,
     GITHUB_APP_CLIENT_SECRET: process.env.GITHUB_APP_CLIENT_SECRET,
-    BANDOLIER_GITHUB_TOKEN: process.env.BANDOLIER_GITHUB_TOKEN,
     APP_PASSWORD: process.env.APP_PASSWORD,
     ARTIFACTS_S3_BUCKET: process.env.ARTIFACTS_S3_BUCKET,
     ARTIFACTS_S3_REGION: process.env.ARTIFACTS_S3_REGION,

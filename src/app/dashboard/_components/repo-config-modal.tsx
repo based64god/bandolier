@@ -739,7 +739,7 @@ export function RepoConfigModal({
             </p>
             {installUrl ? (
               <a
-                href={installUrl}
+                href="https://github.com/apps/bandolier-dev"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-1.5 rounded-lg bg-purple-600 px-3 py-2 text-sm font-medium text-black hover:bg-purple-500"

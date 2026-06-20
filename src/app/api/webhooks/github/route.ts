@@ -353,22 +353,21 @@ async function handleIssueOpened(
   });
 
   // Notify the issue author that the task was received and is being worked on.
-  // This is a bot-voice action, so prefer the GitHub App installation token
-  // (comment is attributed to bandolier[bot]); fall back to the legacy service
-  // user PAT, then to the triggering user's token. The fallback runs on a failed
-  // post too, not just an absent token — an App installation that can't comment
-  // (e.g. missing Issues:write) must not silently swallow the acknowledgement.
+  // This is a bot-voice comment ("🤖 Bando picked up this issue…"), so it must
+  // only ever be posted by the bot itself — exclusively the GitHub App
+  // installation token, attributed to bandolier[bot]. We deliberately do NOT
+  // fall back to the legacy service-user PAT or the triggering user's OAuth
+  // token: a comment that speaks in the bot's voice but is attributed to a human
+  // (or a generic service user) is misleading. On a repo with no App
+  // installation there's no bot identity to comment as, so we skip the comment
+  // rather than post it under another credential.
   const botToken = await getRepoBotToken(db, repository.full_name, Date.now());
   const taskUrl = `${env.BETTER_AUTH_URL}/repo/${repository.full_name}`;
   const commentBody =
     `🤖 Bando picked up this issue and is working on it.\n\n` +
     `[View task on the dashboard](${taskUrl}) (job: \`${jobName}\`)`;
   const postedBy = await postIssueCommentWithFallback(
-    [
-      { token: botToken, source: "app-installation" },
-      { token: env.BANDOLIER_GITHUB_TOKEN, source: "legacy-pat" },
-      { token: linked.accessToken, source: "user-oauth" },
-    ],
+    [{ token: botToken, source: "app-installation" }],
     repository.full_name,
     issue.number,
     commentBody,

@@ -180,11 +180,13 @@ export interface CommentTokenCandidate {
 
 /**
  * Posts an issue comment, trying each candidate token in order until one
- * succeeds. Bot-voice callers pass [installation token, legacy PAT, user OAuth]:
- * the App token is preferred so the comment is attributed to bandolier[bot], but
- * a failure (typically the App installation lacking Issues:write) must NOT
- * swallow the comment — we fall back to a token that can post, which restores
- * the pre-App behavior. Each failed attempt is logged so a misconfigured App is
+ * succeeds. Bot-voice callers ("🤖 Bando picked up this issue…") pass only the
+ * GitHub App installation token, so the comment is always attributed to
+ * bandolier[bot] and never to a human or a generic service user — a message that
+ * speaks in the bot's voice but is attributed to anyone else is misleading. When
+ * the App installation can't post (e.g. it isn't installed, or lacks
+ * Issues:write), the comment is skipped rather than posted under another
+ * credential. Each failed attempt is logged so a misconfigured App is
  * diagnosable. Returns the source that succeeded, or null if none could post.
  */
 export async function postIssueCommentWithFallback(

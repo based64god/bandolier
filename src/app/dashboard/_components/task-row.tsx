@@ -110,7 +110,7 @@ export function TaskRow({
         onClick={(e) => e.stopPropagation()}
       >
         {confirmKill ? (
-          <span className="flex flex-wrap items-center justify-end gap-1">
+          <span className="flex flex-nowrap items-center justify-end gap-1 whitespace-nowrap">
             <button
               onClick={() =>
                 terminate.mutate({

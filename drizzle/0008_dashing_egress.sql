@@ -1,0 +1,2 @@
+ALTER TABLE "repo_webhook_config" ADD COLUMN "allow_public_egress" boolean DEFAULT true NOT NULL;--> statement-breakpoint
+ALTER TABLE "repo_webhook_config" ADD COLUMN "allow_private_egress" boolean DEFAULT false NOT NULL;

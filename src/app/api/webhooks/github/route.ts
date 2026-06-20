@@ -3,7 +3,7 @@ import { type NextRequest, NextResponse } from "next/server";
 
 import { env } from "~/env";
 import { validateAwsCredentials } from "~/server/agents/aws";
-import { createAgentJob } from "~/server/agents/create-job";
+import { createAgentJob, type EgressPolicy } from "~/server/agents/create-job";
 import {
   getRepoBotToken,
   removeInstallation,
@@ -127,6 +127,7 @@ async function handleIssueOpened(
   prefix: string | null,
   agentImage: string | null,
   defaultModel: string | null,
+  egress: EgressPolicy,
 ): Promise<void> {
   const { issue, repository, sender } = payload;
 
@@ -350,6 +351,7 @@ async function handleIssueOpened(
     geminiApiKey: geminiApiKey ?? undefined,
     kubeconfig,
     agentImage: agentImage ?? undefined,
+    egress,
   });
 
   // Notify the issue author that the task was received and is being worked on.
@@ -477,6 +479,10 @@ export async function POST(req: NextRequest) {
         repoConfig?.prefix ?? null,
         repoConfig?.agentImage ?? null,
         repoConfig?.defaultWebhookModel ?? null,
+        {
+          allowPublicEgress: repoConfig?.allowPublicEgress ?? true,
+          allowPrivateEgress: repoConfig?.allowPrivateEgress ?? false,
+        },
       );
     } else if (event === "installation") {
       // App installed/uninstalled, or repos added/removed for an installation.

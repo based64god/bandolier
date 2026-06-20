@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 
 import { type AwsCredentials } from "~/server/agents/aws";
+import { type EgressPolicy } from "~/server/agents/create-job";
 import { type db } from "~/server/db";
 import { repoWebhookConfig } from "~/server/db/schema";
 
@@ -11,6 +12,10 @@ export interface RepoWebhookConfig {
   agentImage: string | null;
   /** Default model id for webhook-triggered agents; null means provider default. */
   defaultWebhookModel: string | null;
+  /** Whether agents may reach the public internet (model providers, GitHub). */
+  allowPublicEgress: boolean;
+  /** SECURITY: whether agents may reach the cluster's own private ranges. */
+  allowPrivateEgress: boolean;
 }
 
 /**
@@ -81,6 +86,8 @@ export async function getRepoWebhookConfig(
       prefix: repoWebhookConfig.prefix,
       agentImage: repoWebhookConfig.agentImage,
       defaultWebhookModel: repoWebhookConfig.defaultWebhookModel,
+      allowPublicEgress: repoWebhookConfig.allowPublicEgress,
+      allowPrivateEgress: repoWebhookConfig.allowPrivateEgress,
     })
     .from(repoWebhookConfig)
     .where(eq(repoWebhookConfig.repoFullName, repoFullName))
@@ -90,6 +97,31 @@ export async function getRepoWebhookConfig(
     prefix: row.prefix ?? null,
     agentImage: row.agentImage ?? null,
     defaultWebhookModel: row.defaultWebhookModel ?? null,
+    allowPublicEgress: row.allowPublicEgress,
+    allowPrivateEgress: row.allowPrivateEgress,
+  };
+}
+
+/**
+ * A repo's network-policy egress toggles, used to parameterize the agent
+ * isolation NetworkPolicy at deploy time. Falls back to the safe baseline
+ * (public allowed, private blocked) when the repo has no config row.
+ */
+export async function getRepoEgressPolicy(
+  database: typeof db,
+  repoFullName: string,
+): Promise<EgressPolicy> {
+  const [row] = await database
+    .select({
+      allowPublicEgress: repoWebhookConfig.allowPublicEgress,
+      allowPrivateEgress: repoWebhookConfig.allowPrivateEgress,
+    })
+    .from(repoWebhookConfig)
+    .where(eq(repoWebhookConfig.repoFullName, repoFullName))
+    .limit(1);
+  return {
+    allowPublicEgress: row?.allowPublicEgress ?? true,
+    allowPrivateEgress: row?.allowPrivateEgress ?? false,
   };
 }
 

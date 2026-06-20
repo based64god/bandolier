@@ -80,6 +80,8 @@ export const webhooksRouter = createTRPCRouter({
           prefix: repoWebhookConfig.prefix,
           agentImage: repoWebhookConfig.agentImage,
           defaultWebhookModel: repoWebhookConfig.defaultWebhookModel,
+          allowPublicEgress: repoWebhookConfig.allowPublicEgress,
+          allowPrivateEgress: repoWebhookConfig.allowPrivateEgress,
         })
         .from(repoWebhookConfig)
         .where(eq(repoWebhookConfig.repoFullName, input.repoFullName))
@@ -91,6 +93,10 @@ export const webhooksRouter = createTRPCRouter({
         prefix: row?.prefix ?? "",
         agentImage: row?.agentImage ?? "",
         defaultWebhookModel: row?.defaultWebhookModel ?? null,
+        // Network-policy egress toggles, defaulting to the safe baseline when no
+        // row exists (public allowed, private blocked).
+        allowPublicEgress: row?.allowPublicEgress ?? true,
+        allowPrivateEgress: row?.allowPrivateEgress ?? false,
       };
     }),
 
@@ -135,6 +141,28 @@ export const webhooksRouter = createTRPCRouter({
       const value = input.model.trim() ? input.model.trim() : null;
       await upsertRepoConfig(ctx.db, input.repoFullName, ctx.session.user.id, {
         defaultWebhookModel: value,
+      });
+      return { success: true };
+    }),
+
+  // Per-repo network-policy egress toggles. These tune the agent-isolation
+  // NetworkPolicy applied to the repo's namespace on the next deploy. Admin-only.
+  // SECURITY: `allowPrivateEgress` lets untrusted, model-driven agent code reach
+  // the cluster's own private ranges (in-cluster services, metadata endpoints,
+  // the Kubernetes API). The UI surfaces a prominent warning before it's enabled.
+  setEgressPolicy: protectedProcedure
+    .input(
+      z.object({
+        repoFullName: z.string().min(1),
+        allowPublicEgress: z.boolean(),
+        allowPrivateEgress: z.boolean(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await requireRepoAdmin(ctx, input.repoFullName);
+      await upsertRepoConfig(ctx.db, input.repoFullName, ctx.session.user.id, {
+        allowPublicEgress: input.allowPublicEgress,
+        allowPrivateEgress: input.allowPrivateEgress,
       });
       return { success: true };
     }),

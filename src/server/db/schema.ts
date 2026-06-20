@@ -164,6 +164,25 @@ export const repoWebhookConfig = pgTable("repo_webhook_config", {
   // Null = fall back to the provider's default. An issue's `model:<query>` label
   // overrides this per issue.
   defaultWebhookModel: text("default_webhook_model"),
+  // ── Network policy egress toggles (per repo) ──────────────────────────────
+  // These tune the egress rules of the per-namespace NetworkPolicy that isolates
+  // this repo's agent pods (see ensureNetworkPolicy). They only take effect when
+  // the server-wide AGENT_NETWORK_POLICY is enabled and the cluster runs a
+  // policy-enforcing CNI (Calico/Cilium).
+  //
+  // Whether agents may reach the public internet (model providers, GitHub).
+  // True (default) keeps the standard egress allowance; false confines an agent
+  // to DNS only, with no outbound HTTP(S).
+  allowPublicEgress: boolean("allow_public_egress").notNull().default(true),
+  // SECURITY: whether agents may reach the cluster's own private ranges (the
+  // CIDRs in AGENT_EGRESS_BLOCKED_CIDRS — pod/service networks, node IPs,
+  // in-cluster services). False (default) keeps them blocked, preventing lateral
+  // movement. Setting this true lets an agent — running untrusted, model-driven
+  // code — reach internal services (metadata endpoints, databases, the
+  // Kubernetes API), so only enable it for repos that genuinely need in-cluster
+  // access and whose agents you trust accordingly. The repo config UI surfaces a
+  // prominent warning before this can be turned on.
+  allowPrivateEgress: boolean("allow_private_egress").notNull().default(false),
   // ── Repo-scoped credentials (admin-only) ──────────────────────────────────
   // Shared infrastructure for everyone working on this repo: a kubeconfig the
   // repo's agents run on and model credentials they authenticate with. Only a

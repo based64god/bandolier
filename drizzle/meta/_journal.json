@@ -57,6 +57,13 @@
       "when": 1781741876386,
       "tag": "0007_left_gabe_jones",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1781741976386,
+      "tag": "0008_dashing_egress",
+      "breakpoints": true
     }
   ]
 }

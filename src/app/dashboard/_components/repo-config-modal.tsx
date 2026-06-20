@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 
 import { env } from "~/env";
 import { api } from "~/trpc/react";
@@ -537,6 +537,141 @@ function RepoDefaultModelSection({ repoFullName }: { repoFullName: string }) {
   );
 }
 
+// A labelled on/off toggle. Saving is driven by the parent.
+function ToggleRow({
+  label,
+  description,
+  enabled,
+  onToggle,
+  disabled,
+  danger,
+}: {
+  label: string;
+  description: ReactNode;
+  enabled: boolean;
+  onToggle: (next: boolean) => void;
+  disabled?: boolean;
+  danger?: boolean;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-3">
+      <div className="min-w-0 space-y-0.5">
+        <p className="text-xs font-medium text-white/70">{label}</p>
+        <p className="text-xs text-white/40">{description}</p>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={enabled}
+        disabled={disabled}
+        onClick={() => onToggle(!enabled)}
+        className={`relative mt-0.5 h-5 w-9 shrink-0 rounded-full transition-colors disabled:opacity-50 ${
+          enabled ? (danger ? "bg-amber-500" : "bg-purple-600") : "bg-white/15"
+        }`}
+      >
+        <span
+          className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform ${
+            enabled ? "translate-x-4" : "translate-x-0.5"
+          }`}
+        />
+      </button>
+    </div>
+  );
+}
+
+// Per-repo network-policy egress toggles. Agents run untrusted, model-driven
+// code in an isolated namespace; these control what that namespace's pods may
+// reach. Allowing private (in-cluster) egress is security-sensitive and gated
+// behind a prominent warning. Admin-only (the whole modal is gated server-side).
+function RepoEgressSection({ repoFullName }: { repoFullName: string }) {
+  const utils = api.useUtils();
+  const { data: config, isLoading } = api.webhooks.getConfig.useQuery({
+    repoFullName,
+  });
+  const [result, setResult] = useState<string | null>(null);
+
+  const save = api.webhooks.setEgressPolicy.useMutation({
+    onSuccess: () => {
+      void utils.webhooks.getConfig.invalidate({ repoFullName });
+      setResult("Saved ✓ — applies on this repo's next agent run.");
+    },
+  });
+
+  const allowPublic = config?.allowPublicEgress ?? true;
+  const allowPrivate = config?.allowPrivateEgress ?? false;
+
+  // Send the full pair so neither toggle clobbers the other.
+  function update(next: { public?: boolean; private?: boolean }) {
+    setResult(null);
+    save.mutate({
+      repoFullName,
+      allowPublicEgress: next.public ?? allowPublic,
+      allowPrivateEgress: next.private ?? allowPrivate,
+    });
+  }
+
+  return (
+    <div className="space-y-3 border-t border-white/10 pt-5">
+      <div className="space-y-1">
+        <h3 className="text-xs font-semibold tracking-wider text-white/50 uppercase">
+          Network egress
+        </h3>
+        <p className="text-xs text-white/40">
+          What this repo&apos;s agent pods may reach over the network. Enforced
+          by the per-namespace NetworkPolicy and applied on the next agent run.
+          Requires the server-wide network policy to be enabled and a
+          policy-enforcing CNI (Calico/Cilium); otherwise these have no effect.
+        </p>
+      </div>
+
+      {isLoading ? (
+        <p className="text-xs text-white/30">Loading…</p>
+      ) : (
+        <div className="space-y-4 rounded-lg border border-white/10 bg-white/[0.03] p-3">
+          <ToggleRow
+            label="Allow public internet egress"
+            description="Outbound HTTP(S) to the public internet — needed to clone from GitHub and reach model providers. Turning this off confines agents to DNS only."
+            enabled={allowPublic}
+            onToggle={(v) => update({ public: v })}
+            disabled={save.isPending}
+          />
+
+          {/* Security warning for the in-cluster egress toggle. */}
+          <div className="space-y-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
+            <div className="flex gap-2">
+              <span aria-hidden className="text-amber-300">
+                ⚠
+              </span>
+              <p className="text-xs text-amber-200/90">
+                <span className="font-semibold">
+                  Allowing in-cluster egress is dangerous.
+                </span>{" "}
+                Agents run untrusted, model-driven code. By default they cannot
+                reach the cluster&apos;s own private ranges (other pods,
+                in-cluster services, node and metadata endpoints, the Kubernetes
+                API). Enabling this removes that barrier and opens a path to
+                lateral movement and SSRF against internal services. Only turn
+                it on for repos that genuinely need in-cluster access and whose
+                agents you trust accordingly.
+              </p>
+            </div>
+            <ToggleRow
+              label="Allow in-cluster (private) egress"
+              description="Lets agents reach the blocked private CIDRs (in-cluster services and node/metadata endpoints)."
+              enabled={allowPrivate}
+              onToggle={(v) => update({ private: v })}
+              disabled={save.isPending}
+              danger
+            />
+          </div>
+
+          <CredFeedback error={save.error?.message} ok={result} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Repo-scoped shared infrastructure: kubeconfig + model credentials, plus the
 // user-vs-repo preference toggle and a prominent security warning.
 function RepoCredentialsSection({ repoFullName }: { repoFullName: string }) {
@@ -840,6 +975,8 @@ export function RepoConfigModal({
           </p>
 
           <RepoDefaultModelSection repoFullName={repoFullName} />
+
+          <RepoEgressSection repoFullName={repoFullName} />
 
           <RepoCredentialsSection repoFullName={repoFullName} />
         </div>

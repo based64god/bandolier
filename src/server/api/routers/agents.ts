@@ -23,6 +23,7 @@ import {
 import {
   createAgentJob,
   DEFAULT_MAX_TURNS,
+  type EgressPolicy,
   JOB_TTL_SECONDS,
 } from "~/server/agents/create-job";
 import { getRepoBotToken } from "~/server/agents/github-app";
@@ -43,7 +44,10 @@ import {
   pickProvider,
   resolveModelCredentials,
 } from "~/server/agents/resolve-credentials";
-import { getRepoAgentImage } from "~/server/agents/webhook-config";
+import {
+  getRepoAgentImage,
+  getRepoEgressPolicy,
+} from "~/server/agents/webhook-config";
 import { type db } from "~/server/db";
 import { agentInput, taskRun } from "~/server/db/schema";
 import { getBatchV1Api, getCoreV1Api } from "~/server/k8s/client";
@@ -992,6 +996,9 @@ export const agentsRouter = createTRPCRouter({
         // Per-repo harness image override (falls back to DEFAULT_HARNESS_IMAGE
         // when unset). Best-effort: a lookup failure must not block the deploy.
         let agentImage: string | undefined;
+        // Per-repo network-policy egress toggles (fall back to the safe baseline
+        // when unset or on lookup failure — never widen egress on error).
+        let egress: EgressPolicy | undefined;
         if (input.repoFullName) {
           try {
             agentImage =
@@ -999,6 +1006,13 @@ export const agentsRouter = createTRPCRouter({
               undefined;
           } catch (err) {
             console.warn("[bandolier:deploy] agent image lookup failed", {
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+          try {
+            egress = await getRepoEgressPolicy(ctx.db, input.repoFullName);
+          } catch (err) {
+            console.warn("[bandolier:deploy] egress policy lookup failed", {
               error: err instanceof Error ? err.message : String(err),
             });
           }
@@ -1028,6 +1042,7 @@ export const agentsRouter = createTRPCRouter({
           geminiApiKey: geminiApiKey ?? undefined,
           kubeconfig,
           agentImage: agentImage ?? undefined,
+          egress,
           createdBy: ctx.session.user.name ?? ctx.session.user.email,
           gitName: gitIdentity.name,
           gitEmail: gitIdentity.email,

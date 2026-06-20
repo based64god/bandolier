@@ -1035,10 +1035,14 @@ export const agentsRouter = createTRPCRouter({
 
         // When a task is spawned from a GitHub issue (via the dashboard or the
         // REST API), leave a comment so the issue author knows it was received.
-        // Prefer the GitHub App installation token so it's attributed to
-        // bandolier[bot], then the legacy service-user PAT, then the deploying
-        // user's token. The fallback runs on a failed post too, not just an
-        // absent token, so an App that can't comment doesn't drop the notice.
+        // This is a bot-voice comment ("🤖 Bando picked up this issue…"), so it
+        // must only ever be posted by the bot itself — exclusively the GitHub
+        // App installation token, attributed to bandolier[bot]. We deliberately
+        // do NOT fall back to the legacy service-user PAT or the deploying
+        // user's OAuth token: a comment that speaks in the bot's voice but is
+        // attributed to a human (or a generic service user) is misleading. With
+        // no App installation there's no bot identity to comment as, so we skip
+        // the comment rather than post it under another credential.
         if (issue && input.repoFullName) {
           const botToken = await getRepoBotToken(
             ctx.db,
@@ -1050,11 +1054,7 @@ export const agentsRouter = createTRPCRouter({
             `🤖 Bando picked up this issue and is working on it.\n\n` +
             `[View task on the dashboard](${taskUrl}) (job: \`${jobName}\`)`;
           const postedBy = await postIssueCommentWithFallback(
-            [
-              { token: botToken, source: "app-installation" },
-              { token: env.BANDOLIER_GITHUB_TOKEN, source: "legacy-pat" },
-              { token: githubToken, source: "user-oauth" },
-            ],
+            [{ token: botToken, source: "app-installation" }],
             input.repoFullName,
             issue.number,
             commentBody,

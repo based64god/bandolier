@@ -81,23 +81,26 @@ body {
 }
 
 /*
- * Subtle CRT glow hugging the edge of the visible viewport. A fixed,
- * non-interactive overlay paints a soft phosphor-green halo just inside the
- * border using inset box-shadows, mimicking the way light bleeds from the edges
- * of a CRT tube.
+ * Subtle CRT glow hugging the edge of the screen. A fixed, non-interactive
+ * overlay paints a soft phosphor-green halo just inside the border using inset
+ * box-shadows, mimicking the way light bleeds from the edges of a CRT tube.
  *
  * On phones whose screen wraps around a notch / Dynamic Island / home indicator
  * (iPhones with Dynamic Island, recent Pixels) the web view runs edge-to-edge
- * under viewport-fit=cover, so the glow is inset by the safe-area insets to keep
- * it hugging the *visible* tube rather than the physical screen corners.
+ * under viewport-fit=cover. The body content is padded in by the safe-area
+ * insets (see above), but the glow deliberately paints *into* those inset
+ * regions when available: it covers the full physical screen so the phosphor
+ * halo bleeds across the entire tube — bezel surround included — rather than
+ * stopping at the visible viewport. Devices that report zero insets are
+ * unaffected since the overlay already spans edge to edge.
  */
 body::after {
   content: "";
   position: fixed;
-  top: env(safe-area-inset-top, 0px);
-  right: env(safe-area-inset-right, 0px);
-  bottom: env(safe-area-inset-bottom, 0px);
-  left: env(safe-area-inset-left, 0px);
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   z-index: 9999;
   pointer-events: none;
   box-shadow:

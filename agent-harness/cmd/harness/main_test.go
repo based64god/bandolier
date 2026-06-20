@@ -2,9 +2,11 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -433,6 +435,107 @@ func TestLogUserInput(t *testing.T) {
 	want := "[user] first line\n[user] second line\n"
 	if got != want {
 		t.Errorf("logUserInput output = %q, want %q", got, want)
+	}
+}
+
+func TestRewriteCommitAuthors(t *testing.T) {
+	dir := t.TempDir()
+
+	git := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		// A clean, deterministic identity for the seed commits we then rewrite.
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=Claude", "GIT_AUTHOR_EMAIL=noreply@anthropic.com",
+			"GIT_COMMITTER_NAME=Claude", "GIT_COMMITTER_EMAIL=noreply@anthropic.com",
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+
+	// A bare "origin" the working repo treats as its remote, so origin/main
+	// resolves the way the harness expects in the pod.
+	remote := t.TempDir()
+	cmdRun(t, remote, "git", "init", "--bare", "-b", "main")
+
+	cmdRun(t, dir, "git", "init", "-b", "main")
+	git("remote", "add", "origin", remote)
+	// Base commit on main.
+	if err := os.WriteFile(filepath.Join(dir, "base.txt"), []byte("base"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "-A")
+	git("commit", "-m", "base commit")
+	git("push", "origin", "main")
+
+	// Work branch with two commits: one carrying a Claude co-author trailer, one
+	// authored entirely as Claude.
+	git("checkout", "-b", "work")
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "-A")
+	git("commit", "-m", "first change\n\nCo-authored-by: Claude <noreply@anthropic.com>")
+	if err := os.WriteFile(filepath.Join(dir, "b.txt"), []byte("b"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "-A")
+	git("commit", "-m", "second change")
+
+	cfg := config{workDir: dir, baseBranch: "main"}
+	if err := rewriteCommitAuthors(context.Background(), cfg, "work", "octocat", "1+octocat@users.noreply.github.com"); err != nil {
+		t.Fatalf("rewriteCommitAuthors: %v", err)
+	}
+
+	// Both new commits must now be authored and committed by the OAuth identity.
+	idents := git("log", "origin/main..work", "--pretty=format:%an|%ae|%cn|%ce")
+	for _, line := range strings.Split(idents, "\n") {
+		if line != "octocat|1+octocat@users.noreply.github.com|octocat|1+octocat@users.noreply.github.com" {
+			t.Errorf("commit identity not rewritten: %q", line)
+		}
+	}
+
+	// The Claude co-author trailer must be gone from every commit message.
+	msgs := git("log", "origin/main..work", "--pretty=format:%B")
+	if strings.Contains(strings.ToLower(msgs), "anthropic") || strings.Contains(strings.ToLower(msgs), "co-authored-by: claude") {
+		t.Errorf("Claude co-author trailer survived rewrite:\n%s", msgs)
+	}
+	// The real commit subjects must survive.
+	if !strings.Contains(msgs, "first change") || !strings.Contains(msgs, "second change") {
+		t.Errorf("commit subjects lost in rewrite:\n%s", msgs)
+	}
+}
+
+func TestRewriteCommitAuthorsNoCommits(t *testing.T) {
+	dir := t.TempDir()
+	remote := t.TempDir()
+	cmdRun(t, remote, "git", "init", "--bare", "-b", "main")
+	cmdRun(t, dir, "git", "init", "-b", "main")
+	cmdRun(t, dir, "git", "-c", "user.name=x", "-c", "user.email=x@x",
+		"remote", "add", "origin", remote)
+	cmdRun(t, dir, "git", "-c", "user.name=x", "-c", "user.email=x@x",
+		"commit", "--allow-empty", "-m", "base")
+	cmdRun(t, dir, "git", "push", "origin", "main")
+
+	// Branch with no commits over the base — a no-op, no error.
+	cmdRun(t, dir, "git", "checkout", "-b", "work")
+	cfg := config{workDir: dir, baseBranch: "main"}
+	if err := rewriteCommitAuthors(context.Background(), cfg, "work", "octocat", "o@x"); err != nil {
+		t.Fatalf("rewriteCommitAuthors on empty branch should be a no-op: %v", err)
+	}
+}
+
+// cmdRun runs a command in dir, failing the test on error.
+func cmdRun(t *testing.T, dir string, name string, args ...string) {
+	t.Helper()
+	cmd := exec.Command(name, args...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("%s %s: %v\n%s", name, strings.Join(args, " "), err, out)
 	}
 }
 

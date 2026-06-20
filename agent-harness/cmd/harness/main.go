@@ -590,6 +590,45 @@ git interpret-trailers --if-exists doNothing \
 	return hooksDir, nil
 }
 
+// claudeCoauthorPattern is the extended-regex (grep -E) used to drop
+// `Co-authored-by:` trailers that attribute a commit to Claude or another AI
+// assistant, so the only authors on a pushed commit are the GitHub OAuth user.
+// Matched case-insensitively against each line of the commit message.
+const claudeCoauthorPattern = `^[[:space:]]*co-authored-by:.*(claude|anthropic|noreply@anthropic\.com)`
+
+// rewriteCommitAuthors rewrites every commit the branch adds over the base so
+// its author and committer are the GitHub OAuth identity (name/email), and
+// strips any `Co-authored-by:` trailer naming Claude/Anthropic. This runs before
+// the branch is pushed and a PR opened so commits are attributed solely to the
+// acting user, never to the agent model. It is a no-op when the branch has no
+// commits over the base.
+func rewriteCommitAuthors(ctx context.Context, cfg config, branchName, name, email string) error {
+	if !hasCommits(ctx, cfg, branchName) {
+		return nil
+	}
+
+	log.Printf("[harness] rewriting commit authorship on %s to %s <%s>", branchName, name, email)
+
+	// env-filter forces both the author and committer identity on every rewritten
+	// commit; msg-filter drops Claude/AI co-author trailers (grep returns non-zero
+	// when it emits no lines, so `|| true` keeps an all-stripped message valid).
+	envFilter := fmt.Sprintf(
+		`export GIT_AUTHOR_NAME=%q GIT_AUTHOR_EMAIL=%q GIT_COMMITTER_NAME=%q GIT_COMMITTER_EMAIL=%q`,
+		name, email, name, email,
+	)
+	msgFilter := fmt.Sprintf(`grep -viE %q || true`, claudeCoauthorPattern)
+
+	// FILTER_BRANCH_SQUELCH_WARNING silences filter-branch's deprecation banner;
+	// -f overwrites any stale refs/original/ backup from a previous attempt. The
+	// rev-list range limits the rewrite to the commits this branch introduced.
+	env := append(os.Environ(), "FILTER_BRANCH_SQUELCH_WARNING=1")
+	rangeSpec := fmt.Sprintf("origin/%s..%s", cfg.baseBranch, branchName)
+	return runCmd(ctx, cfg.workDir, env, "git", "filter-branch", "-f",
+		"--env-filter", envFilter,
+		"--msg-filter", msgFilter,
+		"--", rangeSpec)
+}
+
 // openPR pushes the branch and opens a pull request. It returns an error on a
 // genuine failure (push rejected, or `gh pr create` failing for any reason other
 // than the PR already existing) so the run is marked failed rather than silently
@@ -1136,6 +1175,18 @@ func run(ctx context.Context, cfg config) error {
 
 	// ── Post-run: push branch and open PR ──────────────────────────────────────
 	if prBranch != "" {
+		// Rewrite authorship to the GitHub OAuth identity (and strip Claude/AI
+		// co-author trailers) before anything is pushed, so commits are attributed
+		// solely to the acting user. Done first so the commit subject and generated
+		// PR copy below reflect the rewritten commits.
+		if err := rewriteCommitAuthors(ctx, cfg, prBranch, name, email); err != nil {
+			if ctx.Err() != nil {
+				log.Printf("[harness] terminated by signal")
+				return nil
+			}
+			return fmt.Errorf("rewrite commit authors: %w", err)
+		}
+
 		// Baseline title: for dashboard (non-issue) PRs use Claude's commit summary
 		// rather than the prompt; issue PRs keep the issue title.
 		if cfg.issueNumber == "" {

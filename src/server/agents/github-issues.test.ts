@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { getGithubItemState } from "~/server/agents/github-issues";
+import {
+  getGithubItemState,
+  postIssueCommentWithFallback,
+} from "~/server/agents/github-issues";
 
 function mockFetchOnce(body: unknown, ok = true, status = 200) {
   vi.stubGlobal(
@@ -74,5 +77,87 @@ describe("getGithubItemState", () => {
     expect(
       await getGithubItemState("tok", "https://github.com/o/r/issues/6"),
     ).toBeNull();
+  });
+});
+
+describe("postIssueCommentWithFallback", () => {
+  /** A fetch mock that fails for the given tokens and succeeds otherwise. */
+  function mockFetchByAuth(failTokens: string[]) {
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => {
+      const auth = (init?.headers as Record<string, string>).Authorization;
+      const failed = failTokens.some((t) => auth === `Bearer ${t}`);
+      return Promise.resolve({
+        ok: !failed,
+        status: failed ? 403 : 201,
+        statusText: failed ? "Forbidden" : "Created",
+        json: () => Promise.resolve({}),
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  it("posts with the first candidate token when it succeeds", async () => {
+    const fetchMock = mockFetchByAuth([]);
+    const via = await postIssueCommentWithFallback(
+      [
+        { token: "bot", source: "app-installation" },
+        { token: "pat", source: "legacy-pat" },
+      ],
+      "o/r",
+      1,
+      "hi",
+    );
+    expect(via).toBe("app-installation");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to the next token when the preferred one fails to post", async () => {
+    // The regression: an App installation token that can't comment must not
+    // swallow the comment — we fall through to a token that can post.
+    const fetchMock = mockFetchByAuth(["bot"]);
+    const via = await postIssueCommentWithFallback(
+      [
+        { token: "bot", source: "app-installation" },
+        { token: "pat", source: "legacy-pat" },
+        { token: "oauth", source: "user-oauth" },
+      ],
+      "o/r",
+      1,
+      "hi",
+    );
+    expect(via).toBe("legacy-pat");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("skips empty candidates and de-dupes identical tokens", async () => {
+    const fetchMock = mockFetchByAuth(["dup"]);
+    const via = await postIssueCommentWithFallback(
+      [
+        { token: null, source: "app-installation" },
+        { token: "dup", source: "legacy-pat" },
+        { token: "dup", source: "user-oauth" },
+      ],
+      "o/r",
+      1,
+      "hi",
+    );
+    // Only the one distinct, failing token is tried; nothing posts.
+    expect(via).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns null when every candidate fails", async () => {
+    mockFetchByAuth(["bot", "pat"]);
+    const via = await postIssueCommentWithFallback(
+      [
+        { token: "bot", source: "app-installation" },
+        { token: "pat", source: "legacy-pat" },
+      ],
+      "o/r",
+      1,
+      "hi",
+    );
+    expect(via).toBeNull();
   });
 });

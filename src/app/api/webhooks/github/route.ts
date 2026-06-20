@@ -13,7 +13,7 @@ import {
   getGithubAccountByGithubId,
   githubGitIdentity,
 } from "~/server/agents/github-token";
-import { postIssueComment } from "~/server/agents/github-issues";
+import { postIssueCommentWithFallback } from "~/server/agents/github-issues";
 import { resolveKubeconfig } from "~/server/agents/kubeconfig";
 import {
   fuzzyPickModel,
@@ -353,37 +353,37 @@ async function handleIssueOpened(
   });
 
   // Notify the issue author that the task was received and is being worked on.
-  // This is a bot-voice action, so it is only ever posted via the GitHub App
-  // installation token (the comment is attributed to bandolier[bot]). When the
-  // App isn't installed on the repo there's no bot identity to comment as, so
-  // the notification is skipped rather than posted under a user/service PAT.
-  const commentToken = await getRepoBotToken(
-    db,
+  // This is a bot-voice action, so prefer the GitHub App installation token
+  // (comment is attributed to bandolier[bot]); fall back to the legacy service
+  // user PAT, then to the triggering user's token. The fallback runs on a failed
+  // post too, not just an absent token — an App installation that can't comment
+  // (e.g. missing Issues:write) must not silently swallow the acknowledgement.
+  const botToken = await getRepoBotToken(db, repository.full_name, Date.now());
+  const taskUrl = `${env.BETTER_AUTH_URL}/repo/${repository.full_name}`;
+  const commentBody =
+    `🤖 Bando picked up this issue and is working on it.\n\n` +
+    `[View task on the dashboard](${taskUrl}) (job: \`${jobName}\`)`;
+  const postedBy = await postIssueCommentWithFallback(
+    [
+      { token: botToken, source: "app-installation" },
+      { token: env.BANDOLIER_GITHUB_TOKEN, source: "legacy-pat" },
+      { token: linked.accessToken, source: "user-oauth" },
+    ],
     repository.full_name,
-    Date.now(),
+    issue.number,
+    commentBody,
   );
-  if (commentToken) {
-    const taskUrl = `${env.BETTER_AUTH_URL}/repo/${repository.full_name}`;
-    const commentBody =
-      `🤖 Bando picked up this issue and is working on it.\n\n` +
-      `[View task on the dashboard](${taskUrl}) (job: \`${jobName}\`)`;
-    try {
-      await postIssueComment(
-        commentToken,
-        repository.full_name,
-        issue.number,
-        commentBody,
-      );
-      console.log("[bandolier:webhook] issue comment posted", {
-        issue: issue.number,
-        job: jobName,
-      });
-    } catch (err) {
-      console.warn("[bandolier:webhook] failed to post issue comment", {
-        issue: issue.number,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
+  if (postedBy) {
+    console.log("[bandolier:webhook] issue comment posted", {
+      issue: issue.number,
+      job: jobName,
+      via: postedBy,
+    });
+  } else {
+    console.warn(
+      "[bandolier:webhook] failed to post issue comment — no usable token",
+      { issue: issue.number },
+    );
   }
 }
 

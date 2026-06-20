@@ -11,7 +11,7 @@ import { validateAwsCredentials } from "~/server/agents/aws";
 import {
   getGithubItemState,
   getIssue,
-  postIssueComment,
+  postIssueCommentWithFallback,
   type GithubItemState,
 } from "~/server/agents/github-issues";
 import { SPAWNED_BY_LABEL, spawnedByLabelValue } from "~/server/agents/labels";
@@ -268,8 +268,8 @@ async function podToTask(
     pod.status?.containerStatuses?.[0]?.state?.terminated?.finishedAt;
   const expiresAt = finishedAt
     ? new Date(
-        new Date(finishedAt).getTime() + JOB_TTL_SECONDS * 1000,
-      ).toISOString()
+      new Date(finishedAt).getTime() + JOB_TTL_SECONDS * 1000,
+    ).toISOString()
     : null;
 
   const { currently, pullRequestUrl, createdIssueUrl, awaitingInput } =
@@ -1035,31 +1035,35 @@ export const agentsRouter = createTRPCRouter({
 
         // When a task is spawned from a GitHub issue (via the dashboard or the
         // REST API), leave a comment so the issue author knows it was received.
-        // This is a bot-voice action, so it is only ever posted via the GitHub
-        // App installation token (the comment is attributed to bandolier[bot]).
-        // When the App isn't installed on the repo there's no bot identity to
-        // comment as, so the notification is skipped rather than posted under a
-        // user/service PAT.
-        const commentToken = input.repoFullName
-          ? await getRepoBotToken(ctx.db, input.repoFullName, Date.now())
-          : null;
-        if (issue && commentToken && input.repoFullName) {
+        // Prefer the GitHub App installation token so it's attributed to
+        // bandolier[bot], then the legacy service-user PAT, then the deploying
+        // user's token. The fallback runs on a failed post too, not just an
+        // absent token, so an App that can't comment doesn't drop the notice.
+        if (issue && input.repoFullName) {
+          const botToken = await getRepoBotToken(
+            ctx.db,
+            input.repoFullName,
+            Date.now(),
+          );
           const taskUrl = `${env.BETTER_AUTH_URL}/repo/${input.repoFullName}`;
           const commentBody =
             `🤖 Bando picked up this issue and is working on it.\n\n` +
             `[View task on the dashboard](${taskUrl}) (job: \`${jobName}\`)`;
-          try {
-            await postIssueComment(
-              commentToken,
-              input.repoFullName,
-              issue.number,
-              commentBody,
+          const postedBy = await postIssueCommentWithFallback(
+            [
+              { token: botToken, source: "app-installation" },
+              { token: env.BANDOLIER_GITHUB_TOKEN, source: "legacy-pat" },
+              { token: githubToken, source: "user-oauth" },
+            ],
+            input.repoFullName,
+            issue.number,
+            commentBody,
+          );
+          if (!postedBy) {
+            console.warn(
+              "[bandolier:deploy] failed to post issue comment — no usable token",
+              { issue: issue.number },
             );
-          } catch (err) {
-            console.warn("[bandolier:deploy] failed to post issue comment", {
-              issue: issue.number,
-              error: err instanceof Error ? err.message : String(err),
-            });
           }
         }
 

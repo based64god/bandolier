@@ -148,7 +148,7 @@ export async function getGithubItemState(
   }
 }
 
-/** Posts a comment on a GitHub issue. Best-effort: failures are logged but not thrown. */
+/** Posts a comment on a GitHub issue. Throws on a non-2xx response. */
 export async function postIssueComment(
   token: string,
   repoFullName: string,
@@ -169,6 +169,49 @@ export async function postIssueComment(
   if (!res.ok) {
     throw new Error(`GitHub API ${res.status}: ${res.statusText}`);
   }
+}
+
+/** A token to try when posting a bot-voice comment, labeled for diagnostics. */
+export interface CommentTokenCandidate {
+  token: string | null | undefined;
+  /** Where the token came from, e.g. "app-installation" — used only in logs. */
+  source: string;
+}
+
+/**
+ * Posts an issue comment, trying each candidate token in order until one
+ * succeeds. Bot-voice callers pass [installation token, legacy PAT, user OAuth]:
+ * the App token is preferred so the comment is attributed to bandolier[bot], but
+ * a failure (typically the App installation lacking Issues:write) must NOT
+ * swallow the comment — we fall back to a token that can post, which restores
+ * the pre-App behavior. Each failed attempt is logged so a misconfigured App is
+ * diagnosable. Returns the source that succeeded, or null if none could post.
+ */
+export async function postIssueCommentWithFallback(
+  candidates: CommentTokenCandidate[],
+  repoFullName: string,
+  issueNumber: number,
+  body: string,
+): Promise<string | null> {
+  // De-dupe identical tokens (e.g. when the legacy PAT and user token match) so
+  // we don't retry a credential that already failed.
+  const tried = new Set<string>();
+  for (const { token, source } of candidates) {
+    if (!token || tried.has(token)) continue;
+    tried.add(token);
+    try {
+      await postIssueComment(token, repoFullName, issueNumber, body);
+      return source;
+    } catch (err) {
+      console.warn("[bandolier:github] issue comment attempt failed", {
+        repo: repoFullName,
+        issue: issueNumber,
+        source,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  return null;
 }
 
 /** Fetches a single issue, or null if not found. */

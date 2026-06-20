@@ -68,13 +68,12 @@ body {
   background-color: #000000;
   color: var(--color-purple-300);
 
-  /* With viewport-fit=cover (see layout.tsx) the web view runs edge-to-edge and
-     the black bezel below (body::before) paints the safe-area insets solid
-     black. Pad the content in by those same insets so the top bar and the rest
-     of the UI stay inside the *visible* viewport instead of scrolling up under
-     the notch / Dynamic Island / status bar where the bezel would cover them.
-     The body background is already black, so this just shrinks the live area to
-     match the bezel — devices that report zero insets are unaffected. */
+  /* With viewport-fit=cover (see layout.tsx) the web view runs edge-to-edge.
+     Pad the content in by the safe-area insets so the top bar and the rest of
+     the UI stay inside the *visible* viewport instead of scrolling up under the
+     notch / Dynamic Island / status bar. The body background is already black,
+     so the inset zones read as the powered-down CRT's black surround — devices
+     that report zero insets are unaffected. */
   padding-top: env(safe-area-inset-top, 0px);
   padding-right: env(safe-area-inset-right, 0px);
   padding-bottom: env(safe-area-inset-bottom, 0px);
@@ -104,28 +103,4 @@ body::after {
   box-shadow:
     inset 0 0 60px 4px rgba(56, 226, 113, 0.12),
     inset 0 0 160px 20px rgba(56, 226, 113, 0.06);
-}
-
-/*
- * Black bezel masking the safe-area insets. With viewport-fit=cover and the
- * black-translucent iOS status bar, page content scrolls underneath the notch /
- * Dynamic Island / home-indicator regions and would otherwise stay visible out
- * there. This fixed overlay paints those inset regions solid black — the only
- * thing beyond the phosphor around the viewport is the powered-down CRT's black
- * surround. Its border widths track the insets, leaving the visible viewport (a
- * transparent center) untouched. It sits above the glow so content can never
- * peek through. Collapses to nothing on devices that report zero insets.
- */
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: 10000;
-  pointer-events: none;
-  border-style: solid;
-  border-color: #000000;
-  border-top-width: env(safe-area-inset-top, 0px);
-  border-right-width: env(safe-area-inset-right, 0px);
-  border-bottom-width: env(safe-area-inset-bottom, 0px);
-  border-left-width: env(safe-area-inset-left, 0px);
 }

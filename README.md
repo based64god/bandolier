@@ -221,7 +221,9 @@ The harness image (`ghcr.io/based64god/bandolier-agent-harness:latest`, always p
 
 ### Run artifacts (optional)
 
-Setting `ARTIFACTS_S3_BUCKET` enables uploading each run's transcript to S3 so it survives the Job's one-week TTL.
+Setting `ARTIFACTS_S3_BUCKET` enables uploading each run's full transcript to S3 so it survives the Job's one-week TTL.
+
+This is independent of a run's **structured output** (the PR or issue URL), which is always persisted: the harness reports it to the app on completion and it's recorded on the run row, so a finished run's output stays recoverable from the database even when S3 isn't configured and the pod's logs are gone.
 
 | Variable                                                          | Default     | Description                                                            |
 | ----------------------------------------------------------------- | ----------- | ---------------------------------------------------------------------- |

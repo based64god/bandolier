@@ -9,6 +9,28 @@ const MAX_PULL = 110;
 // Dampening applied to finger travel so the pull feels rubber-banded.
 const RESISTANCE = 0.5;
 
+/**
+ * True when the touch began inside a nested scrollable container (e.g. the logs
+ * modal). Those elements own the gesture: pulling there should scroll the
+ * container, not trigger a page refresh. Walks up from the touch target looking
+ * for an ancestor that scrolls vertically and has overflow content.
+ */
+function isInsideScrollable(target: EventTarget | null): boolean {
+  let node = target instanceof Element ? target : null;
+  while (node && node !== document.body) {
+    const style = window.getComputedStyle(node);
+    const overflowY = style.overflowY;
+    if (
+      (overflowY === "auto" || overflowY === "scroll") &&
+      node.scrollHeight > node.clientHeight
+    ) {
+      return true;
+    }
+    node = node.parentElement;
+  }
+  return false;
+}
+
 /** True when running as an installed PWA (standalone display mode). */
 function isStandalone(): boolean {
   if (typeof window === "undefined") return false;
@@ -54,6 +76,9 @@ export function PullToRefresh() {
     const onTouchStart = (e: TouchEvent) => {
       // Begin tracking only when scrolled to the very top and not mid-refresh.
       if (refreshing || window.scrollY > 0 || e.touches.length !== 1) return;
+      // Skip when the touch starts inside a scrollable element (e.g. the logs
+      // modal) so its own scroll wins instead of triggering a refresh.
+      if (isInsideScrollable(e.target)) return;
       startY.current = e.touches[0]?.clientY ?? 0;
       tracking.current = true;
     };

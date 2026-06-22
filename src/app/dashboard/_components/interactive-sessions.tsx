@@ -278,10 +278,10 @@ export function InteractiveRow({
             colSpan={isDesktop ? TASK_COLUMNS : MOBILE_TASK_COLUMNS}
             className="p-0"
           >
-            {/* Pod name + seed prompt, mirroring the LogModal that opens for a
-                non-interactive task so interactive sessions surface the same
-                context. */}
-            <SessionHeader podName={agent.name} prompt={agent.prompt} />
+            {/* Pod name only — the seed prompt is logged as the first [user]
+                line in the transcript below, so a separate prompt block would
+                just duplicate it. */}
+            <SessionHeader podName={agent.name} />
             <LogView text={logs ?? ""} />
             <div className="border-t border-white/10 p-3">
               <div className="flex items-end gap-2">
@@ -330,64 +330,16 @@ export function InteractiveRow({
 }
 
 /**
- * Pod name + seed prompt header for an expanded interactive session. Mirrors the
- * header and prompt block of the LogModal shown for non-interactive tasks, so an
- * interactive session reports the same context (the pod it's running in and the
- * prompt that seeded it) rather than dropping straight into the live log.
+ * Pod name header for an expanded interactive session. The seed prompt is no
+ * longer shown here — it's logged as the first [user] line in the transcript
+ * below, so a separate prompt block would just duplicate it.
  */
-function SessionHeader({
-  podName,
-  prompt,
-}: {
-  podName: string;
-  prompt: string | null;
-}) {
-  const [copied, setCopied] = useState(false);
-
-  function copyPrompt() {
-    if (!prompt) return;
-    void navigator.clipboard.writeText(prompt).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    });
-  }
-
+function SessionHeader({ podName }: { podName: string }) {
   return (
     <div className="border-b border-white/10 px-4 py-3">
       <code className="inline-block max-w-full truncate rounded bg-purple-500/20 px-2 py-0.5 align-middle text-sm text-purple-300">
         {podName}
       </code>
-      {prompt && (
-        <div className="mt-3">
-          <div className="mb-1.5 flex items-center justify-between">
-            <span className="text-xs font-medium tracking-wider text-white/40 uppercase">
-              Prompt
-            </span>
-            <button
-              onClick={copyPrompt}
-              className="flex items-center gap-1 rounded bg-white/10 px-2 py-1 text-xs text-white/70 hover:bg-white/20 hover:text-white"
-            >
-              {copied ? (
-                "Copied ✓"
-              ) : (
-                <>
-                  <svg
-                    viewBox="0 0 16 16"
-                    fill="currentColor"
-                    className="h-3.5 w-3.5"
-                  >
-                    <path d="M10 1.5H6a.5.5 0 0 0-.5.5v1H4.5A1.5 1.5 0 0 0 3 5v8.5A1.5 1.5 0 0 0 4.5 15h7a1.5 1.5 0 0 0 1.5-1.5V5a1.5 1.5 0 0 0-1.5-1.5h-1V2a.5.5 0 0 0-.5-.5Zm0 2V5h1.5a.5.5 0 0 1 .5.5v8a.5.5 0 0 1-.5.5h-7a.5.5 0 0 1-.5-.5v-8a.5.5 0 0 1 .5-.5H6v-1h4Z" />
-                  </svg>
-                  Copy
-                </>
-              )}
-            </button>
-          </div>
-          <pre className="max-h-32 overflow-auto font-mono text-xs leading-5 whitespace-pre-wrap text-white/55">
-            {prompt}
-          </pre>
-        </div>
-      )}
     </div>
   );
 }

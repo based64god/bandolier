@@ -14,12 +14,12 @@ type Task = RouterOutputs["agents"]["list"][number];
 export const TASK_COLUMNS = 7;
 
 /**
- * Columns that remain on narrow viewports — the three secondary columns
- * ("Created by", "Currently", "Expires") are dropped below the `md` breakpoint
- * via `hidden md:table-cell`. An interactive row's expanded body must span only
+ * Columns that remain in the compact layout — the three secondary columns
+ * ("Created by", "Currently", "Expires") are dropped below the `lg` breakpoint
+ * via `hidden lg:table-cell`. An interactive row's expanded body must span only
  * the columns that actually exist at the current breakpoint: a `colSpan` larger
  * than the live column count would conjure phantom columns and re-balance the
- * whole table, shifting every row horizontally when it expands on mobile.
+ * whole table, shifting every row horizontally when it expands.
  */
 export const MOBILE_TASK_COLUMNS = 4;
 
@@ -94,7 +94,7 @@ export function TaskRow({
       </td>
 
       <td
-        className="hidden px-3 py-2 align-middle md:table-cell md:px-4 md:py-3"
+        className="hidden px-3 py-2 align-middle md:px-4 md:py-3 lg:table-cell"
         onClick={(e) => e.stopPropagation()}
       >
         <SourceBadge
@@ -107,9 +107,9 @@ export function TaskRow({
       </td>
 
       {/* Live "currently" line — clamped to one line so a long output can't
-          grow the row height; the full text is available on hover. Dropped on
-          narrow viewports where space is limited. */}
-      <td className="hidden px-3 py-2 align-middle md:table-cell md:px-4 md:py-3">
+          grow the row height; the full text is available on hover. Shown only
+          in the full layout (lg+). */}
+      <td className="hidden px-3 py-2 align-middle md:px-4 md:py-3 lg:table-cell">
         <span
           title={agent.currently ?? undefined}
           className="block max-w-[16rem] truncate text-xs text-white/40 italic"
@@ -118,7 +118,7 @@ export function TaskRow({
         </span>
       </td>
 
-      <td className="hidden px-3 py-2 align-middle whitespace-nowrap text-white/50 tabular-nums md:table-cell md:px-4 md:py-3">
+      <td className="hidden px-3 py-2 align-middle whitespace-nowrap text-white/50 tabular-nums md:px-4 md:py-3 lg:table-cell">
         {expiresAtLocal(agent.expiresAt)}
       </td>
 

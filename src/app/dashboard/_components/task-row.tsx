@@ -135,9 +135,12 @@ export function TaskRow({
             (`ACTION_ROW_MIN_H`) so a row never grows or shrinks vertically as
             its action toggles between the compact terminate (×) glyph and the
             taller confirm/cancel buttons — only an expanding interactive row
-            should change a row's height. */}
+            should change a row's height. The group wraps on narrow viewports
+            (`flex-wrap`) so the confirm/cancel pair stacks within the slim
+            mobile Actions column rather than overflowing leftward onto the
+            adjacent Task description; it stays on one line from `lg` up. */}
         <div
-          className={`flex flex-nowrap items-center justify-end gap-1 whitespace-nowrap ${ACTION_ROW_MIN_H}`}
+          className={`flex flex-wrap items-center justify-end gap-1 lg:flex-nowrap lg:whitespace-nowrap ${ACTION_ROW_MIN_H}`}
         >
           {confirmKill ? (
             <>

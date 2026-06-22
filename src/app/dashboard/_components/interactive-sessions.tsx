@@ -9,7 +9,11 @@ import { HarnessSegment, UserSegment } from "./log-modal";
 import { parseSegments } from "./log-segments";
 import { OutputBadge, SourceBadge } from "./output-badge";
 import { StatusBadge } from "./status-badge";
-import { MOBILE_TASK_COLUMNS, TASK_COLUMNS } from "./task-row";
+import {
+  ACTION_ROW_MIN_H,
+  MOBILE_TASK_COLUMNS,
+  TASK_COLUMNS,
+} from "./task-row";
 
 type Task = RouterOutputs["agents"]["list"][number];
 
@@ -218,7 +222,13 @@ export function InteractiveRow({
           className="px-3 py-2 text-right align-middle md:px-4 md:py-3"
           onClick={(e) => e.stopPropagation()}
         >
-          <div className="flex items-center justify-end gap-2">
+          {/* Reserve the tallest control's height (`ACTION_ROW_MIN_H`) so the
+              row keeps a constant height whether or not the "End session"
+              button is present — without it, a row shrinks the moment a
+              session ends and its button disappears, shifting rows below it. */}
+          <div
+            className={`flex items-center justify-end gap-2 ${ACTION_ROW_MIN_H}`}
+          >
             {running && (
               <button
                 onClick={() =>

@@ -95,7 +95,13 @@ export function OverviewPanel({ notify }: { notify: boolean }) {
           <thead>
             <tr className="border-b border-white/10 bg-white/5 text-left text-xs font-medium tracking-wider text-white/50 uppercase">
               {[
-                { label: "Status", width: "w-[14%]", center: true },
+                // Wider on mobile (like Output below) so the "STATUS" header
+                // word fits its cell. Under table-fixed a too-narrow column
+                // can't shrink the unbreakable word, so it overflows to the
+                // right and the centered badges read as left-of-header; the
+                // extra width lets text-center actually center the label over
+                // the badges. Back to the compact 14% once md gives it room.
+                { label: "Status", width: "w-[22%] md:w-[14%]", center: true },
                 // Wider on mobile so the output pill (Issue/PR + state glyph)
                 // fits its cell; without the extra room the fixed layout
                 // starves this column and the badge spills into Repository.

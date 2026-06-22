@@ -583,9 +583,14 @@ export function AgentDashboard({
                             },
                             // Wide enough to hold the "End session" button
                             // (shown on running interactive rows) plus the
-                            // terminate control without the fixed column
-                            // clipping them behind the Task text.
-                            { label: "", width: "w-[16%]" },
+                            // terminate control. On narrow viewports the three
+                            // optional columns are gone, so this column's share
+                            // of the remaining width shrinks — too small to fit
+                            // the no-wrap button, which then overflowed its
+                            // `justify-end` flex box leftward, on top of the
+                            // adjacent Task description. A wider mobile share
+                            // keeps the actions inside their own column.
+                            { label: "", width: "w-[28%] md:w-[16%]" },
                           ].map((h, i) => (
                             <th
                               key={i}

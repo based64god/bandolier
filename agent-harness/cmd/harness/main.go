@@ -153,23 +153,27 @@ func detectProvider() providerKind {
 type config struct {
 	task         string
 	systemPrompt string // instructional framing appended to Claude's system prompt
-	title        string // short label used for branch slug, PR title, commit message
-	workDir      string
-	model        string
-	prWriter     string // out-of-band model for writing the PR title/description
-	repoURL      string
-	branch       string
-	maxTurns     string
-	gitName      string
-	gitEmail     string
-	provider     providerKind
-	issueNumber  string // GitHub issue number (issue mode)
-	issueRepo    string // "owner/repo" for gh commands
-	agentBranch  string // server-provided unique working branch (issue mode)
-	baseBranch   string // base branch for the PR
-	interactive  bool   // long-lived session driven by user input between turns
-	inputURL     string // Bandolier endpoint the interactive loop polls for input
-	outputType   string // "pr" (default) or "issue": what the run produces when done
+	// repoSystemPrompt is the admin-configured, repo-attached system prompt
+	// (REPO_SYSTEM_PROMPT): a blanket instruction layered on top of whatever
+	// framing the harness builds, for every run/provider/mode. Empty = none.
+	repoSystemPrompt string
+	title            string // short label used for branch slug, PR title, commit message
+	workDir          string
+	model            string
+	prWriter         string // out-of-band model for writing the PR title/description
+	repoURL          string
+	branch           string
+	maxTurns         string
+	gitName          string
+	gitEmail         string
+	provider         providerKind
+	issueNumber      string // GitHub issue number (issue mode)
+	issueRepo        string // "owner/repo" for gh commands
+	agentBranch      string // server-provided unique working branch (issue mode)
+	baseBranch       string // base branch for the PR
+	interactive      bool   // long-lived session driven by user input between turns
+	inputURL         string // Bandolier endpoint the interactive loop polls for input
+	outputType       string // "pr" (default) or "issue": what the run produces when done
 }
 
 // issueOutput reports whether the run should produce a GitHub issue instead of a
@@ -217,25 +221,26 @@ func loadConfig() (config, error) {
 	}
 
 	return config{
-		task:         task,
-		systemPrompt: strings.TrimSpace(os.Getenv("CLAUDE_SYSTEM_PROMPT")),
-		title:        os.Getenv("AGENT_TITLE"),
-		workDir:      workDir,
-		model:        model,
-		prWriter:     os.Getenv("PR_WRITER_MODEL"),
-		repoURL:      os.Getenv("REPO_URL"),
-		branch:       os.Getenv("BRANCH"),
-		maxTurns:     maxTurns,
-		gitName:      os.Getenv("GIT_NAME"),
-		gitEmail:     os.Getenv("GIT_EMAIL"),
-		provider:     detectProvider(),
-		issueNumber:  issueNumber,
-		issueRepo:    os.Getenv("GITHUB_REPO"),
-		agentBranch:  os.Getenv("AGENT_BRANCH"),
-		baseBranch:   baseBranch,
-		interactive:  os.Getenv("INTERACTIVE") == "1",
-		inputURL:     os.Getenv("BANDOLIER_INPUT_URL"),
-		outputType:   outputType,
+		task:             task,
+		systemPrompt:     strings.TrimSpace(os.Getenv("CLAUDE_SYSTEM_PROMPT")),
+		repoSystemPrompt: strings.TrimSpace(os.Getenv("REPO_SYSTEM_PROMPT")),
+		title:            os.Getenv("AGENT_TITLE"),
+		workDir:          workDir,
+		model:            model,
+		prWriter:         os.Getenv("PR_WRITER_MODEL"),
+		repoURL:          os.Getenv("REPO_URL"),
+		branch:           os.Getenv("BRANCH"),
+		maxTurns:         maxTurns,
+		gitName:          os.Getenv("GIT_NAME"),
+		gitEmail:         os.Getenv("GIT_EMAIL"),
+		provider:         detectProvider(),
+		issueNumber:      issueNumber,
+		issueRepo:        os.Getenv("GITHUB_REPO"),
+		agentBranch:      os.Getenv("AGENT_BRANCH"),
+		baseBranch:       baseBranch,
+		interactive:      os.Getenv("INTERACTIVE") == "1",
+		inputURL:         os.Getenv("BANDOLIER_INPUT_URL"),
+		outputType:       outputType,
 	}, nil
 }
 
@@ -1166,18 +1171,20 @@ func run(ctx context.Context, cfg config) error {
 			claudeArgs = append(claudeArgs, "--max-turns", cfg.maxTurns)
 		}
 		// The instructional framing surrounding the task goes in the system prompt
-		// so the user message stays the raw issue/form context.
-		if cfg.systemPrompt != "" {
-			claudeArgs = append(claudeArgs, "--append-system-prompt", cfg.systemPrompt)
+		// so the user message stays the raw issue/form context. The repo-attached
+		// prompt (if any) is layered on after it.
+		sysPrompt := cfg.withRepoPrompt(cfg.systemPrompt)
+		if sysPrompt != "" {
+			claudeArgs = append(claudeArgs, "--append-system-prompt", sysPrompt)
 		}
 		claudeArgs = append(claudeArgs, cfg.task)
 
 		// Log the system prompt and prompt line-by-line so each line keeps the
 		// [harness] tag (the dashboard dims harness lines; an untagged multi-line
 		// block would render as Claude output).
-		if cfg.systemPrompt != "" {
+		if sysPrompt != "" {
 			log.Printf("[harness] system prompt:")
-			for _, line := range strings.Split(cfg.systemPrompt, "\n") {
+			for _, line := range strings.Split(sysPrompt, "\n") {
 				log.Printf("[harness]   %s", line)
 			}
 		}
@@ -1433,6 +1440,20 @@ func runClaudeStreaming(ctx context.Context, dir string, env []string, args ...s
 
 // ── Codex (OpenAI) ──────────────────────────────────────────────────────────────
 
+// withRepoPrompt layers the repo-attached system prompt (REPO_SYSTEM_PROMPT)
+// onto whatever framing the harness built for a run, so a repo-wide instruction
+// applies to every run regardless of mode or provider. Either side may be empty.
+// It does not replace the framing — the repo prompt is appended after it.
+func (c config) withRepoPrompt(sysPrompt string) string {
+	if c.repoSystemPrompt == "" {
+		return sysPrompt
+	}
+	if strings.TrimSpace(sysPrompt) == "" {
+		return c.repoSystemPrompt
+	}
+	return sysPrompt + "\n\n" + c.repoSystemPrompt
+}
+
 // foldSystemPrompt folds the instructional framing into the prompt, for CLIs
 // (Codex, Gemini) that have no `--append-system-prompt` equivalent.
 func foldSystemPrompt(sysPrompt, task string) string {
@@ -1488,6 +1509,7 @@ func runCodex(ctx context.Context, cfg config, prBranch string) error {
 	if sysPrompt == "" && prBranch != "" {
 		sysPrompt = buildRepoSystemPrompt(prBranch)
 	}
+	sysPrompt = cfg.withRepoPrompt(sysPrompt)
 
 	log.Printf("[harness] starting codex (model=%s)", cfg.model)
 	logCodexPrompt("codex prompt:", sysPrompt, cfg.task)
@@ -1509,9 +1531,11 @@ func runCodexInteractive(ctx context.Context, cfg config, first string) error {
 	env := buildEnv(cfg.provider)
 
 	// First turn: fold the session framing into the opening message and create the
-	// session (no resume, no --ephemeral so it can be resumed below).
-	logCodexPrompt("sending initial message:", cfg.systemPrompt, first)
-	firstArgs := codexArgs(cfg, foldSystemPrompt(cfg.systemPrompt, first), false, false)
+	// session (no resume, no --ephemeral so it can be resumed below). The
+	// repo-attached prompt rides along on the first turn's framing.
+	sysPrompt := cfg.withRepoPrompt(cfg.systemPrompt)
+	logCodexPrompt("sending initial message:", sysPrompt, first)
+	firstArgs := codexArgs(cfg, foldSystemPrompt(sysPrompt, first), false, false)
 	if err := runCodexStreaming(ctx, cfg.workDir, env, firstArgs...); err != nil {
 		if ctx.Err() != nil {
 			return nil
@@ -1684,6 +1708,7 @@ func runGemini(ctx context.Context, cfg config, prBranch string) error {
 	if sysPrompt == "" && prBranch != "" {
 		sysPrompt = buildRepoSystemPrompt(prBranch)
 	}
+	sysPrompt = cfg.withRepoPrompt(sysPrompt)
 
 	log.Printf("[harness] starting agy (model=%s)", cfg.model)
 	logCodexPrompt("agy prompt:", sysPrompt, cfg.task)
@@ -1707,9 +1732,10 @@ func runGeminiInteractive(ctx context.Context, cfg config, first string) error {
 	idle := interactiveIdleTimeout()
 	env := buildEnv(cfg.provider)
 
+	sysPrompt := cfg.withRepoPrompt(cfg.systemPrompt)
 	var convo strings.Builder
-	if cfg.systemPrompt != "" {
-		convo.WriteString(cfg.systemPrompt)
+	if sysPrompt != "" {
+		convo.WriteString(sysPrompt)
 		convo.WriteString("\n\n")
 	}
 	convo.WriteString(
@@ -1731,7 +1757,7 @@ func runGeminiInteractive(ctx context.Context, cfg config, first string) error {
 		return nil
 	}
 
-	logCodexPrompt("sending initial message:", cfg.systemPrompt, first)
+	logCodexPrompt("sending initial message:", sysPrompt, first)
 	if err := runTurn(first); err != nil {
 		if ctx.Err() != nil {
 			return nil
@@ -1863,8 +1889,8 @@ func runClaudeInteractive(ctx context.Context, cfg config, first string) error {
 		"--output-format", "stream-json",
 		"--verbose",
 	}
-	if cfg.systemPrompt != "" {
-		args = append(args, "--append-system-prompt", cfg.systemPrompt)
+	if sysPrompt := cfg.withRepoPrompt(cfg.systemPrompt); sysPrompt != "" {
+		args = append(args, "--append-system-prompt", sysPrompt)
 	}
 	cmd := exec.CommandContext(ctx, "claude", args...)
 	cmd.Dir = cfg.workDir

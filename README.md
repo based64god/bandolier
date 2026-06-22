@@ -148,6 +148,14 @@ Optional env knobs: `GITHUB_TRIGGER_LABEL` (only act on issues carrying a specif
 
 ---
 
+## Repository system prompt (optional)
+
+A repo admin can attach a **system prompt** to a repository in its settings (the repo-config UI). It's a blanket instruction — coding conventions, a review checklist, "always add tests", anything repo-wide — that Bandolier appends to the system prompt of **every** agent run for that repo: dashboard tasks, issue PRs, and webhook-triggered runs, across every model provider and both one-shot and interactive sessions.
+
+It's layered _on top of_ Bandolier's own framing (the working agreement that lets the harness commit and open a PR), never replacing it, so you don't need to repeat the same guidance in each task. Leave it blank for none.
+
+---
+
 ## REST API (optional)
 
 Besides the dashboard, agents can be listed and launched over a small REST API under `/api/v1`, authenticated with an API key (create one in the app; the token is shown once and only its hash is stored):

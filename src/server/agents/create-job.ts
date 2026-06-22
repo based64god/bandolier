@@ -236,6 +236,14 @@ export interface JobSpec {
    * DEFAULT_HARNESS_IMAGE is used.
    */
   agentImage?: string;
+  /**
+   * Repo-attached system prompt: an admin-configured blanket instruction for the
+   * repo, appended to whatever system-prompt framing the harness builds for the
+   * run (every mode and provider). Passed as REPO_SYSTEM_PROMPT — kept distinct
+   * from `systemPrompt` (CLAUDE_SYSTEM_PROMPT), which is the harness's own
+   * instructional framing. Unset = no repo-wide prompt.
+   */
+  repoSystemPrompt?: string;
 }
 
 /** Per-job secret holding the acting user's credentials (GitHub / AWS / Anthropic). */
@@ -347,6 +355,12 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
   }
   if (spec.systemPrompt) {
     envVars.push({ name: "CLAUDE_SYSTEM_PROMPT", value: spec.systemPrompt });
+  }
+  if (spec.repoSystemPrompt) {
+    envVars.push({
+      name: "REPO_SYSTEM_PROMPT",
+      value: spec.repoSystemPrompt,
+    });
   }
   if (spec.outputType === "issue") {
     envVars.push({ name: "OUTPUT_TYPE", value: "issue" });

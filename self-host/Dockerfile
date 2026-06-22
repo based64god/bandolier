@@ -1,6 +1,7 @@
 # bandolier-self-host — the agent harness plus the Go and Node toolchains this
 # repo is built with, so the image can build and run Bandolier itself (not just
-# drive agents).
+# drive agents). It also carries Chromium + Puppeteer so agents can drive a
+# headless browser to inspect site visuals.
 #
 # Layered on top of the published agent-harness image (which already carries the
 # agent CLIs, git, and gh). The Go and Node versions are pinned to match the
@@ -39,6 +40,34 @@ RUN ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
 
 # Fail the build loudly if either toolchain can't run on the base image.
 RUN go version && node --version && npm --version
+
+# ── Chromium + Puppeteer ──────────────────────────────────────────────────────
+# So agents can drive a headless browser to inspect site visuals (screenshots,
+# rendered DOM, layout). We install Debian's own Chromium, then install Puppeteer
+# globally and point it at the system binary — PUPPETEER_SKIP_CHROMIUM_DOWNLOAD
+# keeps Puppeteer from fetching a second, bundled copy, so the browser can never
+# drift from the one the OS patches. (The base image is debian:latest, which
+# ships chromium.)
+#
+# The chromium package already depends on the shared libraries a headless browser
+# needs, so apt pulls those in — we don't hand-list them (their names churn, e.g.
+# the Debian t64 transition). Fonts are only a recommends, so we add them
+# explicitly for correct text/emoji rendering in screenshots.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        chromium \
+        fonts-liberation \
+        fonts-noto-color-emoji \
+    && rm -rf /var/lib/apt/lists/*
+
+# PUPPETEER_SKIP_DOWNLOAD is the current name; the *_CHROMIUM_* alias covers
+# older Puppeteer releases. Both point launches at the system Chromium above.
+ENV PUPPETEER_SKIP_DOWNLOAD=true
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+RUN npm install -g puppeteer-core puppeteer
+
+# Fail the build loudly if the browser can't launch headless on this image.
+RUN chromium --headless --no-sandbox --disable-gpu --dump-dom about:blank >/dev/null
 
 # Inherit the harness ENTRYPOINT (/usr/local/bin/harness) and env (HOME, PATH,
 # IS_SANDBOX, …) from the base image.

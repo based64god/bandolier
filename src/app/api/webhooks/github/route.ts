@@ -127,6 +127,7 @@ async function handleIssueOpened(
   prefix: string | null,
   agentImage: string | null,
   defaultModel: string | null,
+  repoSystemPrompt: string | null,
 ): Promise<void> {
   const { issue, repository, sender } = payload;
 
@@ -350,6 +351,7 @@ async function handleIssueOpened(
     geminiApiKey: geminiApiKey ?? undefined,
     kubeconfig,
     agentImage: agentImage ?? undefined,
+    repoSystemPrompt: repoSystemPrompt ?? undefined,
   });
 
   // Notify the issue author that the task was received and is being worked on.
@@ -476,6 +478,7 @@ export async function POST(req: NextRequest) {
         repoConfig?.prefix ?? null,
         repoConfig?.agentImage ?? null,
         repoConfig?.defaultWebhookModel ?? null,
+        repoConfig?.systemPrompt ?? null,
       );
     } else if (event === "installation") {
       // App installed/uninstalled, or repos added/removed for an installation.

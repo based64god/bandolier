@@ -43,7 +43,10 @@ import {
   pickProvider,
   resolveModelCredentials,
 } from "~/server/agents/resolve-credentials";
-import { getRepoAgentImage } from "~/server/agents/webhook-config";
+import {
+  getRepoAgentImage,
+  getRepoSystemPrompt,
+} from "~/server/agents/webhook-config";
 import { type db } from "~/server/db";
 import { agentInput, taskRun } from "~/server/db/schema";
 import { getBatchV1Api, getCoreV1Api } from "~/server/k8s/client";
@@ -342,8 +345,8 @@ async function podToTask(
     pod.status?.containerStatuses?.[0]?.state?.terminated?.finishedAt;
   const expiresAt = finishedAt
     ? new Date(
-      new Date(finishedAt).getTime() + JOB_TTL_SECONDS * 1000,
-    ).toISOString()
+        new Date(finishedAt).getTime() + JOB_TTL_SECONDS * 1000,
+      ).toISOString()
     : null;
 
   const inspection = await inspectPod(name, namespace, status, kubeconfig);
@@ -1093,8 +1096,10 @@ export const agentsRouter = createTRPCRouter({
         }
 
         // Per-repo harness image override (falls back to DEFAULT_HARNESS_IMAGE
-        // when unset). Best-effort: a lookup failure must not block the deploy.
+        // when unset) and the repo-attached system prompt appended to every run.
+        // Best-effort: a lookup failure must not block the deploy.
         let agentImage: string | undefined;
+        let repoSystemPrompt: string | undefined;
         if (input.repoFullName) {
           try {
             agentImage =
@@ -1104,6 +1109,18 @@ export const agentsRouter = createTRPCRouter({
             console.warn("[bandolier:deploy] agent image lookup failed", {
               error: err instanceof Error ? err.message : String(err),
             });
+          }
+          try {
+            repoSystemPrompt =
+              (await getRepoSystemPrompt(ctx.db, input.repoFullName)) ??
+              undefined;
+          } catch (err) {
+            console.warn(
+              "[bandolier:deploy] repo system prompt lookup failed",
+              {
+                error: err instanceof Error ? err.message : String(err),
+              },
+            );
           }
         }
 
@@ -1131,6 +1148,7 @@ export const agentsRouter = createTRPCRouter({
           geminiApiKey: geminiApiKey ?? undefined,
           kubeconfig,
           agentImage: agentImage ?? undefined,
+          repoSystemPrompt,
           createdBy: ctx.session.user.name ?? ctx.session.user.email,
           gitName: gitIdentity.name,
           gitEmail: gitIdentity.email,

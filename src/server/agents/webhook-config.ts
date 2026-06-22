@@ -11,6 +11,12 @@ export interface RepoWebhookConfig {
   agentImage: string | null;
   /** Default model id for webhook-triggered agents; null means provider default. */
   defaultWebhookModel: string | null;
+  /**
+   * Repo-attached system prompt appended to every agent run for this repo; null
+   * means no repo-wide prompt. See `getRepoSystemPrompt` for the loader callers
+   * use on the deploy/webhook paths.
+   */
+  systemPrompt: string | null;
 }
 
 /**
@@ -81,6 +87,7 @@ export async function getRepoWebhookConfig(
       prefix: repoWebhookConfig.prefix,
       agentImage: repoWebhookConfig.agentImage,
       defaultWebhookModel: repoWebhookConfig.defaultWebhookModel,
+      systemPrompt: repoWebhookConfig.systemPrompt,
     })
     .from(repoWebhookConfig)
     .where(eq(repoWebhookConfig.repoFullName, repoFullName))
@@ -90,7 +97,25 @@ export async function getRepoWebhookConfig(
     prefix: row.prefix ?? null,
     agentImage: row.agentImage ?? null,
     defaultWebhookModel: row.defaultWebhookModel ?? null,
+    systemPrompt: row.systemPrompt ?? null,
   };
+}
+
+/**
+ * The repo-attached system prompt for a repo: the blanket instruction appended
+ * to every agent run, or null when none is set (callers append nothing). Read on
+ * the deploy and webhook paths the same way `getRepoAgentImage` is.
+ */
+export async function getRepoSystemPrompt(
+  database: typeof db,
+  repoFullName: string,
+): Promise<string | null> {
+  const [row] = await database
+    .select({ systemPrompt: repoWebhookConfig.systemPrompt })
+    .from(repoWebhookConfig)
+    .where(eq(repoWebhookConfig.repoFullName, repoFullName))
+    .limit(1);
+  return row?.systemPrompt ?? null;
 }
 
 /**

@@ -3,8 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildAppJwt,
+  buildDockerConfigJson,
   clearTokenCache,
   getInstallationToken,
+  imageRegistryHost,
   isGithubAppConfigured,
 } from "~/server/agents/github-app";
 
@@ -137,6 +139,50 @@ describe("getInstallationToken", () => {
     );
     await expect(getInstallationToken("42", NOW)).rejects.toThrow(
       /token exchange failed: 401/,
+    );
+  });
+});
+
+describe("imageRegistryHost", () => {
+  it("extracts a registry host with a dot", () => {
+    expect(imageRegistryHost("ghcr.io/acme/img:tag")).toBe("ghcr.io");
+    expect(imageRegistryHost("registry.example.com/x")).toBe(
+      "registry.example.com",
+    );
+  });
+
+  it("extracts a registry host with a port", () => {
+    expect(imageRegistryHost("registry.example.com:5000/x")).toBe(
+      "registry.example.com:5000",
+    );
+    expect(imageRegistryHost("localhost:5000/x")).toBe("localhost:5000");
+  });
+
+  it("treats bare localhost as a registry host", () => {
+    expect(imageRegistryHost("localhost/x")).toBe("localhost");
+  });
+
+  it("returns null for implicit Docker Hub references", () => {
+    expect(imageRegistryHost("acme/bandolier-agent")).toBeNull();
+    expect(imageRegistryHost("bandolier-agent")).toBeNull();
+    expect(imageRegistryHost("library/ubuntu:22.04")).toBeNull();
+  });
+});
+
+describe("buildDockerConfigJson", () => {
+  it("produces a dockerconfigjson with a base64 auth for the registry", () => {
+    const json = buildDockerConfigJson("ghcr.io", "bandolier", "ghs_token");
+    const parsed = JSON.parse(json) as {
+      auths: Record<
+        string,
+        { username: string; password: string; auth: string }
+      >;
+    };
+    const entry = parsed.auths["ghcr.io"]!;
+    expect(entry.username).toBe("bandolier");
+    expect(entry.password).toBe("ghs_token");
+    expect(Buffer.from(entry.auth, "base64").toString("utf8")).toBe(
+      "bandolier:ghs_token",
     );
   });
 });

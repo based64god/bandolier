@@ -5,6 +5,7 @@ import { env } from "~/env";
 import { validateAwsCredentials } from "~/server/agents/aws";
 import { createAgentJob } from "~/server/agents/create-job";
 import {
+  getRegistryPullSecret,
   getRepoBotToken,
   removeInstallation,
   upsertInstallation,
@@ -314,6 +315,18 @@ async function handleIssueOpened(
   // GitHub links them to that account regardless of the sender's email privacy.
   const gitIdentity = githubGitIdentity(sender.id, sender.login);
 
+  // A custom image on a private ghcr.io package needs pull credentials — mint
+  // them from the repo's GitHub App installation token. Best-effort: a failure
+  // leaves the cluster to pull with its own node credentials.
+  const imagePullSecret = agentImage
+    ? ((await getRegistryPullSecret(
+        db,
+        repository.full_name,
+        agentImage,
+        Date.now(),
+      )) ?? undefined)
+    : undefined;
+
   const jobName = await createAgentJob({
     namespace: repoToNamespace(repository.full_name),
     // Build the prompt here (no operator context): the issue context is stored
@@ -351,6 +364,7 @@ async function handleIssueOpened(
     geminiApiKey: geminiApiKey ?? undefined,
     kubeconfig,
     agentImage: agentImage ?? undefined,
+    imagePullSecret,
     repoSystemPrompt: repoSystemPrompt ?? undefined,
   });
 

@@ -564,7 +564,7 @@ export function AgentDashboard({
                       <thead>
                         <tr className="border-b border-white/10 bg-white/5 text-left text-xs font-medium tracking-wider text-white/50 uppercase">
                           {[
-                            { label: "Status", width: "w-[12%]", center: true },
+                            { label: "Status", width: "w-[10%]", center: true },
                             { label: "Output", width: "w-[10%]" },
                             { label: "Task", width: "w-[18%]" },
                             // These secondary columns are dropped on narrow

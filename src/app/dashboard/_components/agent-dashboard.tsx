@@ -611,14 +611,18 @@ export function AgentDashboard({
                               width: "w-[12%]",
                               optional: true,
                             },
-                            // Wide enough to hold the "End session" button
-                            // (shown on running interactive rows) plus the
-                            // terminate control. In the compact layout the three
-                            // optional columns are gone, so this column needs a
-                            // larger share — otherwise the no-wrap button group
-                            // overflowed its `justify-end` flex box leftward, on
-                            // top of the adjacent Task description.
-                            { label: "", width: "w-[42%] lg:w-[16%]" },
+                            // Holds the "End session" button (shown on running
+                            // interactive rows) plus the terminate control. The
+                            // action controls are compact and wrap on narrow
+                            // viewports (see TaskRow / InteractiveRow), so this
+                            // column only needs room for the widest single
+                            // control — the rest stacks within the cell instead
+                            // of overflowing leftward onto the Task description.
+                            // Keeping it slim here is what gives the Task column
+                            // real width on mobile: a large fixed share starved
+                            // the description to a sliver even on rows whose
+                            // only action is the small terminate (×) glyph.
+                            { label: "", width: "w-[22%] lg:w-[16%]" },
                           ].map((h, i) => (
                             <th
                               key={i}

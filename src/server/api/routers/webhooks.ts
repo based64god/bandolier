@@ -104,6 +104,11 @@ export const webhooksRouter = createTRPCRouter({
         prefix: z.string().optional(),
         // Optional agent harness image override; blank clears it (use default).
         agentImage: z.string().optional(),
+        // Optional repo-attached system prompt: a blanket instruction appended to
+        // the system prompt of every agent run for the repo, across dashboard,
+        // issue, and webhook runs. Capped to keep it from bloating every job's
+        // env; blank clears it.
+        systemPrompt: z.string().max(10000).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -113,10 +118,14 @@ export const webhooksRouter = createTRPCRouter({
       const agentImage = input.agentImage?.trim()
         ? input.agentImage.trim()
         : null;
+      const systemPrompt = input.systemPrompt?.trim()
+        ? input.systemPrompt.trim()
+        : null;
 
       await upsertRepoConfig(ctx.db, input.repoFullName, ctx.session.user.id, {
         prefix,
         agentImage,
+        systemPrompt,
       });
       return { success: true };
     }),
@@ -137,29 +146,6 @@ export const webhooksRouter = createTRPCRouter({
       const value = input.model.trim() ? input.model.trim() : null;
       await upsertRepoConfig(ctx.db, input.repoFullName, ctx.session.user.id, {
         defaultWebhookModel: value,
-      });
-      return { success: true };
-    }),
-
-  // Set (or clear, with an empty string) the repo-attached system prompt: a
-  // blanket instruction appended to the system prompt of every agent run for the
-  // repo, across dashboard, issue, and webhook runs. Partial upsert so it doesn't
-  // clobber other config. Admin-only, like the rest of the repo configuration.
-  setSystemPrompt: protectedProcedure
-    .input(
-      z.object({
-        repoFullName: z.string().min(1),
-        // Capped to keep the prompt from bloating every job's env; blank clears it.
-        systemPrompt: z.string().max(10000),
-      }),
-    )
-    .mutation(async ({ ctx, input }) => {
-      await requireRepoAdmin(ctx, input.repoFullName);
-      const value = input.systemPrompt.trim()
-        ? input.systemPrompt.trim()
-        : null;
-      await upsertRepoConfig(ctx.db, input.repoFullName, ctx.session.user.id, {
-        systemPrompt: value,
       });
       return { success: true };
     }),

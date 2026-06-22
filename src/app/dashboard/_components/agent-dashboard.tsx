@@ -566,7 +566,7 @@ export function AgentDashboard({
                           {[
                             { label: "Status", width: "w-[12%]", center: true },
                             { label: "Output", width: "w-[10%]" },
-                            { label: "Task", width: "w-[28%]" },
+                            { label: "Task", width: "w-[18%]" },
                             // These secondary columns are dropped on narrow
                             // viewports where space is limited — the row stays
                             // readable with Status/Output/Task alone.
@@ -585,7 +585,11 @@ export function AgentDashboard({
                               width: "w-[9%]",
                               optional: true,
                             },
-                            { label: "", width: "w-[8%]" },
+                            // Wide enough to hold the "End session" button
+                            // (shown on running interactive rows) plus the
+                            // terminate control without the fixed column
+                            // clipping them behind the Task text.
+                            { label: "", width: "w-[16%]" },
                           ].map((h, i) => (
                             <th
                               key={i}

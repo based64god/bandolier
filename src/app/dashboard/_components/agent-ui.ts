@@ -67,6 +67,23 @@ export function isAgentOutputResolved(agent: {
   return false;
 }
 
+/**
+ * The text to show in the hover tooltip for a task's name cell. The cell renders
+ * `displayName`, which for an ad-hoc task is only a 60-char preview of the prompt
+ * (server-truncated with an ellipsis) — so on hover we surface the full prompt
+ * instead. Issue tasks show `#N: title`, which is already untruncated, and their
+ * `prompt` is the entire issue body (not a longer form of the label), so those
+ * keep the label.
+ */
+export function taskNameTooltip(agent: {
+  displayName: string;
+  prompt: string | null;
+  issueNumber: string | null;
+}): string {
+  if (!agent.issueNumber && agent.prompt) return agent.prompt;
+  return agent.displayName;
+}
+
 // When the finished job will be garbage-collected, shown as a local clock time
 // (e.g. "3:25 PM"). Null/running → "—"; an already-passed expiry → "expiring…".
 // The date is appended when the expiry doesn't fall on the current local day, so

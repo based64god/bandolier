@@ -7,6 +7,7 @@ import {
   SPINNER_STATUSES,
   STATUS_ICON_PATHS,
   STATUS_STYLES,
+  taskNameTooltip,
 } from "~/app/dashboard/_components/agent-ui";
 
 const KNOWN_STATUSES = ["Running", "Pending", "Failed", "Succeeded", "Unknown"];
@@ -116,6 +117,39 @@ describe("isAgentDone", () => {
     );
     // Stable sort keeps active agents in their original order, ahead of done ones.
     expect(sorted.map((a) => a.name)).toEqual(["b", "d", "a", "c"]);
+  });
+});
+
+describe("taskNameTooltip", () => {
+  it("surfaces the full prompt for an ad-hoc task whose label is a truncated preview", () => {
+    const prompt = "a".repeat(80);
+    expect(
+      taskNameTooltip({
+        displayName: `${prompt.slice(0, 60)}…`,
+        prompt,
+        issueNumber: null,
+      }),
+    ).toBe(prompt);
+  });
+
+  it("keeps the label for an issue task, whose prompt is the whole issue body", () => {
+    expect(
+      taskNameTooltip({
+        displayName: "#42: Fix the thing",
+        prompt: "## Issue #42: Fix the thing\n\nLong body…",
+        issueNumber: "42",
+      }),
+    ).toBe("#42: Fix the thing");
+  });
+
+  it("falls back to the label when no prompt is available", () => {
+    expect(
+      taskNameTooltip({
+        displayName: "some-pod-name",
+        prompt: null,
+        issueNumber: null,
+      }),
+    ).toBe("some-pod-name");
   });
 });
 

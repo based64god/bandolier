@@ -50,11 +50,16 @@ export function TaskRow({
       className="cursor-pointer hover:bg-white/[0.04]"
     >
       <td className="px-3 py-2 text-center align-middle md:px-4 md:py-3">
-        <StatusBadge status={agent.status} />
+        {/* Centered to match the centered "Status" header — a flex wrapper
+            keeps the pill centered regardless of its (status-dependent) width,
+            mirroring the InteractiveRow's status cell. */}
+        <div className="flex justify-center">
+          <StatusBadge status={agent.status} />
+        </div>
       </td>
 
       <td
-        className="px-3 py-2 align-middle md:px-4 md:py-3"
+        className="px-4 py-2 align-middle md:px-5 md:py-3"
         onClick={(e) => e.stopPropagation()}
       >
         <OutputBadge
@@ -66,11 +71,13 @@ export function TaskRow({
       </td>
 
       <td className="px-3 py-2 align-middle md:px-4 md:py-3">
-        {/* Clamped to one line so a long description can't bleed past the fixed
-            column width into the actions alongside it. */}
+        {/* Clamped to one line only while the confirm/cancel buttons are
+            showing — that's when a long description could bleed past the fixed
+            column width into the wider actions alongside it. With just the
+            compact terminate (×) control, the full name can use the room. */}
         <span
           title={agent.displayName}
-          className="block truncate text-sm text-white/90"
+          className={`block text-sm text-white/90 ${confirmKill ? "truncate" : ""}`}
         >
           {agent.displayName}
         </span>

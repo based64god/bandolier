@@ -564,36 +564,67 @@ export function AgentDashboard({
                       <thead>
                         <tr className="border-b border-white/10 bg-white/5 text-left text-xs font-medium tracking-wider text-white/50 uppercase">
                           {[
-                            { label: "Status", width: "w-[12%]", center: true },
-                            { label: "Output", width: "w-[10%]" },
-                            { label: "Task", width: "w-[18%]" },
+                            // Each always-visible column carries a distinct
+                            // mobile (`width`) and desktop (`mdWidth`) size. The
+                            // three optional columns are hidden below `md`, so
+                            // only the four visible ones get a base mobile width
+                            // and those four must sum to 100% — `table-fixed`
+                            // otherwise scales the unfilled remainder
+                            // proportionally, shrinking Actions to ~16/56 ≈ 29%
+                            // of the row. That is too narrow for the
+                            // whitespace-nowrap "End session" button plus the
+                            // terminate control, so the button group overflows
+                            // leftward and clips into the Task description.
+                            {
+                              label: "Status",
+                              width: "w-[14%]",
+                              mdWidth: "md:w-[12%]",
+                              center: true,
+                            },
+                            {
+                              label: "Output",
+                              width: "w-[12%]",
+                              mdWidth: "md:w-[10%]",
+                            },
+                            {
+                              label: "Task",
+                              width: "w-[26%]",
+                              mdWidth: "md:w-[18%]",
+                            },
                             // These secondary columns are dropped on narrow
                             // viewports where space is limited — the row stays
                             // readable with Status/Output/Task alone.
                             {
                               label: "Created by",
-                              width: "w-[15%]",
+                              width: "md:w-[15%]",
                               optional: true,
                             },
                             {
                               label: "Currently",
-                              width: "w-[18%]",
+                              width: "md:w-[18%]",
                               optional: true,
                             },
                             {
                               label: "Expires",
-                              width: "w-[9%]",
+                              width: "md:w-[9%]",
                               optional: true,
                             },
                             // Wide enough to hold the "End session" button
                             // (shown on running interactive rows) plus the
                             // terminate control without the fixed column
-                            // clipping them behind the Task text.
-                            { label: "", width: "w-[16%]" },
+                            // clipping them behind the Task text. Mobile gets a
+                            // generous 48% so the button group fits even on a
+                            // ~320px viewport; desktop reclaims the space the
+                            // restored optional columns need.
+                            {
+                              label: "",
+                              width: "w-[48%]",
+                              mdWidth: "md:w-[16%]",
+                            },
                           ].map((h, i) => (
                             <th
                               key={i}
-                              className={`px-3 py-2 align-middle md:px-4 md:py-3 ${h.width} ${h.center ? "text-center" : ""} ${h.optional ? "hidden md:table-cell" : ""}`}
+                              className={`px-3 py-2 align-middle md:px-4 md:py-3 ${h.width} ${h.mdWidth ?? ""} ${h.center ? "text-center" : ""} ${h.optional ? "hidden md:table-cell" : ""}`}
                             >
                               {h.label}
                             </th>

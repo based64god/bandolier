@@ -1,5 +1,7 @@
 // Shared presentation helpers for agent tables (per-repo view + overview panel).
 
+import type { GithubItemState } from "~/server/agents/github-issues";
+
 export const STATUS_STYLES: Record<string, string> = {
   // Classic palette: a running agent is blue (in-flight), a finished one green.
   Running: "border-blue-500/40 bg-blue-500/20 text-blue-300",
@@ -41,6 +43,28 @@ const DONE_STATUSES = new Set(["Succeeded", "Failed"]);
 /** Whether an agent has finished running (so it can sink to the bottom). */
 export function isAgentDone(status: string): boolean {
   return DONE_STATUSES.has(status);
+}
+
+/**
+ * Whether a task's output has reached a terminal state on GitHub: a merged or
+ * closed pull request, or a closed/completed created issue. Tasks with no output
+ * yet, or whose output is still open, are not resolved. Mirrors OutputBadge's
+ * precedence — a created issue stands in for the output when present, otherwise
+ * the pull request — so the filter matches the badge a user sees on the row.
+ */
+export function isAgentOutputResolved(agent: {
+  pullRequestUrl: string | null;
+  pullRequestState: GithubItemState | null;
+  createdIssueUrl: string | null;
+  createdIssueState: GithubItemState | null;
+}): boolean {
+  if (agent.createdIssueUrl) {
+    return agent.createdIssueState != null && agent.createdIssueState !== "open";
+  }
+  if (agent.pullRequestUrl) {
+    return agent.pullRequestState != null && agent.pullRequestState !== "open";
+  }
+  return false;
 }
 
 // When the finished job will be garbage-collected, shown as a local clock time

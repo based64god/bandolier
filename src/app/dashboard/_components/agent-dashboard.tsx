@@ -10,7 +10,7 @@ import { InstallButton } from "~/app/_components/install-button";
 import { repoToNamespace } from "~/server/agents/namespace";
 import { authClient } from "~/server/better-auth/client";
 import { api } from "~/trpc/react";
-import { isAgentDone } from "./agent-ui";
+import { isAgentOutputResolved } from "./agent-ui";
 import { DeployModal } from "./deploy-modal";
 import { InteractiveRow } from "./interactive-sessions";
 import { LogModal } from "./log-modal";
@@ -156,14 +156,14 @@ export function AgentDashboard({
     },
   );
 
-  // The "hide completed" filter persists in the URL (?hideCompleted=1) so it
+  // The "hide resolved" filter persists in the URL (?hideResolved=1) so it
   // survives refreshes and is shareable.
-  const hideCompleted = searchParams.get("hideCompleted") === "1";
+  const hideResolved = searchParams.get("hideResolved") === "1";
 
-  function toggleHideCompleted() {
+  function toggleHideResolved() {
     const params = new URLSearchParams(searchParams.toString());
-    if (hideCompleted) params.delete("hideCompleted");
-    else params.set("hideCompleted", "1");
+    if (hideResolved) params.delete("hideResolved");
+    else params.set("hideResolved", "1");
     const qs = params.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
   }
@@ -171,15 +171,15 @@ export function AgentDashboard({
   // One contiguous list. Tasks awaiting input float to the top regardless of
   // age (they need the user now); the rest follow newest-first. Interactive
   // tasks render as expandable cards (unchanged behaviour); the rest as rows.
-  // The "hide completed" filter optionally drops finished (Succeeded/Failed)
-  // tasks.
+  // The "hide resolved" filter optionally drops tasks whose output has reached a
+  // terminal state on GitHub — a merged/closed PR or a closed/completed issue.
   const sortedAgents = [...agents].sort((a, b) => {
     const awaitDiff = Number(b.awaitingInput) - Number(a.awaitingInput);
     if (awaitDiff !== 0) return awaitDiff;
     return (b.createdAt ?? "").localeCompare(a.createdAt ?? "");
   });
-  const visibleAgents = hideCompleted
-    ? sortedAgents.filter((a) => !isAgentDone(a.status))
+  const visibleAgents = hideResolved
+    ? sortedAgents.filter((a) => !isAgentOutputResolved(a))
     : sortedAgents;
 
   // Interactive agents still drive the awaiting-input alerts.
@@ -532,19 +532,19 @@ export function AgentDashboard({
                   <label className="flex cursor-pointer items-center gap-2 text-xs text-white/50 select-none hover:text-white/70">
                     <input
                       type="checkbox"
-                      checked={hideCompleted}
-                      onChange={toggleHideCompleted}
+                      checked={hideResolved}
+                      onChange={toggleHideResolved}
                       className="h-3.5 w-3.5 rounded border-white/20 bg-white/5 accent-purple-500"
                     />
-                    Hide completed
+                    Hide resolved
                   </label>
                 </div>
 
                 {visibleAgents.length === 0 ? (
                   <div className="rounded-xl border border-white/10 bg-white/5 py-12 text-center text-sm text-white/40">
-                    All tasks are completed.{" "}
+                    All tasks are resolved.{" "}
                     <button
-                      onClick={toggleHideCompleted}
+                      onClick={toggleHideResolved}
                       className="text-white/70 underline hover:text-white"
                     >
                       Show them

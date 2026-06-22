@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   expiresAtLocal,
   isAgentDone,
+  isAgentOutputResolved,
   SPINNER_STATUSES,
   STATUS_ICON_PATHS,
   STATUS_STYLES,
@@ -115,5 +116,84 @@ describe("isAgentDone", () => {
     );
     // Stable sort keeps active agents in their original order, ahead of done ones.
     expect(sorted.map((a) => a.name)).toEqual(["b", "d", "a", "c"]);
+  });
+});
+
+describe("isAgentOutputResolved", () => {
+  const base = {
+    pullRequestUrl: null,
+    pullRequestState: null,
+    createdIssueUrl: null,
+    createdIssueState: null,
+  };
+
+  it("is not resolved when the task has produced no output yet", () => {
+    expect(isAgentOutputResolved(base)).toBe(false);
+  });
+
+  it("is not resolved while the pull request is still open", () => {
+    expect(
+      isAgentOutputResolved({
+        ...base,
+        pullRequestUrl: "https://github.com/o/r/pull/1",
+        pullRequestState: "open",
+      }),
+    ).toBe(false);
+  });
+
+  it("resolves a merged or closed pull request", () => {
+    for (const state of ["merged", "closed"] as const) {
+      expect(
+        isAgentOutputResolved({
+          ...base,
+          pullRequestUrl: "https://github.com/o/r/pull/1",
+          pullRequestState: state,
+        }),
+      ).toBe(true);
+    }
+  });
+
+  it("treats a PR with unknown (null) state as unresolved", () => {
+    expect(
+      isAgentOutputResolved({
+        ...base,
+        pullRequestUrl: "https://github.com/o/r/pull/1",
+        pullRequestState: null,
+      }),
+    ).toBe(false);
+  });
+
+  it("resolves a closed or completed created issue", () => {
+    for (const state of ["closed", "completed"] as const) {
+      expect(
+        isAgentOutputResolved({
+          ...base,
+          createdIssueUrl: "https://github.com/o/r/issues/1",
+          createdIssueState: state,
+        }),
+      ).toBe(true);
+    }
+  });
+
+  it("is not resolved while the created issue is still open", () => {
+    expect(
+      isAgentOutputResolved({
+        ...base,
+        createdIssueUrl: "https://github.com/o/r/issues/1",
+        createdIssueState: "open",
+      }),
+    ).toBe(false);
+  });
+
+  it("prefers the created issue over the PR, mirroring the output badge", () => {
+    // Issue present but open → unresolved, even if the PR is merged.
+    expect(
+      isAgentOutputResolved({
+        pullRequestUrl: "https://github.com/o/r/pull/1",
+        pullRequestState: "merged",
+        createdIssueUrl: "https://github.com/o/r/issues/1",
+        createdIssueState: "open",
+      }),
+    ).toBe(false);
   });
 });

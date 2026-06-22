@@ -560,8 +560,19 @@ export function AgentDashboard({
                       <thead>
                         <tr className="border-b border-white/10 bg-white/5 text-left text-xs font-medium tracking-wider text-white/50 uppercase">
                           {[
-                            { label: "Status", width: "w-[10%]", center: true },
-                            { label: "Output", width: "w-[10%]" },
+                            // Status/Output carry pills with hard minimum
+                            // widths (e.g. the "Succeeded" status pill, the
+                            // "Issue #1234" source link). The compact (narrow)
+                            // layout shows only Status/Output/Task/Actions, so
+                            // these get a generous share there; in the full
+                            // layout (lg+, see below) they shrink once the wide
+                            // viewport gives every column room.
+                            {
+                              label: "Status",
+                              width: "w-[19%] lg:w-[11%]",
+                              center: true,
+                            },
+                            { label: "Output", width: "w-[25%] lg:w-[12%]" },
                             // The primary column: `w-auto` so it absorbs all the
                             // width the fixed columns leave behind. A fixed share
                             // here would clamp the description to a constant
@@ -571,38 +582,41 @@ export function AgentDashboard({
                             // wasting the freed space. Mirrors the Repository
                             // column in the overview panel.
                             { label: "Task", width: "w-auto" },
-                            // These secondary columns are dropped on narrow
-                            // viewports where space is limited — the row stays
-                            // readable with Status/Output/Task alone.
+                            // The three secondary columns appear only in the full
+                            // layout (lg+). Below `lg` — including the 768–1023
+                            // tablet band — the row stays readable with
+                            // Status/Output/Task alone. (Showing all seven at
+                            // `md` starved the pill columns: a centered Status
+                            // pill wider than its cell overflowed symmetrically
+                            // and bled out past the table's edge, and the
+                            // "Issue #N" source spilled into Currently.)
                             {
                               label: "Created by",
-                              width: "w-[15%]",
+                              width: "w-[16%]",
                               optional: true,
                             },
                             {
                               label: "Currently",
-                              width: "w-[18%]",
+                              width: "w-[15%]",
                               optional: true,
                             },
                             {
                               label: "Expires",
-                              width: "w-[9%]",
+                              width: "w-[12%]",
                               optional: true,
                             },
                             // Wide enough to hold the "End session" button
                             // (shown on running interactive rows) plus the
-                            // terminate control. On narrow viewports the three
-                            // optional columns are gone, so this column's share
-                            // of the remaining width shrinks — too small to fit
-                            // the no-wrap button, which then overflowed its
-                            // `justify-end` flex box leftward, on top of the
-                            // adjacent Task description. A wider mobile share
-                            // keeps the actions inside their own column.
-                            { label: "", width: "w-[28%] md:w-[16%]" },
+                            // terminate control. In the compact layout the three
+                            // optional columns are gone, so this column needs a
+                            // larger share — otherwise the no-wrap button group
+                            // overflowed its `justify-end` flex box leftward, on
+                            // top of the adjacent Task description.
+                            { label: "", width: "w-[42%] lg:w-[16%]" },
                           ].map((h, i) => (
                             <th
                               key={i}
-                              className={`px-3 py-2 align-middle md:px-4 md:py-3 ${h.width} ${h.center ? "text-center" : ""} ${h.optional ? "hidden md:table-cell" : ""}`}
+                              className={`px-3 py-2 align-middle md:px-4 md:py-3 ${h.width} ${h.center ? "text-center" : ""} ${h.optional ? "hidden lg:table-cell" : ""}`}
                             >
                               {h.label}
                             </th>

@@ -17,12 +17,12 @@ import {
 
 type Task = RouterOutputs["agents"]["list"][number];
 
-// Mirrors Tailwind's `md` breakpoint (48rem / 768px), which is where the table
+// Mirrors Tailwind's `lg` breakpoint (64rem / 1024px), which is where the table
 // shows or hides its three secondary columns.
-const MD_QUERY = "(min-width: 48rem)";
+const LG_QUERY = "(min-width: 64rem)";
 
 /**
- * Tracks whether the viewport is at or above the `md` breakpoint, so the
+ * Tracks whether the viewport is at or above the `lg` breakpoint, so the
  * expanded row can span exactly the columns that are actually rendered. Starts
  * `true` to match SSR (where the optional columns are present) and corrects on
  * mount, avoiding a hydration mismatch.
@@ -30,7 +30,7 @@ const MD_QUERY = "(min-width: 48rem)";
 function useIsDesktop() {
   const [isDesktop, setIsDesktop] = useState(true);
   useEffect(() => {
-    const mql = window.matchMedia(MD_QUERY);
+    const mql = window.matchMedia(LG_QUERY);
     const update = () => setIsDesktop(mql.matches);
     update();
     mql.addEventListener("change", update);
@@ -189,9 +189,9 @@ export function InteractiveRow({
           </div>
         </td>
 
-        {/* Created by — dropped on narrow viewports where space is limited. */}
+        {/* Created by — shown only in the full layout (lg+). */}
         <td
-          className="hidden px-3 py-2 align-middle md:table-cell md:px-4 md:py-3"
+          className="hidden px-3 py-2 align-middle md:px-4 md:py-3 lg:table-cell"
           onClick={(e) => e.stopPropagation()}
         >
           <SourceBadge
@@ -203,9 +203,9 @@ export function InteractiveRow({
           />
         </td>
 
-        {/* Currently — clamped to one line, full text on hover. Dropped on
-            narrow viewports where space is limited. */}
-        <td className="hidden px-3 py-2 align-middle md:table-cell md:px-4 md:py-3">
+        {/* Currently — clamped to one line, full text on hover. Shown only in
+            the full layout (lg+). */}
+        <td className="hidden px-3 py-2 align-middle md:px-4 md:py-3 lg:table-cell">
           <span
             title={agent.currently ?? undefined}
             className="block max-w-[16rem] truncate text-xs text-white/40 italic"
@@ -214,8 +214,8 @@ export function InteractiveRow({
           </span>
         </td>
 
-        {/* Expires — dropped on narrow viewports where space is limited. */}
-        <td className="hidden px-3 py-2 align-middle whitespace-nowrap text-white/50 tabular-nums md:table-cell md:px-4 md:py-3">
+        {/* Expires — shown only in the full layout (lg+). */}
+        <td className="hidden px-3 py-2 align-middle whitespace-nowrap text-white/50 tabular-nums md:px-4 md:py-3 lg:table-cell">
           {expiresAtLocal(agent.expiresAt)}
         </td>
 
@@ -271,7 +271,7 @@ export function InteractiveRow({
       {!collapsed && (
         <tr className={awaiting ? "bg-amber-500/[0.06]" : undefined}>
           {/* Span only the columns that exist at the current breakpoint. The
-              three secondary columns are dropped below `md`, so spanning all
+              three secondary columns are dropped below `lg`, so spanning all
               seven there would conjure phantom columns and re-balance the
               table, shifting every row sideways as it expands. */}
           <td

@@ -249,6 +249,39 @@ async function resolveItemStates(
   return { pullRequestState, createdIssueState, issueState };
 }
 
+/**
+ * Recovers a run's output URLs from the durable `taskRun` row when they couldn't
+ * be read from the pod's logs. The harness records them via the ingest callback,
+ * so a finished run's PR/issue links survive pod loss (TTL deletion, eviction,
+ * node failure, transient log-read errors). Only queries for URLs the log read
+ * didn't already supply, keeping the common (live-pod) path free of DB lookups.
+ */
+async function withPersistedOutput(
+  database: typeof db,
+  jobName: string,
+  phase: string,
+  logUrls: { pullRequestUrl: string | null; createdIssueUrl: string | null },
+): Promise<{ pullRequestUrl: string | null; createdIssueUrl: string | null }> {
+  // A running pod has no persisted output to recover yet; only a finished run's
+  // URLs are on the row, so skip the lookup (keeps the live path query-free).
+  const terminal = phase === "Succeeded" || phase === "Failed";
+  if (!terminal || (logUrls.pullRequestUrl && logUrls.createdIssueUrl)) {
+    return logUrls;
+  }
+  const [run] = await database
+    .select({
+      pullRequestUrl: taskRun.pullRequestUrl,
+      createdIssueUrl: taskRun.createdIssueUrl,
+    })
+    .from(taskRun)
+    .where(eq(taskRun.jobName, jobName))
+    .limit(1);
+  return {
+    pullRequestUrl: logUrls.pullRequestUrl ?? run?.pullRequestUrl ?? null,
+    createdIssueUrl: logUrls.createdIssueUrl ?? run?.createdIssueUrl ?? null,
+  };
+}
+
 /** Maps a pod into the task shape returned by `list`/`get` (reads logs once). */
 async function podToTask(
   pod: V1Pod,
@@ -272,8 +305,17 @@ async function podToTask(
     ).toISOString()
     : null;
 
-  const { currently, pullRequestUrl, createdIssueUrl, awaitingInput } =
-    await inspectPod(name, namespace, status, kubeconfig);
+  const inspection = await inspectPod(name, namespace, status, kubeconfig);
+  const { currently, awaitingInput } = inspection;
+  const jobName = pod.metadata?.labels?.["bandolier.io/job"] ?? name;
+  // Fall back to the persisted output when logs didn't yield it (pod gone or a
+  // transient log-read failure) — the harness records it on the run row.
+  const { pullRequestUrl, createdIssueUrl } = await withPersistedOutput(
+    database,
+    jobName,
+    status,
+    inspection,
+  );
 
   const containerEnv = pod.spec?.containers?.[0]?.env ?? [];
   const prompt =
@@ -299,7 +341,7 @@ async function podToTask(
 
   return {
     name,
-    jobName: pod.metadata?.labels?.["bandolier.io/job"] ?? name,
+    jobName,
     repoFullName,
     displayName: annotations["bandolier.io/display-name"] ?? name,
     // Pod creation time, used to sort the task list reverse-chronologically.
@@ -409,8 +451,22 @@ export const agentsRouter = createTRPCRouter({
 
           // The pull-request URL lives in the harness logs; read it per pod
           // (cheap here — only the user's own agents, and terminal pods cache).
-          const { pullRequestUrl, createdIssueUrl, awaitingInput } =
-            await inspectPod(name, namespace, status, kubeconfig);
+          const inspection = await inspectPod(
+            name,
+            namespace,
+            status,
+            kubeconfig,
+          );
+          const { awaitingInput } = inspection;
+          const jobName = pod.metadata?.labels?.["bandolier.io/job"] ?? name;
+          // Fall back to the persisted output when the logs are gone (TTL
+          // deletion, eviction) or unreadable — kept on the durable run row.
+          const { pullRequestUrl, createdIssueUrl } = await withPersistedOutput(
+            ctx.db,
+            jobName,
+            status,
+            inspection,
+          );
           const interactive =
             pod.metadata?.labels?.[INTERACTIVE_LABEL] === "true";
 

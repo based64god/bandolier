@@ -68,8 +68,12 @@ var (
 	outputIssueURL string
 )
 
-// uploadTranscript best-effort POSTs the captured transcript to Bandolier so it
-// outlives the Job's TTL. No-op when the ingest env isn't injected.
+// uploadTranscript best-effort POSTs the run's structured output (its PR/issue
+// URL) and captured transcript to Bandolier's ingest callback. The output is
+// persisted on the run row so it survives pod-log loss; the transcript is stored
+// in object storage when the server has a bucket configured. Reporting the
+// output is the point of this call — it runs for every run, not just when S3
+// artifacts are enabled. No-op only when the ingest env isn't injected.
 func uploadTranscript() {
 	url := os.Getenv("BANDOLIER_INGEST_URL")
 	token := os.Getenv("BANDOLIER_INGEST_TOKEN")

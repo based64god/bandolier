@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { api } from "~/trpc/react";
 import type { RouterOutputs } from "~/trpc/react";
-import { expiresAtLocal } from "./agent-ui";
+import { expiresAtLocal, taskNameTooltip } from "./agent-ui";
 import { HarnessSegment, UserSegment } from "./log-modal";
 import { parseSegments } from "./log-segments";
 import { OutputBadge, SourceBadge } from "./output-badge";
@@ -186,7 +186,7 @@ export function InteractiveRow({
                 `min-width: auto` keeps it at full text width and `truncate`
                 never engages. */}
             <span
-              title={agent.displayName}
+              title={taskNameTooltip(agent)}
               className="min-w-0 truncate text-sm text-white/90"
             >
               {agent.displayName}

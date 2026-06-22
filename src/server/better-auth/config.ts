@@ -16,10 +16,13 @@ export const auth = betterAuth({
     github: {
       clientId: env.BETTER_AUTH_GITHUB_CLIENT_ID,
       clientSecret: env.BETTER_AUTH_GITHUB_CLIENT_SECRET,
-      // repo:     list repositories + clone/push (incl. private).
-      // workflow: required to push changes that touch .github/workflows/*,
-      //           otherwise GitHub rejects the push and PR creation fails.
-      scope: ["repo", "workflow"],
+      // repo:          list repositories + clone/push (incl. private).
+      // workflow:      required to push changes that touch .github/workflows/*,
+      //                otherwise GitHub rejects the push and PR creation fails.
+      // read:packages: pull private custom harness images from GHCR. GHCR
+      //                rejects GitHub App installation tokens, so the pull is
+      //                done with the triggering user's OAuth token instead.
+      scope: ["repo", "workflow", "read:packages"],
     },
   },
 });

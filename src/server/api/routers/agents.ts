@@ -1117,25 +1117,12 @@ export const agentsRouter = createTRPCRouter({
             });
           }
           // A custom image on a private ghcr.io package needs pull credentials —
-          // mint them from the repo's GitHub App installation token. Best-effort:
-          // a failure leaves the cluster to pull with its own node credentials.
+          // use the deploying user's GitHub OAuth token (GHCR rejects App
+          // installation tokens). Best-effort: no token leaves the cluster to
+          // pull with its own node credentials.
           if (agentImage) {
-            try {
-              imagePullSecret =
-                (await getRegistryPullSecret(
-                  ctx.db,
-                  input.repoFullName,
-                  agentImage,
-                  Date.now(),
-                )) ?? undefined;
-            } catch (err) {
-              console.warn(
-                "[bandolier:deploy] image pull secret lookup failed",
-                {
-                  error: err instanceof Error ? err.message : String(err),
-                },
-              );
-            }
+            imagePullSecret =
+              getRegistryPullSecret(agentImage, githubToken) ?? undefined;
           }
           try {
             repoSystemPrompt =

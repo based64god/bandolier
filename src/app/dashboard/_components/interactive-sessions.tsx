@@ -174,17 +174,15 @@ export function InteractiveRow({
             >
               <path d="M4.22 6.22a.75.75 0 0 1 1.06 0L8 8.94l2.72-2.72a.75.75 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 7.28a.75.75 0 0 1 0-1.06Z" />
             </svg>
-            {/* Clamped to one line only while the "End session" button is
-                showing (running sessions) — that's when a long description
-                could bleed past the fixed column width into the button
-                alongside it. Once the session ends and the button is gone, the
-                full name can use the room. `min-w-0` lets this flex child
+            {/* Always clamped to one line so a long description can't wrap and
+                grow the row taller than its single-line neighbours; the full
+                text is available on hover. `min-w-0` lets this flex child
                 shrink below its content width — without it the item's default
                 `min-width: auto` keeps it at full text width and `truncate`
                 never engages. */}
             <span
               title={agent.displayName}
-              className={`min-w-0 text-sm text-white/90 ${running ? "truncate" : ""}`}
+              className="min-w-0 truncate text-sm text-white/90"
             >
               {agent.displayName}
             </span>

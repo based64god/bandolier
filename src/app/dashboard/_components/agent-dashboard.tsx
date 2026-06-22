@@ -567,14 +567,16 @@ export function AgentDashboard({
                             // these get a generous share there; in the full
                             // layout (lg+, see below) they shrink once the wide
                             // viewport gives every column room.
+                            // Status/Output share the same widths as the
+                            // overview panel so the two tables line up.
                             {
                               label: "Status",
-                              width: "w-[19%] lg:w-[11%]",
+                              width: "w-[18%] lg:w-[10%]",
                               center: true,
                             },
                             {
                               label: "Output",
-                              width: "w-[25%] lg:w-[12%]",
+                              width: "w-[23%] lg:w-[11%]",
                               center: true,
                             },
                             // The primary column: `w-auto` so it absorbs all the

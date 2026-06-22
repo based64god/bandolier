@@ -132,9 +132,13 @@ export function OverviewPanel({ notify }: { notify: boolean }) {
                     <div className="flex flex-col items-center gap-1">
                       <StatusBadge status={agent.status} />
                       {agent.awaitingInput && (
-                        <span className="flex items-center gap-1 rounded-full border border-amber-400/50 bg-amber-400/15 px-2 py-0.5 text-xs font-medium text-amber-200">
+                        <span
+                          title="Waiting"
+                          aria-label="Waiting"
+                          className="flex items-center justify-center gap-1 rounded-full border border-amber-400/50 bg-amber-400/15 px-1.5 py-0.5 text-xs font-medium whitespace-nowrap text-amber-200 md:px-2"
+                        >
                           <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-300" />
-                          Waiting for input
+                          <span className="hidden md:inline">Waiting</span>
                         </span>
                       )}
                     </div>

@@ -572,7 +572,11 @@ export function AgentDashboard({
                               width: "w-[19%] lg:w-[11%]",
                               center: true,
                             },
-                            { label: "Output", width: "w-[25%] lg:w-[12%]" },
+                            {
+                              label: "Output",
+                              width: "w-[25%] lg:w-[12%]",
+                              center: true,
+                            },
                             // The primary column: `w-auto` so it absorbs all the
                             // width the fixed columns leave behind. A fixed share
                             // here would clamp the description to a constant

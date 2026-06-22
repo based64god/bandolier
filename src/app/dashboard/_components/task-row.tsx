@@ -70,15 +70,20 @@ export function TaskRow({
       </td>
 
       <td
-        className="px-4 py-2 align-middle md:px-5 md:py-3"
+        className="px-4 py-2 text-center align-middle md:px-5 md:py-3"
         onClick={(e) => e.stopPropagation()}
       >
-        <OutputBadge
-          createdIssueUrl={agent.createdIssueUrl}
-          createdIssueState={agent.createdIssueState}
-          pullRequestUrl={agent.pullRequestUrl}
-          pullRequestState={agent.pullRequestState}
-        />
+        {/* Centered to match the centered "Output" header — a flex wrapper
+            keeps the badge (or the empty-state dash) centered regardless of its
+            width, mirroring the Status cell. */}
+        <div className="flex justify-center">
+          <OutputBadge
+            createdIssueUrl={agent.createdIssueUrl}
+            createdIssueState={agent.createdIssueState}
+            pullRequestUrl={agent.pullRequestUrl}
+            pullRequestState={agent.pullRequestState}
+          />
+        </div>
       </td>
 
       <td className="px-3 py-2 align-middle md:px-4 md:py-3">

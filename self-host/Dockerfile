@@ -1,6 +1,6 @@
 # bandolier-self-host — the agent harness plus the Go and Node toolchains this
 # repo is built with, so the image can build and run Bandolier itself (not just
-# drive agents). It also carries Chromium + Puppeteer so agents can drive a
+# drive agents). It also carries Chromium + Playwright so agents can drive a
 # headless browser to inspect site visuals.
 #
 # Layered on top of the published agent-harness image (which already carries the
@@ -41,11 +41,11 @@ RUN ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
 # Fail the build loudly if either toolchain can't run on the base image.
 RUN go version && node --version && npm --version
 
-# ── Chromium + Puppeteer ──────────────────────────────────────────────────────
+# ── Chromium + Playwright ─────────────────────────────────────────────────────
 # So agents can drive a headless browser to inspect site visuals (screenshots,
-# rendered DOM, layout). We install Debian's own Chromium, then install Puppeteer
-# globally and point it at the system binary — PUPPETEER_SKIP_CHROMIUM_DOWNLOAD
-# keeps Puppeteer from fetching a second, bundled copy, so the browser can never
+# rendered DOM, layout). We install Debian's own Chromium, then install Playwright
+# globally and point it at the system binary — PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD
+# keeps Playwright from fetching a second, bundled copy, so the browser can never
 # drift from the one the OS patches. (The base image is debian:latest, which
 # ships chromium.)
 #
@@ -59,12 +59,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         fonts-noto-color-emoji \
     && rm -rf /var/lib/apt/lists/*
 
-# PUPPETEER_SKIP_DOWNLOAD is the current name; the *_CHROMIUM_* alias covers
-# older Puppeteer releases. Both point launches at the system Chromium above.
-ENV PUPPETEER_SKIP_DOWNLOAD=true
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
-RUN npm install -g puppeteer-core puppeteer
+# PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD stops Playwright from fetching its own bundled
+# browsers; PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH points launches at the system
+# Chromium installed above.
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=true
+ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
+RUN npm install -g playwright-core playwright
 
 # Fail the build loudly if the browser can't launch headless on this image.
 RUN chromium --headless --no-sandbox --disable-gpu --dump-dom about:blank >/dev/null

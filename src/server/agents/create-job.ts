@@ -1,7 +1,6 @@
 import type { AwsCredentials } from "~/server/agents/aws";
 import { env } from "~/env";
 import { ingestToken } from "~/lib/ingest";
-import { artifactsEnabled } from "~/server/agents/artifacts";
 import { SPAWNED_BY_LABEL, spawnedByLabelValue } from "~/server/agents/labels";
 import { db } from "~/server/db";
 import { taskRun } from "~/server/db/schema";
@@ -366,25 +365,28 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
     envVars.push({ name: "OUTPUT_TYPE", value: "issue" });
   }
 
-  // Both the artifact upload and the interactive input poll are authenticated by
-  // the same per-job HMAC token; inject it (and the job name) when either is in
-  // play, then add the feature-specific callback URLs.
-  const persistArtifacts = artifactsEnabled();
-  if (persistArtifacts || spec.interactive) {
-    envVars.push(
-      { name: "BANDOLIER_JOB", value: jobName },
-      {
-        name: "BANDOLIER_INGEST_TOKEN",
-        value: ingestToken(jobName, env.BETTER_AUTH_SECRET),
-      },
-    );
-  }
-  if (persistArtifacts) {
-    envVars.push({
+  // The ingest callback, the artifact upload, and the interactive input poll are
+  // all authenticated by the same per-job HMAC token; inject it (and the job
+  // name) for every run, then add the feature-specific callback URLs.
+  //
+  // The ingest callback runs unconditionally — not just when S3 artifacts are
+  // configured. It's how the harness reports the run's structured output (the
+  // PR/issue URL) back to the database so it survives pod-log loss (TTL
+  // deletion, eviction, node failure). The transcript-to-S3 upload is a separate
+  // concern that the endpoint layers on only when a bucket is set; coupling the
+  // two used to mean a deployment without S3 lost its output the moment its pod
+  // logs went away.
+  envVars.push(
+    { name: "BANDOLIER_JOB", value: jobName },
+    {
+      name: "BANDOLIER_INGEST_TOKEN",
+      value: ingestToken(jobName, env.BETTER_AUTH_SECRET),
+    },
+    {
       name: "BANDOLIER_INGEST_URL",
       value: `${env.BETTER_AUTH_URL}/api/agent-runs`,
-    });
-  }
+    },
+  );
   if (spec.interactive) {
     envVars.push(
       { name: "INTERACTIVE", value: "1" },
@@ -524,18 +526,20 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
     },
   });
 
-  // Record the run so it can be listed/inspected after the Job's TTL deletes
-  // the pod. The harness fills in transcriptKey via the ingest callback.
-  if (persistArtifacts) {
-    await db.insert(taskRun).values({
-      jobName,
-      namespace: ns,
-      displayName: spec.displayName,
-      createdBy: spec.createdBy ?? null,
-      repoFullName: spec.repoFullName ?? null,
-      issueNumber: spec.issueNumber ?? null,
-    });
-  }
+  // Record the run so it can be listed/inspected after the Job's TTL deletes the
+  // pod. Inserted for every run, not just when S3 is configured: the harness
+  // reports the run's structured output (PR/issue URL) into this row via the
+  // ingest callback, and that output must outlive the pod logs regardless of
+  // whether transcript artifacts are also being stored. The transcriptKey column
+  // stays null when there's no bucket to upload to.
+  await db.insert(taskRun).values({
+    jobName,
+    namespace: ns,
+    displayName: spec.displayName,
+    createdBy: spec.createdBy ?? null,
+    repoFullName: spec.repoFullName ?? null,
+    issueNumber: spec.issueNumber ?? null,
+  });
 
   console.log("[bandolier:deploy] job created", {
     job: jobName,

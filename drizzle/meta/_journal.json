@@ -64,6 +64,13 @@
       "when": 1782090154504,
       "tag": "0008_fast_the_initiative",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1782095934405,
+      "tag": "0009_salty_the_renegades",
+      "breakpoints": true
     }
   ]
 }

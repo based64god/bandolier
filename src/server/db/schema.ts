@@ -172,6 +172,13 @@ export const repoWebhookConfig = pgTable("repo_webhook_config", {
   // Null = fall back to the provider's default. An issue's `model:<query>` label
   // overrides this per issue.
   defaultWebhookModel: text("default_webhook_model"),
+  // Optional repo-attached system prompt: a blanket instruction appended to the
+  // system prompt of every agent run for this repo (dashboard, issue, and
+  // webhook; all providers and modes), letting admins set repo-wide guidance —
+  // coding conventions, review checklists, etc. — without repeating it per task.
+  // It is layered on top of the harness's own framing, never replacing it. Null
+  // = no repo-wide prompt.
+  systemPrompt: text("system_prompt"),
   // ── Repo-scoped credentials (admin-only) ──────────────────────────────────
   // Shared infrastructure for everyone working on this repo: a kubeconfig the
   // repo's agents run on and model credentials they authenticate with. Only a

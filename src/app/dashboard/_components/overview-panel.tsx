@@ -101,11 +101,12 @@ export function OverviewPanel({ notify }: { notify: boolean }) {
                 // right and the centered badges read as left-of-header; the
                 // extra width lets text-center actually center the label over
                 // the badges. Back to the compact 14% once md gives it room.
-                { label: "Status", width: "w-[22%] md:w-[14%]", center: true },
+                { label: "Status", width: "w-[18%] md:w-[10%]", center: true },
                 // Wider on mobile so the output pill (Issue/PR + state glyph)
                 // fits its cell; without the extra room the fixed layout
                 // starves this column and the badge spills into Repository.
-                { label: "Output", width: "w-[28%] md:w-[12%]", center: true },
+                // Shares the same widths as the task table (agent-dashboard).
+                { label: "Output", width: "w-[23%] md:w-[11%]", center: true },
                 { label: "Repository", width: "w-[auto]" },
                 // Dropped on narrow viewports where space is limited — the row
                 // stays readable with Status/Output/Repository alone.

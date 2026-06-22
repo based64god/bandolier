@@ -232,9 +232,13 @@ export function InteractiveRow({
           {/* Reserve the tallest control's height (`ACTION_ROW_MIN_H`) so the
               row keeps a constant height whether or not the "End session"
               button is present — without it, a row shrinks the moment a
-              session ends and its button disappears, shifting rows below it. */}
+              session ends and its button disappears, shifting rows below it.
+              The group wraps on narrow viewports (`flex-wrap`) so the "End
+              session" button and terminate glyph stack within the slim mobile
+              Actions column rather than overflowing leftward onto the adjacent
+              Task description; it stays on one line from `lg` up. */}
           <div
-            className={`flex items-center justify-end gap-2 ${ACTION_ROW_MIN_H}`}
+            className={`flex flex-wrap items-center justify-end gap-2 lg:flex-nowrap ${ACTION_ROW_MIN_H}`}
           >
             {running && (
               <button

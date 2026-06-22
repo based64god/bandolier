@@ -6,6 +6,7 @@ import { api } from "~/trpc/react";
 import { useAwaitingInputAlerts, useCompletionAlerts } from "./notifications";
 import { OutputBadge, SourceBadge } from "./output-badge";
 import { StatusBadge } from "./status-badge";
+import { ACTION_ROW_MIN_H } from "./task-row";
 
 /**
  * Home-screen panel listing agents across every repository the user can access.
@@ -136,7 +137,13 @@ export function OverviewPanel({ notify }: { notify: boolean }) {
                   }
                 >
                   <td className="px-3 py-2 text-center align-middle md:px-4 md:py-3">
-                    <div className="flex flex-col items-center gap-1">
+                    {/* Reserve the same row height as the per-repo task table
+                        (`ACTION_ROW_MIN_H`, set there by the Actions cell) so the
+                        overview's rows aren't shorter — the task table's floor
+                        comes from its action controls, which the overview lacks. */}
+                    <div
+                      className={`flex flex-col items-center justify-center gap-1 ${ACTION_ROW_MIN_H}`}
+                    >
                       <StatusBadge status={agent.status} />
                       {agent.awaitingInput && (
                         <span

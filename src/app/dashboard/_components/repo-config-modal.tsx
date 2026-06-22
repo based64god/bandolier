@@ -537,75 +537,6 @@ function RepoDefaultModelSection({ repoFullName }: { repoFullName: string }) {
   );
 }
 
-// Repo-attached system prompt: a blanket instruction appended to the system
-// prompt of every agent run for this repo (dashboard, issue, and webhook; all
-// providers and modes). Uncontrolled textarea seeded from the saved value, saved
-// on submit. Admin-only, like the rest of the repo configuration.
-function RepoSystemPromptSection({ repoFullName }: { repoFullName: string }) {
-  const utils = api.useUtils();
-  const { data: config } = api.webhooks.getConfig.useQuery({ repoFullName });
-  const [result, setResult] = useState<string | null>(null);
-  const promptRef = useRef<HTMLTextAreaElement>(null);
-
-  const save = api.webhooks.setSystemPrompt.useMutation({
-    onSuccess: () => {
-      void utils.webhooks.getConfig.invalidate({ repoFullName });
-      setResult("Saved ✓");
-    },
-  });
-
-  return (
-    <div className="space-y-2 border-t border-white/10 pt-5">
-      <h3 className="text-xs font-semibold tracking-wider text-white/50 uppercase">
-        Repository system prompt
-      </h3>
-      <p className="text-xs text-white/40">
-        A blanket instruction appended to the system prompt of every agent run
-        for this repo — dashboard tasks, issues, and webhook-triggered runs
-        alike. Use it for repo-wide guidance like coding conventions or review
-        checklists. It is layered on top of Bandolier&apos;s own framing, never
-        replacing it. Leave blank for none.
-      </p>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          setResult(null);
-          save.mutate({
-            repoFullName,
-            systemPrompt: promptRef.current?.value ?? "",
-          });
-        }}
-        className="space-y-2"
-      >
-        <textarea
-          key={
-            config
-              ? `sysprompt-${String(config.updatedAt)}`
-              : "sysprompt-loading"
-          }
-          ref={promptRef}
-          rows={5}
-          defaultValue={config?.systemPrompt ?? ""}
-          placeholder={
-            "e.g. Always write tests for new behaviour. Prefer small, focused commits. Follow the existing code style."
-          }
-          className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 focus:border-purple-500/50 focus:outline-none"
-        />
-        <div className="flex items-center gap-3">
-          <button
-            type="submit"
-            disabled={save.isPending}
-            className="rounded-lg bg-purple-600 px-3 py-2 text-sm font-medium text-black hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {save.isPending ? "Saving…" : "Save system prompt"}
-          </button>
-          <CredFeedback error={save.error?.message} ok={result} />
-        </div>
-      </form>
-    </div>
-  );
-}
-
 // Repo-scoped shared infrastructure: kubeconfig + model credentials, plus the
 // user-vs-repo preference toggle and a prominent security warning.
 function RepoCredentialsSection({ repoFullName }: { repoFullName: string }) {
@@ -733,6 +664,7 @@ export function RepoConfigModal({
   // effect; read via the refs on submit.
   const prefixRef = useRef<HTMLInputElement>(null);
   const agentImageRef = useRef<HTMLInputElement>(null);
+  const systemPromptRef = useRef<HTMLTextAreaElement>(null);
 
   const utils = api.useUtils();
   const { data: config } = api.webhooks.getConfig.useQuery({
@@ -789,9 +721,10 @@ export function RepoConfigModal({
         <div className="space-y-5 px-5 py-5">
           <p className="text-xs text-white/40">
             Repository-level settings for this repo: when agents trigger, the
-            image they run on, and the shared credentials they use. Event
-            delivery is handled by the Bandolier GitHub App — install it on this
-            repo (below) rather than configuring a webhook by hand.
+            image they run on, the system prompt they get, and the shared
+            credentials they use. Event delivery is handled by the Bandolier
+            GitHub App — install it on this repo (below) rather than configuring
+            a webhook by hand.
           </p>
 
           {/* GitHub App install */}
@@ -834,6 +767,7 @@ export function RepoConfigModal({
                 repoFullName,
                 prefix: prefixRef.current?.value ?? "",
                 agentImage: agentImageRef.current?.value ?? "",
+                systemPrompt: systemPromptRef.current?.value ?? "",
               });
             }}
             className="space-y-4"
@@ -884,6 +818,35 @@ export function RepoConfigModal({
               </p>
             </div>
 
+            {/* Repository system prompt */}
+            <div className="space-y-1.5">
+              <label className="block text-xs font-medium text-white/60">
+                Repository system prompt{" "}
+                <span className="font-normal text-white/30">(optional)</span>
+              </label>
+              <textarea
+                key={
+                  config
+                    ? `sysprompt-${String(config.updatedAt)}`
+                    : "sysprompt-loading"
+                }
+                ref={systemPromptRef}
+                rows={5}
+                defaultValue={config?.systemPrompt ?? ""}
+                placeholder={
+                  "e.g. Always write tests for new behaviour. Prefer small, focused commits. Follow the existing code style."
+                }
+                className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 focus:border-purple-500/50 focus:outline-none"
+              />
+              <p className="text-xs text-white/30">
+                A blanket instruction appended to the system prompt of every
+                agent run for this repo — dashboard tasks, issues, and
+                webhook-triggered runs alike. Layered on top of
+                Bandolier&apos;s own framing, never replacing it. Leave blank
+                for none.
+              </p>
+            </div>
+
             <div className="flex items-center gap-3">
               <button
                 type="submit"
@@ -909,8 +872,6 @@ export function RepoConfigModal({
           </p>
 
           <RepoDefaultModelSection repoFullName={repoFullName} />
-
-          <RepoSystemPromptSection repoFullName={repoFullName} />
 
           <RepoCredentialsSection repoFullName={repoFullName} />
         </div>

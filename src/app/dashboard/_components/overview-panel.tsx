@@ -99,7 +99,7 @@ export function OverviewPanel({ notify }: { notify: boolean }) {
                 // Wider on mobile so the output pill (Issue/PR + state glyph)
                 // fits its cell; without the extra room the fixed layout
                 // starves this column and the badge spills into Repository.
-                { label: "Output", width: "w-[28%] md:w-[12%]" },
+                { label: "Output", width: "w-[28%] md:w-[12%]", center: true },
                 { label: "Repository", width: "w-[auto]" },
                 // Dropped on narrow viewports where space is limited — the row
                 // stays readable with Status/Output/Repository alone.
@@ -128,7 +128,7 @@ export function OverviewPanel({ notify }: { notify: boolean }) {
                     repo ? "cursor-pointer hover:bg-white/[0.04]" : undefined
                   }
                 >
-                  <td className="px-3 py-2 align-middle md:px-4 md:py-3">
+                  <td className="px-3 py-2 text-center align-middle md:px-4 md:py-3">
                     <div className="flex flex-col items-center gap-1">
                       <StatusBadge status={agent.status} />
                       {agent.awaitingInput && (
@@ -141,7 +141,7 @@ export function OverviewPanel({ notify }: { notify: boolean }) {
                   </td>
 
                   <td
-                    className="px-3 py-2 align-middle md:px-4 md:py-3"
+                    className="px-3 py-2 text-center align-middle md:px-4 md:py-3"
                     onClick={(e) => e.stopPropagation()}
                   >
                     <OutputBadge

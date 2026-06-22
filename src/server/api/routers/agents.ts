@@ -25,7 +25,10 @@ import {
   DEFAULT_MAX_TURNS,
   JOB_TTL_SECONDS,
 } from "~/server/agents/create-job";
-import { getRepoBotToken } from "~/server/agents/github-app";
+import {
+  getRegistryPullSecret,
+  getRepoBotToken,
+} from "~/server/agents/github-app";
 import {
   getGithubIdentity,
   getUserGithubToken,
@@ -1099,6 +1102,9 @@ export const agentsRouter = createTRPCRouter({
         // when unset) and the repo-attached system prompt appended to every run.
         // Best-effort: a lookup failure must not block the deploy.
         let agentImage: string | undefined;
+        let imagePullSecret:
+          | { registry: string; dockerConfigJson: string }
+          | undefined;
         let repoSystemPrompt: string | undefined;
         if (input.repoFullName) {
           try {
@@ -1109,6 +1115,27 @@ export const agentsRouter = createTRPCRouter({
             console.warn("[bandolier:deploy] agent image lookup failed", {
               error: err instanceof Error ? err.message : String(err),
             });
+          }
+          // A custom image on a private ghcr.io package needs pull credentials —
+          // mint them from the repo's GitHub App installation token. Best-effort:
+          // a failure leaves the cluster to pull with its own node credentials.
+          if (agentImage) {
+            try {
+              imagePullSecret =
+                (await getRegistryPullSecret(
+                  ctx.db,
+                  input.repoFullName,
+                  agentImage,
+                  Date.now(),
+                )) ?? undefined;
+            } catch (err) {
+              console.warn(
+                "[bandolier:deploy] image pull secret lookup failed",
+                {
+                  error: err instanceof Error ? err.message : String(err),
+                },
+              );
+            }
           }
           try {
             repoSystemPrompt =
@@ -1148,6 +1175,7 @@ export const agentsRouter = createTRPCRouter({
           geminiApiKey: geminiApiKey ?? undefined,
           kubeconfig,
           agentImage: agentImage ?? undefined,
+          imagePullSecret,
           repoSystemPrompt,
           createdBy: ctx.session.user.name ?? ctx.session.user.email,
           gitName: gitIdentity.name,

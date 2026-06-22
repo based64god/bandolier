@@ -208,3 +208,92 @@ export function clearTokenCache(installationId?: string): void {
   if (installationId) tokenCache.delete(installationId);
   else tokenCache.clear();
 }
+
+// ── Registry pull credentials (private custom agent images) ───────────────────
+
+/** GitHub Container Registry — the registry an App installation token can pull
+ * from, for packages owned by the account the App is installed under. */
+export const GHCR_REGISTRY = "ghcr.io";
+
+/**
+ * The registry host of a container image reference, or null when the image uses
+ * the implicit Docker Hub default (no host component). A leading path segment is
+ * the registry only when it looks like a host — it contains a `.` or `:`, or is
+ * exactly `localhost` — matching Docker's own reference grammar. Examples:
+ *   ghcr.io/acme/img:tag        → "ghcr.io"
+ *   registry.example.com:5000/x → "registry.example.com:5000"
+ *   acme/bandolier-agent        → null  (Docker Hub)
+ *   bandolier-agent             → null
+ */
+export function imageRegistryHost(image: string): string | null {
+  const firstSlash = image.indexOf("/");
+  if (firstSlash === -1) return null;
+  const candidate = image.slice(0, firstSlash);
+  if (
+    candidate === "localhost" ||
+    candidate.includes(".") ||
+    candidate.includes(":")
+  ) {
+    return candidate;
+  }
+  return null;
+}
+
+/**
+ * A Kubernetes `kubernetes.io/dockerconfigjson` payload authenticating to a
+ * single registry with a username/password (here, a GitHub App installation
+ * token). Returned as the JSON string Kubernetes expects under the
+ * `.dockerconfigjson` key.
+ */
+export function buildDockerConfigJson(
+  registry: string,
+  username: string,
+  password: string,
+): string {
+  const auth = Buffer.from(`${username}:${password}`).toString("base64");
+  return JSON.stringify({
+    auths: { [registry]: { username, password, auth } },
+  });
+}
+
+/** Resolved pull credentials for a private agent image: the registry host and
+ * the dockerconfigjson Kubernetes stores in an image-pull Secret. */
+export interface RegistryPullSecret {
+  registry: string;
+  dockerConfigJson: string;
+}
+
+/**
+ * Resolves image-pull credentials for a repo's custom agent image, or null when
+ * none are needed or available. The built-in default harness image is public, so
+ * only a per-repo `agentImage` override can require auth — and only when it lives
+ * on `ghcr.io`, where the Bandolier GitHub App's installation token can pull
+ * packages owned by the account the App is installed under. Any other registry
+ * (or a public ghcr.io image) is left to the cluster's own node credentials.
+ *
+ * Best-effort and non-throwing: a missing App config, an uninstalled repo, or a
+ * token-mint failure returns null so the deploy proceeds — Kubernetes will still
+ * pull a public image, and surface an ImagePullBackOff for a genuinely private
+ * one rather than the deploy failing outright.
+ *
+ * `nowMs` is injected for testability; production callers pass `Date.now()`.
+ */
+export async function getRegistryPullSecret(
+  database: typeof db,
+  repoFullName: string,
+  image: string,
+  nowMs: number,
+): Promise<RegistryPullSecret | null> {
+  if (imageRegistryHost(image) !== GHCR_REGISTRY) return null;
+
+  const token = await getRepoBotToken(database, repoFullName, nowMs);
+  if (!token) return null;
+
+  // GHCR ignores the username for token auth, but it must be non-empty; use the
+  // App slug when known purely for legibility in any logged docker config.
+  const username = env.NEXT_PUBLIC_GITHUB_APP_SLUG ?? "bandolier";
+  return {
+    registry: GHCR_REGISTRY,
+    dockerConfigJson: buildDockerConfigJson(GHCR_REGISTRY, username, token),
+  };
+}

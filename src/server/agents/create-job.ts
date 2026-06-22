@@ -236,6 +236,16 @@ export interface JobSpec {
    */
   agentImage?: string;
   /**
+   * Image-pull credentials for a private custom `agentImage`. When set, a
+   * `kubernetes.io/dockerconfigjson` Secret holding `dockerConfigJson` is created
+   * (owned by the Job, so GC'd with it) and referenced as an `imagePullSecret` on
+   * the pod, letting the cluster pull from a registry it has no standing
+   * credentials for — e.g. a private `ghcr.io` package authenticated with the
+   * Bandolier GitHub App's installation token. Unset = rely on the cluster's own
+   * node credentials (public images need none).
+   */
+  imagePullSecret?: { registry: string; dockerConfigJson: string };
+  /**
    * Repo-attached system prompt: an admin-configured blanket instruction for the
    * repo, appended to whatever system-prompt framing the harness builds for the
    * run (every mode and provider). Passed as REPO_SYSTEM_PROMPT — kept distinct
@@ -248,6 +258,11 @@ export interface JobSpec {
 /** Per-job secret holding the acting user's credentials (GitHub / AWS / Anthropic). */
 function userSecretName(jobName: string): string {
   return `${jobName}-creds`;
+}
+
+/** Per-job image-pull secret (dockerconfigjson) for a private agent image. */
+function pullSecretName(jobName: string): string {
+  return `${jobName}-pull`;
 }
 
 export async function createAgentJob(spec: JobSpec): Promise<string> {
@@ -457,6 +472,12 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
           spec: {
             serviceAccountName: "bandolier-agent",
             restartPolicy: "Never",
+            // Pull a private custom image via the per-job dockerconfigjson secret
+            // created below (e.g. a private ghcr.io package authenticated with the
+            // GitHub App installation token). Omitted entirely for public images.
+            ...(spec.imagePullSecret && {
+              imagePullSecrets: [{ name: pullSecretName(jobName) }],
+            }),
             // Run as root: the harness image is built around HOME=/root with the
             // agent CLIs in /root/.local/bin (see agent-harness/Dockerfile), so a
             // non-root uid can't read its tools or write $HOME (e.g. ~/.gemini).
@@ -504,6 +525,16 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
     }
   }
 
+  // Owner reference tying a secret's lifecycle to the Job, so Kubernetes
+  // garbage-collects it when the Job is deleted (manually or via TTL).
+  const jobOwnerRef = {
+    apiVersion: "batch/v1",
+    kind: "Job",
+    name: jobName,
+    uid: job.metadata?.uid ?? "",
+    blockOwnerDeletion: true,
+  };
+
   await getCoreV1Api(kc).createNamespacedSecret({
     namespace: ns,
     body: {
@@ -511,20 +542,33 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
         name: userSecretName(jobName),
         namespace: ns,
         labels: { "app.kubernetes.io/managed-by": "bandolier" },
-        ownerReferences: [
-          {
-            apiVersion: "batch/v1",
-            kind: "Job",
-            name: jobName,
-            uid: job.metadata?.uid ?? "",
-            blockOwnerDeletion: true,
-          },
-        ],
+        ownerReferences: [jobOwnerRef],
       },
       type: "Opaque",
       stringData,
     },
   });
+
+  // When the custom image lives on a private registry, create the dockerconfigjson
+  // secret the pod's imagePullSecrets reference. Owned by the Job like the creds
+  // secret, so it's GC'd together with the run.
+  if (spec.imagePullSecret) {
+    await getCoreV1Api(kc).createNamespacedSecret({
+      namespace: ns,
+      body: {
+        metadata: {
+          name: pullSecretName(jobName),
+          namespace: ns,
+          labels: { "app.kubernetes.io/managed-by": "bandolier" },
+          ownerReferences: [jobOwnerRef],
+        },
+        type: "kubernetes.io/dockerconfigjson",
+        stringData: {
+          ".dockerconfigjson": spec.imagePullSecret.dockerConfigJson,
+        },
+      },
+    });
+  }
 
   // Record the run so it can be listed/inspected after the Job's TTL deletes the
   // pod. Inserted for every run, not just when S3 is configured: the harness

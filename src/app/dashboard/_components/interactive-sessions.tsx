@@ -226,7 +226,7 @@ export function InteractiveRow({
                   })
                 }
                 disabled={endSession.isPending || endSession.isSuccess}
-                className="rounded-md border border-white/10 px-2 py-1 text-xs whitespace-nowrap text-white/60 hover:bg-white/10 disabled:opacity-40"
+                className="rounded-md border border-white/10 px-3 py-1.5 text-xs whitespace-nowrap text-white/60 hover:bg-white/10 disabled:opacity-40"
                 title="Close the session and open a PR if there are commits"
               >
                 {endSession.isSuccess ? "Ending…" : "End session"}

@@ -1889,9 +1889,21 @@ func runClaudeInteractive(ctx context.Context, cfg config, first string) error {
 		"--output-format", "stream-json",
 		"--verbose",
 	}
-	if sysPrompt := cfg.withRepoPrompt(cfg.systemPrompt); sysPrompt != "" {
+	sysPrompt := cfg.withRepoPrompt(cfg.systemPrompt)
+	if sysPrompt != "" {
 		args = append(args, "--append-system-prompt", sysPrompt)
 	}
+
+	// Log the combined system prompt line-by-line so each line keeps the
+	// [harness] tag, matching the non-interactive path. Without this the
+	// repo-attached prompt would be sent to Claude but never appear in the logs.
+	if sysPrompt != "" {
+		log.Printf("[harness] system prompt:")
+		for _, line := range strings.Split(sysPrompt, "\n") {
+			log.Printf("[harness]   %s", line)
+		}
+	}
+
 	cmd := exec.CommandContext(ctx, "claude", args...)
 	cmd.Dir = cfg.workDir
 	cmd.Env = buildEnv(cfg.provider)

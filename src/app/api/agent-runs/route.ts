@@ -42,10 +42,21 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Upload failed" }, { status: 500 });
   }
 
-  // Record the key (no-op if the run row was pruned).
+  // The run's structured output, reported by the harness. Persisting it makes a
+  // finished run's output recoverable from the database after the pod (and its
+  // logs, where this is otherwise re-derived) are gone.
+  const pullRequestUrl = req.headers.get("x-bandolier-pr-url");
+  const createdIssueUrl = req.headers.get("x-bandolier-issue-url");
+
+  // Record the key and output (no-op if the run row was pruned).
   await db
     .update(taskRun)
-    .set({ transcriptKey: key, updatedAt: new Date() })
+    .set({
+      transcriptKey: key,
+      ...(pullRequestUrl && { pullRequestUrl }),
+      ...(createdIssueUrl && { createdIssueUrl }),
+      updatedAt: new Date(),
+    })
     .where(eq(taskRun.jobName, jobName));
 
   console.log("[bandolier:ingest] transcript stored", {

@@ -59,6 +59,15 @@ var (
 	stdoutTee  io.Writer = os.Stdout
 )
 
+// outputPRURL / outputIssueURL hold the run's structured output (the pull
+// request or issue the harness produced). They're reported to Bandolier via the
+// ingest callback so a finished run's output is recoverable from the database
+// even after the pod — and its logs — are gone.
+var (
+	outputPRURL    string
+	outputIssueURL string
+)
+
 // uploadTranscript best-effort POSTs the captured transcript to Bandolier so it
 // outlives the Job's TTL. No-op when the ingest env isn't injected.
 func uploadTranscript() {
@@ -82,6 +91,14 @@ func uploadTranscript() {
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("X-Bandolier-Job", job)
 	req.Header.Set("Content-Type", "text/plain; charset=utf-8")
+	// Report the run's structured output alongside the transcript so it's
+	// persisted durably — pod logs (the live source) vanish with the pod.
+	if outputPRURL != "" {
+		req.Header.Set("X-Bandolier-PR-URL", outputPRURL)
+	}
+	if outputIssueURL != "" {
+		req.Header.Set("X-Bandolier-Issue-URL", outputIssueURL)
+	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -670,8 +687,10 @@ func openPR(ctx context.Context, cfg config, branchName, title, body string) err
 		}
 	}
 
-	// Emit the PR URL with a stable marker so the dashboard can surface it.
+	// Emit the PR URL with a stable marker so the dashboard can surface it, and
+	// record it for the ingest callback so it outlives the pod logs.
 	if url := prURLRe.FindString(out); url != "" {
+		outputPRURL = url
 		log.Printf("[harness] PR_URL=%s", url)
 	} else {
 		log.Printf("[harness] pull request created (no URL parsed)")
@@ -768,8 +787,10 @@ func openIssue(ctx context.Context, cfg config, transcript string, parent *githu
 		return fmt.Errorf("gh issue create: %w", err)
 	}
 
-	// Emit the issue URL with a stable marker so the dashboard can surface it.
+	// Emit the issue URL with a stable marker so the dashboard can surface it, and
+	// record it for the ingest callback so it outlives the pod logs.
 	if url := issueURLRe.FindString(out); url != "" {
+		outputIssueURL = url
 		log.Printf("[harness] ISSUE_URL=%s", url)
 	} else {
 		log.Printf("[harness] issue created (no URL parsed)")

@@ -128,6 +128,8 @@ docker build -t <your-registry>/bandolier-agent-harness:latest agent-harness
 docker push <your-registry>/bandolier-agent-harness:latest
 ```
 
+**Private registries.** If the override points at a **private `ghcr.io` package** owned by the account the Bandolier GitHub App is installed on, Bandolier pulls it automatically: at deploy time it mints the App's installation token and attaches a short-lived `kubernetes.io/dockerconfigjson` image-pull Secret (owned by the Job, so it's garbage-collected with the run) to the agent pod. This requires the App's **Packages** repository permission (read) — see [GitHub App](#github-app-optional) — and the cluster otherwise needs no standing GHCR credentials. For private images on any **other** registry, configure the cluster's nodes (or the `bandolier-agent` ServiceAccount) with the appropriate pull credentials yourself; Bandolier only brokers GHCR.
+
 `agent-harness/k8s/manifest.yaml` is a standalone reference Job you can apply directly to test the image in isolation; the running app generates equivalent Jobs itself and does not use that file.
 
 ---
@@ -136,7 +138,7 @@ docker push <your-registry>/bandolier-agent-harness:latest
 
 To have agents launch automatically when issues are opened, install the Bandolier GitHub App:
 
-1. Create a GitHub App (Settings → Developer settings → GitHub Apps). Give it a webhook URL of `https://<your-host>/api/webhooks/github`, a webhook secret, and these repository permissions: **Issues** (read & write), **Pull requests** (read & write), **Contents** (read), **Metadata** (read). Subscribe to the **Issues** event. Generate a private key.
+1. Create a GitHub App (Settings → Developer settings → GitHub Apps). Give it a webhook URL of `https://<your-host>/api/webhooks/github`, a webhook secret, and these repository permissions: **Issues** (read & write), **Pull requests** (read & write), **Contents** (read), **Metadata** (read), and — to let agents pull private custom harness images from GHCR — **Packages** (read). Subscribe to the **Issues** event. Generate a private key.
 2. Set `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY` (PEM, `\n`-escaped), and `GITHUB_WEBHOOK_SECRET` (the App's webhook secret) in the app's environment. Optionally set `NEXT_PUBLIC_GITHUB_APP_SLUG` so the repo-config UI links to the App's install page.
 3. Install the App on the repos you want Bandolier to act on. The App delivers events automatically — there's no per-repo webhook to add.
 
@@ -204,14 +206,14 @@ The harness image (`ghcr.io/based64god/bandolier-agent-harness:latest`, always p
 
 ### GitHub App / webhooks
 
-| Variable                                            | Description                                                                                                                                                                |
-| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GITHUB_APP_ID`                                     | Numeric id of the Bandolier GitHub App. Required (with the key) for bot-voice actions and event delivery.                                                                  |
-| `GITHUB_APP_PRIVATE_KEY`                            | The App's PEM private key (`\n`-escaped). Used to mint installation tokens for bot comments.                                                                               |
-| `GITHUB_APP_CLIENT_ID` / `GITHUB_APP_CLIENT_SECRET` | The App's OAuth credentials. Optional until login is moved to the App.                                                                                                     |
-| `NEXT_PUBLIC_GITHUB_APP_SLUG`                       | The App's public slug, used to link the repo-config UI to its install page.                                                                                                |
-| `GITHUB_WEBHOOK_SECRET`                             | Secret for verifying webhook signatures. With the GitHub App, set this to the App's webhook secret (delivery is app-level — there are no per-repo secrets).                |
-| `GITHUB_TRIGGER_LABEL`                              | If set, only act on issues that carry this label.                                                                                                                          |
+| Variable                                            | Description                                                                                                                                                 |
+| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GITHUB_APP_ID`                                     | Numeric id of the Bandolier GitHub App. Required (with the key) for bot-voice actions and event delivery.                                                   |
+| `GITHUB_APP_PRIVATE_KEY`                            | The App's PEM private key (`\n`-escaped). Used to mint installation tokens for bot comments.                                                                |
+| `GITHUB_APP_CLIENT_ID` / `GITHUB_APP_CLIENT_SECRET` | The App's OAuth credentials. Optional until login is moved to the App.                                                                                      |
+| `NEXT_PUBLIC_GITHUB_APP_SLUG`                       | The App's public slug, used to link the repo-config UI to its install page.                                                                                 |
+| `GITHUB_WEBHOOK_SECRET`                             | Secret for verifying webhook signatures. With the GitHub App, set this to the App's webhook secret (delivery is app-level — there are no per-repo secrets). |
+| `GITHUB_TRIGGER_LABEL`                              | If set, only act on issues that carry this label.                                                                                                           |
 
 ### Access gate (optional)
 

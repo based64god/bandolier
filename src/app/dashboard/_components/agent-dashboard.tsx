@@ -92,7 +92,7 @@ function RepoSelector({
 
   return (
     <SearchableSelect
-      className="min-w-0 flex-1 sm:w-80 sm:flex-initial"
+      className="min-w-0 flex-1 2xl:w-80 2xl:flex-initial"
       options={options}
       value={selected?.fullName ?? null}
       onChange={(v) => v && onChange(v)}
@@ -221,26 +221,39 @@ export function AgentDashboard({
     <div className="flex min-h-screen flex-col bg-black text-white">
       {/* Header */}
       <header className="border-b border-white/10 px-4 py-3 sm:px-6 sm:py-4">
-        {/* A single row at every width. The hamburger sits far left. The
-            branding + repo selector take the middle and give up space first
-            (the branding text hides at sm:, then the repo selector shrinks and
-            truncates). The right-hand group is protected (shrink-0).
+        {/* A single row at every width. Below xl: the bar is deliberately spare
+            — a hamburger (far left) holding the secondary controls, the repo
+            selector stretching to fill the middle, and Deploy on the right — so
+            the selector keeps a genuinely usable width across the whole
+            mobile-L → laptop range rather than being crushed to a few pixels.
 
-            Deploy lives in the right-hand group up to lg:, then jumps to the
-            centre of the bar on large viewports (see the centred overlay
+            At xl: there is finally room for everything inline, so the branding
+            text, repo-config button, "updated" stamp, and the notification /
+            settings / account controls all appear and the hamburger retires.
+
+            Deploy lives in the right-hand group up to 2xl:, then jumps to the
+            centre of the bar on the widest viewports (see the centred overlay
             below). It always renders and never wraps to a new row. */}
         <div className="relative flex items-center gap-2 sm:gap-3">
-          {/* Centred Deploy — large viewports only. Absolutely centred over the
-              bar so it stays put regardless of how wide the side groups grow.
-              pointer-events are disabled on the wrapper so the empty space
-              either side never swallows clicks meant for the controls beneath. */}
-          <div className="pointer-events-none absolute inset-x-0 z-10 hidden justify-center lg:flex">
+          {/* Centred Deploy — the very widest viewports only. Absolutely centred
+              over the bar so it stays put regardless of how wide the side
+              groups grow. pointer-events are disabled on the wrapper so the
+              empty space either side never swallows clicks meant for the
+              controls beneath. It only switches on at 2xl: — below that the side
+              groups (branding + repo selector + repo config + inline controls)
+              still reach the horizontal centre, so a centred overlay would
+              collide with them. Up to 2xl: Deploy stays in the right-hand
+              group. */}
+          <div className="pointer-events-none absolute inset-x-0 z-10 hidden justify-center 2xl:flex">
             <div className="pointer-events-auto">{deployButton}</div>
           </div>
 
-          {/* Hamburger — far left, mobile only. Holds the secondary controls so
-              the bar never overflows on narrow screens. */}
-          <div className="relative shrink-0 sm:hidden">
+          {/* Hamburger — far left, below xl. Holds the secondary controls
+              (notifications, settings, account, sign out) so the bar never
+              overflows and the repo selector keeps usable width through the
+              mobile-L → laptop range. The inline controls only appear at xl:,
+              where there is finally room for everything at once. */}
+          <div className="relative shrink-0 xl:hidden">
             <button
               onClick={() => setMenuOpen((o) => !o)}
               aria-label="Menu"
@@ -337,7 +350,7 @@ export function AgentDashboard({
                 className="flex items-center gap-2.5 transition hover:opacity-80"
               >
                 <BandolierIcon className="h-7 w-7 shrink-0" />
-                <span className="hidden sm:inline">Bandolier</span>
+                <span className="hidden xl:inline">Bandolier</span>
               </Link>
             </h1>
 
@@ -354,7 +367,7 @@ export function AgentDashboard({
             {selectedRepo?.isAdmin && (
               <button
                 onClick={() => setShowRepoConfig(true)}
-                className="hidden rounded-lg border border-white/10 px-3 py-1.5 text-sm font-medium text-white/70 hover:bg-white/10 hover:text-white sm:inline-flex"
+                className="hidden rounded-lg border border-white/10 px-3 py-1.5 text-sm font-medium whitespace-nowrap text-white/70 hover:bg-white/10 hover:text-white xl:inline-flex"
               >
                 Repo config
               </button>
@@ -363,16 +376,18 @@ export function AgentDashboard({
 
           <div className="flex shrink-0 items-center gap-2 sm:gap-3">
             {namespace && kubeConfigured && (
-              <span className="hidden text-xs text-white/30 lg:inline">
+              <span className="hidden text-xs text-white/30 xl:inline">
                 {agentsLoading
                   ? "Refreshing…"
                   : `Updated ${new Date(dataUpdatedAt).toLocaleTimeString()}`}
               </span>
             )}
 
-            {/* Secondary controls — inline from sm: up, collapsed into the
-                hamburger menu on narrow screens. */}
-            <div className="hidden items-center gap-2 sm:flex sm:gap-3">
+            {/* Secondary controls — inline from xl: up, collapsed into the
+                hamburger menu below that. Holding them in the menu through the
+                mobile-L → laptop range keeps the bar uncluttered and leaves the
+                repo selector its full flexible width. */}
+            <div className="hidden items-center gap-2 xl:flex xl:gap-3">
               <button
                 onClick={toggleNotify}
                 aria-label={
@@ -455,10 +470,10 @@ export function AgentDashboard({
               </div>
             </div>
 
-            {/* Deploy lives here up to lg:, where it moves to the centred
+            {/* Deploy lives here up to 2xl:, where it moves to the centred
                 overlay above. It's the last component in this group to give up
                 space and never wraps to a new row. */}
-            <div className="lg:hidden">{deployButton}</div>
+            <div className="2xl:hidden">{deployButton}</div>
           </div>
         </div>
       </header>

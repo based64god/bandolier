@@ -562,7 +562,15 @@ export function AgentDashboard({
                           {[
                             { label: "Status", width: "w-[10%]", center: true },
                             { label: "Output", width: "w-[10%]" },
-                            { label: "Task", width: "w-[18%]" },
+                            // The primary column: `w-auto` so it absorbs all the
+                            // width the fixed columns leave behind. A fixed share
+                            // here would clamp the description to a constant
+                            // width — truncating as if the wide action controls
+                            // (confirm/cancel, "End session") were always present
+                            // even when only the compact terminate glyph is, and
+                            // wasting the freed space. Mirrors the Repository
+                            // column in the overview panel.
+                            { label: "Task", width: "w-auto" },
                             // These secondary columns are dropped on narrow
                             // viewports where space is limited — the row stays
                             // readable with Status/Output/Task alone.

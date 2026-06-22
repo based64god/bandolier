@@ -4,7 +4,7 @@ import { useState } from "react";
 
 import { api } from "~/trpc/react";
 import type { RouterOutputs } from "~/trpc/react";
-import { expiresAtLocal } from "./agent-ui";
+import { expiresAtLocal, taskNameTooltip } from "./agent-ui";
 import { OutputBadge, SourceBadge } from "./output-badge";
 import { StatusBadge } from "./status-badge";
 
@@ -91,7 +91,7 @@ export function TaskRow({
             the row taller than its single-line neighbours; the full text is
             available on hover. */}
         <span
-          title={agent.displayName}
+          title={taskNameTooltip(agent)}
           className="block truncate text-sm text-white/90"
         >
           {agent.displayName}

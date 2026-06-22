@@ -24,6 +24,17 @@ export const TASK_COLUMNS = 7;
 export const MOBILE_TASK_COLUMNS = 4;
 
 /**
+ * Fixed height for the "Actions" cell's inner row, shared by TaskRow and
+ * InteractiveRow. It matches the tallest action control (the bordered
+ * "End session" / confirm buttons) so a collapsed row keeps a constant height
+ * no matter which action — terminate glyph, confirm/cancel, end-session, or
+ * none — is currently shown. Without it, a row visibly shrinks when its taller
+ * control disappears (e.g. once a session ends), shifting every row below it.
+ * Only an expanding interactive row should ever change a row's height.
+ */
+export const ACTION_ROW_MIN_H = "min-h-[1.875rem]";
+
+/**
  * A non-interactive task as a compact row in the task table (matching the
  * overview table's density). Clicking the row opens its logs; cells surface the
  * source (issue link or creator), status, the live "currently" line, expiry, and
@@ -116,39 +127,48 @@ export function TaskRow({
         className="px-3 py-2 text-right align-middle md:px-4 md:py-3"
         onClick={(e) => e.stopPropagation()}
       >
-        {confirmKill ? (
-          <span className="flex flex-nowrap items-center justify-end gap-1 whitespace-nowrap">
+        {/* The actions cell reserves the height of the tallest control
+            (`ACTION_ROW_MIN_H`) so a row never grows or shrinks vertically as
+            its action toggles between the compact terminate (×) glyph and the
+            taller confirm/cancel buttons — only an expanding interactive row
+            should change a row's height. */}
+        <div
+          className={`flex flex-nowrap items-center justify-end gap-1 whitespace-nowrap ${ACTION_ROW_MIN_H}`}
+        >
+          {confirmKill ? (
+            <>
+              <button
+                onClick={() =>
+                  terminate.mutate({
+                    podName: agent.name,
+                    namespace,
+                    repoFullName,
+                  })
+                }
+                disabled={terminate.isPending}
+                className="rounded bg-red-600/40 px-2 py-1 text-xs text-red-200 hover:bg-red-600/60 disabled:opacity-50"
+              >
+                {terminate.isPending ? "…" : "Confirm"}
+              </button>
+              <button
+                onClick={() => setConfirmKill(false)}
+                className="rounded bg-white/10 px-2 py-1 text-xs hover:bg-white/20"
+              >
+                Cancel
+              </button>
+            </>
+          ) : (
             <button
-              onClick={() =>
-                terminate.mutate({
-                  podName: agent.name,
-                  namespace,
-                  repoFullName,
-                })
-              }
-              disabled={terminate.isPending}
-              className="rounded bg-red-600/40 px-2 py-1 text-xs text-red-200 hover:bg-red-600/60 disabled:opacity-50"
+              onClick={() => setConfirmKill(true)}
+              aria-label="Terminate agent"
+              className="rounded p-1 text-red-500/50 hover:bg-red-500/10 hover:text-red-400"
             >
-              {terminate.isPending ? "…" : "Confirm"}
+              <svg viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4">
+                <path d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.75.75 0 1 1 1.06 1.06L9.06 8l3.22 3.22a.75.75 0 1 1-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 0 1-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06Z" />
+              </svg>
             </button>
-            <button
-              onClick={() => setConfirmKill(false)}
-              className="rounded bg-white/10 px-2 py-1 text-xs hover:bg-white/20"
-            >
-              Cancel
-            </button>
-          </span>
-        ) : (
-          <button
-            onClick={() => setConfirmKill(true)}
-            aria-label="Terminate agent"
-            className="rounded p-1 text-red-500/50 hover:bg-red-500/10 hover:text-red-400"
-          >
-            <svg viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4">
-              <path d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.75.75 0 1 1 1.06 1.06L9.06 8l3.22 3.22a.75.75 0 1 1-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 0 1-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06Z" />
-            </svg>
-          </button>
-        )}
+          )}
+        </div>
       </td>
     </tr>
   );

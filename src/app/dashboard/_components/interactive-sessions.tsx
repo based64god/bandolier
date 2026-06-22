@@ -127,9 +127,13 @@ export function InteractiveRow({
         className={`cursor-pointer select-none ${rowTint}`}
       >
         {/* Status (+ awaiting pill) — centered to match the centered "Status"
-            header and the non-interactive TaskRow. */}
+            header and the non-interactive TaskRow. The pills stack vertically
+            (mirroring the overview panel) so the status badge itself stays
+            centered under the header: a horizontal row would center the
+            badge+"Waiting" pair as a group, leaving the status badge offset to
+            the left of the column. */}
         <td className="px-3 py-2 text-center align-middle md:px-4 md:py-3">
-          <div className="flex flex-wrap items-center justify-center gap-1">
+          <div className="flex flex-col items-center gap-1">
             <StatusBadge status={agent.status} />
             {awaiting && (
               <span

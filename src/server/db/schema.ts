@@ -120,6 +120,14 @@ export const taskRun = pgTable("task_run", {
   issueNumber: text("issue_number"),
   /** Object-storage key for the rendered transcript, set on harness callback. */
   transcriptKey: text("transcript_key"),
+  /**
+   * The run's durable output, reported by the harness ingest callback. Pod logs
+   * are the live source while the pod exists, but they vanish with the pod (TTL
+   * deletion, eviction, node loss); persisting the URLs here keeps a finished
+   * run's output recoverable regardless of cluster state.
+   */
+  pullRequestUrl: text("pull_request_url"),
+  createdIssueUrl: text("created_issue_url"),
   createdAt: timestamp("created_at")
     .$defaultFn(() => /* @__PURE__ */ new Date())
     .notNull(),

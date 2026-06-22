@@ -2,7 +2,7 @@ import { randomUUID } from "crypto";
 
 import { setHeaderOptions, type V1Pod } from "@kubernetes/client-node";
 import { TRPCError } from "@trpc/server";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 
 import { env } from "~/env";
@@ -249,7 +249,80 @@ async function resolveItemStates(
   return { pullRequestState, createdIssueState, issueState };
 }
 
-/** Maps a pod into the task shape returned by `list`/`get` (reads logs once). */
+interface OutputUrls {
+  pullRequestUrl: string | null;
+  createdIssueUrl: string | null;
+}
+
+/** A pod's stable job name (falls back to the pod name for legacy pods). */
+function podJobName(pod: V1Pod): string {
+  return (
+    pod.metadata?.labels?.["bandolier.io/job"] ??
+    pod.metadata?.name ??
+    "unknown"
+  );
+}
+
+/**
+ * Batch-loads persisted output URLs for the terminal pods in `pods` in a single
+ * query, keyed by job name. The harness records these via the ingest callback,
+ * so a finished run's PR/issue links survive pod loss (TTL deletion, eviction,
+ * node failure, transient log-read errors). Running pods are skipped — they have
+ * no persisted output yet — so a list of only running pods issues no query at
+ * all; otherwise the lookup is one `IN (...)` regardless of pod count, rather
+ * than one query per pod.
+ */
+async function loadPersistedOutputs(
+  database: typeof db,
+  pods: V1Pod[],
+): Promise<Map<string, OutputUrls>> {
+  const jobNames = pods
+    .filter((p) => {
+      const phase = p.status?.phase;
+      return phase === "Succeeded" || phase === "Failed";
+    })
+    .map(podJobName);
+
+  const byJob = new Map<string, OutputUrls>();
+  if (jobNames.length === 0) return byJob;
+
+  const rows = await database
+    .select({
+      jobName: taskRun.jobName,
+      pullRequestUrl: taskRun.pullRequestUrl,
+      createdIssueUrl: taskRun.createdIssueUrl,
+    })
+    .from(taskRun)
+    .where(inArray(taskRun.jobName, jobNames));
+  for (const row of rows) {
+    byJob.set(row.jobName, {
+      pullRequestUrl: row.pullRequestUrl,
+      createdIssueUrl: row.createdIssueUrl,
+    });
+  }
+  return byJob;
+}
+
+/**
+ * Merges a pod's log-derived output URLs with the batch-loaded persisted
+ * fallback, preferring whatever the live logs supplied.
+ */
+function mergeOutput(
+  logUrls: OutputUrls,
+  persisted: OutputUrls | undefined,
+): OutputUrls {
+  return {
+    pullRequestUrl: logUrls.pullRequestUrl ?? persisted?.pullRequestUrl ?? null,
+    createdIssueUrl:
+      logUrls.createdIssueUrl ?? persisted?.createdIssueUrl ?? null,
+  };
+}
+
+/**
+ * Maps a pod into the task shape returned by `list`/`get` (reads logs once).
+ * `persistedOutputs` is the batch-loaded fallback keyed by job name (see
+ * loadPersistedOutputs); it's consulted only when the logs don't supply a URL.
+ */
 async function podToTask(
   pod: V1Pod,
   namespace: string,
@@ -257,6 +330,7 @@ async function podToTask(
   database: typeof db,
   userGithubToken: string | null,
   nowMs: number,
+  persistedOutputs: Map<string, OutputUrls>,
 ) {
   const annotations = pod.metadata?.annotations ?? {};
   const name = pod.metadata?.name ?? "unknown";
@@ -272,8 +346,15 @@ async function podToTask(
     ).toISOString()
     : null;
 
-  const { currently, pullRequestUrl, createdIssueUrl, awaitingInput } =
-    await inspectPod(name, namespace, status, kubeconfig);
+  const inspection = await inspectPod(name, namespace, status, kubeconfig);
+  const { currently, awaitingInput } = inspection;
+  const jobName = podJobName(pod);
+  // Fall back to the persisted output when logs didn't yield it (pod gone or a
+  // transient log-read failure) — the harness records it on the run row.
+  const { pullRequestUrl, createdIssueUrl } = mergeOutput(
+    inspection,
+    persistedOutputs.get(jobName),
+  );
 
   const containerEnv = pod.spec?.containers?.[0]?.env ?? [];
   const prompt =
@@ -299,7 +380,7 @@ async function podToTask(
 
   return {
     name,
-    jobName: pod.metadata?.labels?.["bandolier.io/job"] ?? name,
+    jobName,
     repoFullName,
     displayName: annotations["bandolier.io/display-name"] ?? name,
     // Pod creation time, used to sort the task list reverse-chronologically.
@@ -400,6 +481,10 @@ export const agentsRouter = createTRPCRouter({
         labelSelector: `${LABEL_SELECTOR},${SPAWNED_BY_LABEL}=${spawnedByLabelValue(userId)}`,
       });
 
+      // One batched query recovers persisted output for every terminal pod whose
+      // logs are gone — rather than a lookup per pod.
+      const persistedOutputs = await loadPersistedOutputs(ctx.db, res.items);
+
       return await Promise.all(
         res.items.map(async (pod) => {
           const annotations = pod.metadata?.annotations ?? {};
@@ -409,8 +494,20 @@ export const agentsRouter = createTRPCRouter({
 
           // The pull-request URL lives in the harness logs; read it per pod
           // (cheap here — only the user's own agents, and terminal pods cache).
-          const { pullRequestUrl, createdIssueUrl, awaitingInput } =
-            await inspectPod(name, namespace, status, kubeconfig);
+          const inspection = await inspectPod(
+            name,
+            namespace,
+            status,
+            kubeconfig,
+          );
+          const { awaitingInput } = inspection;
+          const jobName = podJobName(pod);
+          // Fall back to the persisted output when the logs are gone (TTL
+          // deletion, eviction) or unreadable — kept on the durable run row.
+          const { pullRequestUrl, createdIssueUrl } = mergeOutput(
+            inspection,
+            persistedOutputs.get(jobName),
+          );
           const interactive =
             pod.metadata?.labels?.[INTERACTIVE_LABEL] === "true";
 
@@ -488,6 +585,9 @@ export const agentsRouter = createTRPCRouter({
           namespace: input.namespace,
           labelSelector: LABEL_SELECTOR,
         });
+        // One batched query recovers persisted output for every terminal pod
+        // whose logs are gone — rather than a lookup per pod.
+        const persistedOutputs = await loadPersistedOutputs(ctx.db, res.items);
         return await Promise.all(
           res.items.map((pod) =>
             podToTask(
@@ -497,6 +597,7 @@ export const agentsRouter = createTRPCRouter({
               ctx.db,
               githubToken,
               nowMs,
+              persistedOutputs,
             ),
           ),
         );
@@ -540,6 +641,7 @@ export const agentsRouter = createTRPCRouter({
           ctx.db,
           ctx.session.user.id,
         );
+        const persistedOutputs = await loadPersistedOutputs(ctx.db, [pod]);
         return await podToTask(
           pod,
           input.namespace,
@@ -547,6 +649,7 @@ export const agentsRouter = createTRPCRouter({
           ctx.db,
           githubToken,
           Date.now(),
+          persistedOutputs,
         );
       } catch (err) {
         if (err instanceof TRPCError) throw err;

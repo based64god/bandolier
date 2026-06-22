@@ -62,6 +62,18 @@ html {
   color-scheme: dark;
 }
 
+/*
+ * iOS Safari auto-zooms the viewport whenever a focused text field has a font
+ * smaller than 16px. Several inputs use Tailwind's smaller text scales
+ * (text-sm/text-xs), so enforce a 16px minimum on all text-entry controls to
+ * suppress that zoom. max() leaves any explicitly larger font untouched.
+ */
+input,
+textarea,
+select {
+  font-size: max(16px, 1em);
+}
+
 body {
   /* Plain jet black base, like a powered-down CRT, so the phosphor-green text
      glows. No gradient — the only lighting is the CRT edge glow below. */

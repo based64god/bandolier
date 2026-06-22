@@ -167,10 +167,13 @@ export function InteractiveRow({
               <path d="M4.22 6.22a.75.75 0 0 1 1.06 0L8 8.94l2.72-2.72a.75.75 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 7.28a.75.75 0 0 1 0-1.06Z" />
             </svg>
             {/* Clamped to one line so a long description can't bleed past the
-                fixed column width into the End session button alongside it. */}
+                fixed column width into the End session button alongside it.
+                `min-w-0` lets this flex child shrink below its content width —
+                without it the item's default `min-width: auto` keeps it at full
+                text width and `truncate` never engages. */}
             <span
               title={agent.displayName}
-              className="truncate text-sm text-white/90"
+              className="min-w-0 truncate text-sm text-white/90"
             >
               {agent.displayName}
             </span>

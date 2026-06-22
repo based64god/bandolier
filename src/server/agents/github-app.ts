@@ -211,8 +211,9 @@ export function clearTokenCache(installationId?: string): void {
 
 // ── Registry pull credentials (private custom agent images) ───────────────────
 
-/** GitHub Container Registry — the registry an App installation token can pull
- * from, for packages owned by the account the App is installed under. */
+/** GitHub Container Registry. Private packages here are pulled with the
+ * triggering user's GitHub OAuth token: GHCR does not accept GitHub App
+ * installation tokens, so the bot identity can't pull a private image. */
 export const GHCR_REGISTRY = "ghcr.io";
 
 /**
@@ -241,8 +242,8 @@ export function imageRegistryHost(image: string): string | null {
 
 /**
  * A Kubernetes `kubernetes.io/dockerconfigjson` payload authenticating to a
- * single registry with a username/password (here, a GitHub App installation
- * token). Returned as the JSON string Kubernetes expects under the
+ * single registry with a username/password (here, the triggering user's GitHub
+ * OAuth token). Returned as the JSON string Kubernetes expects under the
  * `.dockerconfigjson` key.
  */
 export function buildDockerConfigJson(
@@ -267,33 +268,33 @@ export interface RegistryPullSecret {
  * Resolves image-pull credentials for a repo's custom agent image, or null when
  * none are needed or available. The built-in default harness image is public, so
  * only a per-repo `agentImage` override can require auth — and only when it lives
- * on `ghcr.io`, where the Bandolier GitHub App's installation token can pull
- * packages owned by the account the App is installed under. Any other registry
- * (or a public ghcr.io image) is left to the cluster's own node credentials.
+ * on `ghcr.io`. Authentication uses the triggering user's GitHub OAuth token
+ * (with `read:packages`): GHCR rejects GitHub App installation tokens, so the
+ * pull is attributed to the user who opened the issue / deployed the agent —
+ * exactly like cloning and PR authorship. Any other registry (or a public
+ * ghcr.io image) is left to the cluster's own node credentials.
  *
- * Best-effort and non-throwing: a missing App config, an uninstalled repo, or a
- * token-mint failure returns null so the deploy proceeds — Kubernetes will still
- * pull a public image, and surface an ImagePullBackOff for a genuinely private
- * one rather than the deploy failing outright.
- *
- * `nowMs` is injected for testability; production callers pass `Date.now()`.
+ * Best-effort and non-throwing: a non-GHCR image, or a user with no linked
+ * GitHub token, returns null so the deploy proceeds — Kubernetes will still pull
+ * a public image, and surface an ImagePullBackOff for a genuinely private one
+ * (e.g. the user lacks `read:packages` or package access) rather than failing
+ * the deploy outright.
  */
-export async function getRegistryPullSecret(
-  database: typeof db,
-  repoFullName: string,
+export function getRegistryPullSecret(
   image: string,
-  nowMs: number,
-): Promise<RegistryPullSecret | null> {
+  githubToken: string | null | undefined,
+): RegistryPullSecret | null {
   if (imageRegistryHost(image) !== GHCR_REGISTRY) return null;
+  if (!githubToken) return null;
 
-  const token = await getRepoBotToken(database, repoFullName, nowMs);
-  if (!token) return null;
-
-  // GHCR ignores the username for token auth, but it must be non-empty; use the
-  // App slug when known purely for legibility in any logged docker config.
-  const username = env.NEXT_PUBLIC_GITHUB_APP_SLUG ?? "bandolier";
+  // GHCR ignores the username for token auth, but it must be non-empty; the
+  // conventional placeholder for "the password is a token" is x-access-token.
   return {
     registry: GHCR_REGISTRY,
-    dockerConfigJson: buildDockerConfigJson(GHCR_REGISTRY, username, token),
+    dockerConfigJson: buildDockerConfigJson(
+      GHCR_REGISTRY,
+      "x-access-token",
+      githubToken,
+    ),
   };
 }

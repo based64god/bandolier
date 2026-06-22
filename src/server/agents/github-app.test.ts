@@ -6,6 +6,7 @@ import {
   buildDockerConfigJson,
   clearTokenCache,
   getInstallationToken,
+  getRegistryPullSecret,
   imageRegistryHost,
   isGithubAppConfigured,
 } from "~/server/agents/github-app";
@@ -184,5 +185,32 @@ describe("buildDockerConfigJson", () => {
     expect(Buffer.from(entry.auth, "base64").toString("utf8")).toBe(
       "bandolier:ghs_token",
     );
+  });
+});
+
+describe("getRegistryPullSecret", () => {
+  it("builds GHCR pull creds from the user's OAuth token", () => {
+    const secret = getRegistryPullSecret(
+      "ghcr.io/acme/harness:latest",
+      "gho_usertoken",
+    );
+    expect(secret?.registry).toBe("ghcr.io");
+    const parsed = JSON.parse(secret!.dockerConfigJson) as {
+      auths: Record<string, { password: string }>;
+    };
+    // Authenticates with the user's token, never an installation token.
+    expect(parsed.auths["ghcr.io"]?.password).toBe("gho_usertoken");
+  });
+
+  it("returns null for non-GHCR images even with a token", () => {
+    expect(
+      getRegistryPullSecret("registry.example.com/x:1", "gho_usertoken"),
+    ).toBeNull();
+    expect(getRegistryPullSecret("acme/img:1", "gho_usertoken")).toBeNull();
+  });
+
+  it("returns null when the user has no linked GitHub token", () => {
+    expect(getRegistryPullSecret("ghcr.io/acme/img:1", null)).toBeNull();
+    expect(getRegistryPullSecret("ghcr.io/acme/img:1", undefined)).toBeNull();
   });
 });

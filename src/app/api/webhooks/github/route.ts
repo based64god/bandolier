@@ -315,16 +315,11 @@ async function handleIssueOpened(
   // GitHub links them to that account regardless of the sender's email privacy.
   const gitIdentity = githubGitIdentity(sender.id, sender.login);
 
-  // A custom image on a private ghcr.io package needs pull credentials — mint
-  // them from the repo's GitHub App installation token. Best-effort: a failure
-  // leaves the cluster to pull with its own node credentials.
+  // A custom image on a private ghcr.io package needs pull credentials — use the
+  // issue author's GitHub OAuth token (GHCR rejects App installation tokens).
+  // Best-effort: a failure leaves the cluster to pull with its own node creds.
   const imagePullSecret = agentImage
-    ? ((await getRegistryPullSecret(
-        db,
-        repository.full_name,
-        agentImage,
-        Date.now(),
-      )) ?? undefined)
+    ? (getRegistryPullSecret(agentImage, linked.accessToken) ?? undefined)
     : undefined;
 
   const jobName = await createAgentJob({

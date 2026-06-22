@@ -3,7 +3,7 @@
 import { useState } from "react";
 
 import Link from "next/link";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 
 import { BandolierIcon } from "~/app/_components/bandolier-icon";
 import { InstallButton } from "~/app/_components/install-button";
@@ -12,6 +12,7 @@ import { authClient } from "~/server/better-auth/client";
 import { api } from "~/trpc/react";
 import { isAgentOutputResolved } from "./agent-ui";
 import { DeployModal } from "./deploy-modal";
+import { useHideResolved } from "./hide-resolved";
 import { InteractiveRow } from "./interactive-sessions";
 import { LogModal } from "./log-modal";
 import {
@@ -111,8 +112,6 @@ export function AgentDashboard({
   repoSlug: string | null;
 }) {
   const router = useRouter();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
   const [logPod, setLogPod] = useState<string | null>(null);
   const [showDeploy, setShowDeploy] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -156,16 +155,13 @@ export function AgentDashboard({
     },
   );
 
-  // The "hide resolved" filter persists in the URL (?hideResolved=1) so it
-  // survives refreshes and is shareable.
-  const hideResolved = searchParams.get("hideResolved") === "1";
+  // The "hide resolved" filter persists in a cookie so it survives refreshes,
+  // applies across repos, and is not carried into shared links (a shared URL
+  // shows the recipient their own preference, not the sender's filtered view).
+  const [hideResolved, setHideResolved] = useHideResolved();
 
   function toggleHideResolved() {
-    const params = new URLSearchParams(searchParams.toString());
-    if (hideResolved) params.delete("hideResolved");
-    else params.set("hideResolved", "1");
-    const qs = params.toString();
-    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    setHideResolved(!hideResolved);
   }
 
   // One contiguous list. Tasks awaiting input float to the top regardless of

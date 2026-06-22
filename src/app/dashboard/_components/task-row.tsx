@@ -82,13 +82,12 @@ export function TaskRow({
       </td>
 
       <td className="px-3 py-2 align-middle md:px-4 md:py-3">
-        {/* Clamped to one line only while the confirm/cancel buttons are
-            showing — that's when a long description could bleed past the fixed
-            column width into the wider actions alongside it. With just the
-            compact terminate (×) control, the full name can use the room. */}
+        {/* Always clamped to one line so a long description can't wrap and grow
+            the row taller than its single-line neighbours; the full text is
+            available on hover. */}
         <span
           title={agent.displayName}
-          className={`block text-sm text-white/90 ${confirmKill ? "truncate" : ""}`}
+          className="block truncate text-sm text-white/90"
         >
           {agent.displayName}
         </span>

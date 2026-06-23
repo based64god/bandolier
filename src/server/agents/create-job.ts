@@ -675,6 +675,9 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
     namespace: ns,
     displayName: spec.displayName,
     createdBy: spec.createdBy ?? null,
+    // The canonical owner id (same value tagged on the pod via SPAWNED_BY_LABEL),
+    // so the run's transcript stays ownership-checkable after the pod is gone.
+    spawnedBy: spec.userId,
     repoFullName: spec.repoFullName ?? null,
     issueNumber: spec.issueNumber ?? null,
   });

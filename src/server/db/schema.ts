@@ -117,6 +117,14 @@ export const taskRun = pgTable("task_run", {
   namespace: text("namespace").notNull(),
   displayName: text("display_name").notNull(),
   createdBy: text("created_by"),
+  /**
+   * Canonical id of the user who spawned this run, used to authorize ownership of
+   * the run after its pod is gone (e.g. serving the persisted transcript). Unlike
+   * `createdBy` (a display name/login for UI), this is the stable session user id
+   * and must never be returned to clients. Null for runs created before this
+   * column existed.
+   */
+  spawnedBy: text("spawned_by"),
   repoFullName: text("repo_full_name"),
   issueNumber: text("issue_number"),
   /** Object-storage key for the rendered transcript, set on harness callback. */

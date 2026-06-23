@@ -177,6 +177,7 @@ type config struct {
 	baseBranch       string // base branch for the PR
 	interactive      bool   // long-lived session driven by user input between turns
 	inputURL         string // Bandolier endpoint the interactive loop polls for input
+	acpURL           string // Bandolier ACP relay endpoint the proxy pulls/pushes frames on
 	outputType       string // "pr" (default) or "issue": what the run produces when done
 }
 
@@ -244,6 +245,7 @@ func loadConfig() (config, error) {
 		baseBranch:       baseBranch,
 		interactive:      os.Getenv("INTERACTIVE") == "1",
 		inputURL:         os.Getenv("BANDOLIER_INPUT_URL"),
+		acpURL:           os.Getenv("BANDOLIER_ACP_URL"),
 		outputType:       outputType,
 	}, nil
 }
@@ -1109,8 +1111,7 @@ func run(ctx context.Context, cfg config) error {
 			if cfg.issueNumber == "" {
 				cfg.systemPrompt = interactiveFraming(issueOutput, prBranch)
 			}
-			log.Printf("[harness] interactive mode via codex (model=%s)", cfg.model)
-			if err := runCodexInteractive(ctx, cfg, cfg.task); err != nil {
+			if err := runACPProxy(ctx, cfg); err != nil {
 				if ctx.Err() != nil {
 					log.Printf("[harness] terminated by signal")
 					return nil
@@ -1153,8 +1154,7 @@ func run(ctx context.Context, cfg config) error {
 		if cfg.issueNumber == "" {
 			cfg.systemPrompt = interactiveFraming(issueOutput, prBranch)
 		}
-		log.Printf("[harness] interactive mode (model=%s)", cfg.model)
-		if err := runClaudeInteractive(ctx, cfg, cfg.task); err != nil {
+		if err := runACPProxy(ctx, cfg); err != nil {
 			if ctx.Err() != nil {
 				log.Printf("[harness] terminated by signal")
 				return nil

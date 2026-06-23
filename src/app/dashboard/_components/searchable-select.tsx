@@ -241,7 +241,7 @@ export function SearchableSelect({
               bottom: coords.bottom,
               maxHeight: coords.maxHeight,
             }}
-            className="z-50 flex flex-col overflow-hidden rounded-xl border border-white/10 bg-[#0a2014] shadow-2xl"
+            className="z-50 flex flex-col overflow-hidden rounded-xl border border-white/10 bg-[var(--surface-panel)] shadow-2xl"
           >
             <div className="border-b border-white/10 p-2">
               <input

@@ -194,7 +194,7 @@ export function LogModal({
       onClick={onClose}
     >
       <div
-        className="flex h-[80vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-white/20 bg-[#0a2014]"
+        className="flex h-[80vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-white/20 bg-[var(--surface-panel)]"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}

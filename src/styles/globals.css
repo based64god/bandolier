@@ -1,14 +1,68 @@
 @import "tailwindcss";
 
 /*
- * Old-school computer terminal theme: black background, phosphor-green text.
+ * Default theme: the original black-and-purple palette — stock Tailwind purple,
+ * gray, sky, blue, and white tokens on a sans-serif font.
  *
- * The app was originally purple/gray. Rather than touch every component, we
- * remap the Tailwind color tokens those components already use (purple, sky,
- * gray, and white) onto a green CRT palette. A handful of hardcoded hex
- * backgrounds are updated in the components themselves.
+ * The green "CRT terminal" look is an easter egg. Entering the Konami code adds
+ * the `.h4x0r` class to <html> (see konami-easter-egg.tsx), and the
+ * `html.h4x0r` block at the bottom of this file remaps the Tailwind color
+ * tokens those components already use (white, gray, purple, sky, blue) onto a
+ * green phosphor palette, so every component, modal, menu, and button flips at
+ * once.
  */
 @theme {
+  --font-sans:
+    var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif,
+    "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+}
+
+:root {
+  /* Background for panel surfaces (modals, menus, popovers). Components
+     reference this variable instead of a hardcoded hex, so the h4x0r block
+     below can flip every panel to the green CRT palette in one place. The page
+     itself stays flat black (bg-black) in both themes. */
+  --surface-panel: #1e293b; /* slate-800 */
+}
+
+html {
+  color-scheme: dark;
+}
+
+/*
+ * iOS Safari auto-zooms the viewport whenever a focused text field has a font
+ * smaller than 16px. Several inputs use Tailwind's smaller text scales
+ * (text-sm/text-xs), so enforce a 16px minimum on all text-entry controls to
+ * suppress that zoom. max() leaves any explicitly larger font untouched.
+ */
+input,
+textarea,
+select {
+  font-size: max(16px, 1em);
+}
+
+body {
+  /* With viewport-fit=cover (see layout.tsx) the web view runs edge-to-edge.
+     Pad the content in by the safe-area insets so the top bar and the rest of
+     the UI stay inside the *visible* viewport instead of scrolling up under the
+     notch / Dynamic Island / status bar. Devices that report zero insets are
+     unaffected. */
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+}
+
+/* ======================================================================
+ * 1337 h4x0r mode — Konami code easter egg.
+ *
+ * Re-skins the app as an old-school green-on-black CRT terminal. Rather than
+ * touch every component, we remap the Tailwind color tokens components already
+ * use onto a green phosphor palette; overriding them under this class (which
+ * outranks the :root defaults emitted by @theme) retints the whole app at once.
+ * A handful of hardcoded hex surfaces are flipped in the components themselves.
+ * ====================================================================== */
+html.h4x0r {
   /* Monospaced everywhere for the terminal feel. */
   --font-sans:
     var(--font-geist-sans), ui-monospace, SFMono-Regular, Menlo, Consolas,
@@ -56,57 +110,26 @@
   --color-blue-400: #34d68d;
   --color-blue-500: #15b673;
   --color-blue-600: #0e9760;
+
+  /* Panel surfaces flip from slate to dark green. */
+  --surface-panel: #0a2014;
 }
 
-html {
-  color-scheme: dark;
-}
-
-/*
- * iOS Safari auto-zooms the viewport whenever a focused text field has a font
- * smaller than 16px. Several inputs use Tailwind's smaller text scales
- * (text-sm/text-xs), so enforce a 16px minimum on all text-entry controls to
- * suppress that zoom. max() leaves any explicitly larger font untouched.
- */
-input,
-textarea,
-select {
-  font-size: max(16px, 1em);
-}
-
-body {
+html.h4x0r body {
   /* Plain jet black base, like a powered-down CRT, so the phosphor-green text
      glows. No gradient — the only lighting is the CRT edge glow below. */
   background-color: #000000;
   color: var(--color-purple-300);
-
-  /* With viewport-fit=cover (see layout.tsx) the web view runs edge-to-edge.
-     Pad the content in by the safe-area insets so the top bar and the rest of
-     the UI stay inside the *visible* viewport instead of scrolling up under the
-     notch / Dynamic Island / status bar. The body background is already black,
-     so the inset zones read as the powered-down CRT's black surround — devices
-     that report zero insets are unaffected. */
-  padding-top: env(safe-area-inset-top, 0px);
-  padding-right: env(safe-area-inset-right, 0px);
-  padding-bottom: env(safe-area-inset-bottom, 0px);
-  padding-left: env(safe-area-inset-left, 0px);
 }
 
 /*
  * Subtle CRT glow hugging the edge of the screen. A fixed, non-interactive
  * overlay paints a soft phosphor-green halo just inside the border using inset
- * box-shadows, mimicking the way light bleeds from the edges of a CRT tube.
- *
- * On phones whose screen wraps around a notch / Dynamic Island / home indicator
- * (iPhones with Dynamic Island, recent Pixels) the web view runs edge-to-edge
- * under viewport-fit=cover. The body content is padded in by the safe-area
- * insets (see above), but the glow deliberately paints *into* those inset
- * regions when available: it covers the full physical screen so the phosphor
- * halo bleeds across the entire tube — bezel surround included — rather than
- * stopping at the visible viewport. Devices that report zero insets are
- * unaffected since the overlay already spans edge to edge.
+ * box-shadows, mimicking the way light bleeds from the edges of a CRT tube. It
+ * paints into the safe-area inset regions too, so the halo bleeds across the
+ * entire tube — bezel surround included — under viewport-fit=cover.
  */
-body::after {
+html.h4x0r body::after {
   content: "";
   position: fixed;
   top: 0;

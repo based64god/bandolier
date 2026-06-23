@@ -3,6 +3,7 @@ import "~/styles/globals.css";
 import { type Metadata, type Viewport } from "next";
 import { Geist } from "next/font/google";
 
+import { KonamiEasterEgg } from "~/app/_components/konami-easter-egg";
 import { PullToRefresh } from "~/app/_components/pull-to-refresh";
 import { PwaRegister } from "~/app/_components/pwa-register";
 import { UpdatePrompt } from "~/app/_components/update-prompt";
@@ -64,10 +65,19 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${geist.variable}`}>
       <body>
+        {/* Re-apply the "1337 h4x0r mode" easter egg (see KonamiEasterEgg)
+            before paint so a saved preference doesn't flash the default theme
+            first. Runs synchronously during body parse. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `try{if(localStorage.getItem('h4x0r')==='1')document.documentElement.classList.add('h4x0r')}catch(e){}`,
+          }}
+        />
         <TRPCReactProvider>{children}</TRPCReactProvider>
         <PwaRegister />
         <PullToRefresh />
         <UpdatePrompt />
+        <KonamiEasterEgg />
       </body>
     </html>
   );

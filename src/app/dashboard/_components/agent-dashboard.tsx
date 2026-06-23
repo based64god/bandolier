@@ -280,7 +280,7 @@ export function AgentDashboard({
                 />
                 <div
                   role="menu"
-                  className="absolute left-0 z-20 mt-2 w-56 origin-top-left rounded-xl border border-white/10 bg-[#0a2014] p-2 shadow-xl"
+                  className="absolute left-0 z-20 mt-2 w-56 origin-top-left rounded-xl border border-white/10 bg-[var(--surface-panel)] p-2 shadow-xl"
                 >
                   <div className="flex items-center gap-2 border-b border-white/10 px-2 pb-2">
                     {user.image && (

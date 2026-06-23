@@ -350,7 +350,9 @@ export function AgentDashboard({
                 className="flex items-center gap-2.5 transition hover:opacity-80"
               >
                 <BandolierIcon className="h-7 w-7 shrink-0" />
-                <span className="hidden xl:inline">Bandolier</span>
+                <span className="hidden tracking-[0.15em] uppercase xl:inline">
+                  Bandolier
+                </span>
               </Link>
             </h1>
 

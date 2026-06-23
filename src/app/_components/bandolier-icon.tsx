@@ -1,28 +1,37 @@
 // WW2-style bandolier: a diagonal shoulder strap with bullet cartridges.
 // The whole shape is drawn in a flat (horizontal strap, upright bullets)
-// coordinate system and then rotated 45° so it reads as a diagonal bandolier.
+// coordinate system and then rotated -45° so it reads as a diagonal bandolier
+// running from the lower-left to the upper-right corner. The strap overflows
+// the 32×32 box and is clipped back to it by the viewBox, so it reaches the
+// corners.
+//
+// The glyph carries its own brand colors — a gray strap with white bullets
+// (rounded tip, flat back) — rather than inheriting the surrounding text color,
+// so it renders identically wherever it appears.
 export function BandolierIcon({ className }: { className?: string }) {
   return (
     <svg
-      viewBox="-2 -2 28 28"
-      fill="currentColor"
+      viewBox="0 0 32 32"
       xmlns="http://www.w3.org/2000/svg"
       aria-hidden="true"
       className={className}
     >
-      <g transform="rotate(45 12 12)">
-        {/* Shoulder strap */}
-        <rect x="-1" y="10" width="26" height="4" rx="2" fillOpacity="0.5" />
+      <g transform="rotate(-45 16 16)">
+        {/* Shoulder strap — a continuous gray band spanning corner to corner. */}
+        <rect x="-8" y="12" width="48" height="8" fill="#9a9a9a" />
 
-        {/* Bullet cartridges — six evenly spaced along the strap.
-            Each sits partially above the strap (y 4→11.5) so the case
-            overlaps the strap loop and only the bullet tip is exposed. */}
-        <rect x="0.5" y="4" width="2.5" height="8.5" rx="1.25" />
-        <rect x="4.2" y="4" width="2.5" height="8.5" rx="1.25" />
-        <rect x="7.9" y="4" width="2.5" height="8.5" rx="1.25" />
-        <rect x="11.6" y="4" width="2.5" height="8.5" rx="1.25" />
-        <rect x="15.3" y="4" width="2.5" height="8.5" rx="1.25" />
-        <rect x="19" y="4" width="2.5" height="8.5" rx="1.25" />
+        {/* Cartridges — four evenly spaced bullets crossing the strap, each a
+            flat-backed body (rect) over a rounded tip (circle). */}
+        <g fill="#ffffff">
+          <rect x="2.55" y="9.5" width="4.4" height="12.5" />
+          <circle cx="4.75" cy="22" r="2.2" />
+          <rect x="10.05" y="9.5" width="4.4" height="12.5" />
+          <circle cx="12.25" cy="22" r="2.2" />
+          <rect x="17.55" y="9.5" width="4.4" height="12.5" />
+          <circle cx="19.75" cy="22" r="2.2" />
+          <rect x="25.05" y="9.5" width="4.4" height="12.5" />
+          <circle cx="27.25" cy="22" r="2.2" />
+        </g>
       </g>
     </svg>
   );

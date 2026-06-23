@@ -39,6 +39,7 @@ export default defineConfig({
         "src/server/agents/openai.ts",
         "src/server/agents/gemini.ts",
         "src/server/agents/resolve-credentials.ts",
+        "src/server/agents/repo-permissions.ts",
         "src/server/api/rest.ts",
         "src/app/dashboard/_components/parse-aws.ts",
         "src/app/dashboard/_components/agent-ui.ts",

@@ -3,8 +3,15 @@ import { and, desc, eq } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 
 import { env } from "~/env";
+import {
+  dispatchPendingRun,
+  getUnresolvedPendingRun,
+  markResolved,
+  setApprovalCommentId,
+  storePendingRun,
+} from "~/server/agents/agent-approval";
 import { validateAwsCredentials } from "~/server/agents/aws";
-import { createAgentJob } from "~/server/agents/create-job";
+import { createAgentJob, type JobSpec } from "~/server/agents/create-job";
 import {
   getRegistryPullSecret,
   getRepoBotToken,
@@ -17,9 +24,16 @@ import {
 } from "~/server/agents/github-token";
 import {
   getPullRequestRefs,
+  listCommentReactions,
+  postIssueCommentReturningId,
   postIssueCommentWithFallback,
 } from "~/server/agents/github-issues";
 import { resolveKubeconfig } from "~/server/agents/kubeconfig";
+import {
+  getUserRepoPermission,
+  isMaintainerOrHigher,
+  runUsesRepoCredentials,
+} from "~/server/agents/repo-permissions";
 import {
   fuzzyPickModel,
   listModelsForUser,
@@ -88,11 +102,14 @@ interface IssuePayload {
 }
 
 // `issue_comment` event: a comment on an issue — or on a pull request, which
-// GitHub delivers through the same event with `issue.pull_request` set.
+// GitHub delivers through the same event with `issue.pull_request` set. Drives
+// both resuming a run by commenting and the maintainer approval flow for held,
+// credential-gated runs.
 interface IssueCommentPayload {
   action: string;
   issue: GitHubIssue & { pull_request?: { html_url: string } };
   comment: {
+    id: number;
     body: string | null;
     user: { id: number; login: string; type?: string };
   };
@@ -325,6 +342,9 @@ async function resolveWebhookRun(opts: {
     geminiApiKey,
     kubeconfig,
     prWriterModel,
+    // The full resolution result, so callers judging credential provenance
+    // (e.g. the repo-credentials maintainer gate) don't re-resolve.
+    resolved,
   };
 }
 
@@ -389,6 +409,7 @@ async function handleIssueOpened(
     geminiApiKey,
     kubeconfig,
     prWriterModel,
+    resolved,
   } = run;
 
   console.log("[bandolier:webhook] issue opened", {
@@ -423,7 +444,7 @@ async function handleIssueOpened(
     ? (getRegistryPullSecret(agentImage, linked.accessToken) ?? undefined)
     : undefined;
 
-  const jobName = await createAgentJob({
+  const spec: JobSpec = {
     namespace: repoToNamespace(repository.full_name),
     // Build the prompt here (no operator context): the issue context is stored
     // as CLAUDE_TASK and shown in the dashboard; the instructional framing goes
@@ -464,7 +485,89 @@ async function handleIssueOpened(
     imagePullSecret,
     repoSystemPrompt: repoSystemPrompt ?? undefined,
     networkPolicy,
-  });
+  };
+
+  // Privilege gate: when this run would spend the repo's *shared* credentials (a
+  // repo-level kubeconfig or model key), only a GitHub user with maintainer-or-
+  // higher on the repo may execute it. A less-privileged opener has the run held
+  // for approval — the bot comments asking a maintainer to approve (by reacting
+  // to or replying to that comment), and the run is dispatched only then.
+  const usesRepoCreds = await runUsesRepoCredentials(
+    db,
+    linked.userId,
+    repository.full_name,
+    resolved,
+  );
+  if (usesRepoCreds) {
+    const botToken = await getRepoBotToken(
+      db,
+      repository.full_name,
+      Date.now(),
+    );
+    // Check the opener's privilege using the bot token (or, failing that, their
+    // own). Without any token we can't verify, so we fail closed and hold.
+    const permToken = botToken ?? linked.accessToken ?? null;
+    const permission = permToken
+      ? await getUserRepoPermission(
+          permToken,
+          repository.full_name,
+          sender.login,
+        )
+      : "none";
+    if (!isMaintainerOrHigher(permission)) {
+      console.log(
+        "[bandolier:webhook] issue held for approval — repo credentials + under-privileged opener",
+        {
+          issue: issue.number,
+          sender: sender.login,
+          permission,
+        },
+      );
+      const pendingId = await storePendingRun(db, {
+        repoFullName: repository.full_name,
+        issueNumber: issue.number,
+        requestedByLogin: sender.login,
+        spec,
+      });
+      const commentBody =
+        `🤖 This issue would run a Bandolier agent on **${repository.full_name}**'s ` +
+        `shared repo-level credentials, which requires **maintainer** access or higher.\n\n` +
+        `@${sender.login} doesn't have that on this repo, so the run is held for approval.\n\n` +
+        `A maintainer can approve it by reacting 👍 to this comment, or replying \`/bando approve\`.`;
+      if (botToken) {
+        try {
+          const commentId = await postIssueCommentReturningId(
+            botToken,
+            repository.full_name,
+            issue.number,
+            commentBody,
+          );
+          await setApprovalCommentId(db, pendingId, String(commentId));
+          console.log("[bandolier:webhook] approval comment posted", {
+            issue: issue.number,
+            comment: commentId,
+          });
+        } catch (err) {
+          console.warn("[bandolier:webhook] failed to post approval comment", {
+            issue: issue.number,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      } else {
+        console.warn(
+          "[bandolier:webhook] run held but no bot token to request approval",
+          { issue: issue.number },
+        );
+      }
+      return;
+    }
+    console.log(
+      "[bandolier:webhook] repo credentials used — opener is maintainer+",
+      { issue: issue.number, sender: sender.login, permission },
+    );
+  }
+
+  const jobName = await createAgentJob(spec);
 
   // Notify the issue author that the task was received and is being worked on.
   // This is a bot-voice comment ("🤖 Bando picked up this issue…"), so it must
@@ -725,6 +828,152 @@ async function handleIssueComment(
   }
 }
 
+// Approval / decline commands a maintainer can reply with to act on a held run.
+const APPROVE_COMMANDS = ["/bando approve", "/bando-approve"];
+const DECLINE_COMMANDS = ["/bando decline", "/bando-decline", "/bando deny"];
+// Reaction contents that count as an approval when placed on the bot's
+// approval-request comment (a thumbs-up or a rocket).
+const APPROVAL_REACTIONS = new Set(["+1", "rocket", "hooray"]);
+
+/**
+ * Dispatches a held run after a maintainer's approval: atomically claims the row
+ * (so two racing approvals can't both fire), creates the agent job, and posts a
+ * confirmation. No-op if the row was already resolved.
+ */
+async function approveAndDispatch(
+  run: Awaited<ReturnType<typeof getUnresolvedPendingRun>>,
+  approverLogin: string,
+  botToken: string | null,
+): Promise<void> {
+  if (!run) return;
+  const claimed = await markResolved(db, run.id, "dispatched", approverLogin);
+  if (!claimed) return; // already resolved by a concurrent approval
+
+  let jobName: string;
+  try {
+    jobName = await dispatchPendingRun(run);
+  } catch (err) {
+    console.error("[bandolier:webhook] failed to dispatch approved run", {
+      issue: run.issueNumber,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return;
+  }
+  console.log("[bandolier:webhook] approved run dispatched", {
+    issue: run.issueNumber,
+    approver: approverLogin,
+    job: jobName,
+  });
+  if (botToken) {
+    const taskUrl = `${env.BETTER_AUTH_URL}/repo/${run.repoFullName}`;
+    const body =
+      `🤖 Approved by @${approverLogin}. Bando is now working on this issue.\n\n` +
+      `[View task on the dashboard](${taskUrl}) (job: \`${jobName}\`)`;
+    await postIssueCommentWithFallback(
+      [{ token: botToken, source: "app-installation" }],
+      run.repoFullName,
+      run.issueNumber,
+      body,
+    );
+  }
+}
+
+/**
+ * Handles an `issue_comment` event for the credential-approval flow. A held run
+ * (see handleIssueOpened) is dispatched when a maintainer-or-higher user either
+ * replies with `/bando approve` or reacts 👍/🚀 to the bot's approval comment.
+ * The comment's text is checked first; if it isn't a command, we re-check the
+ * approval comment's reactions (GitHub doesn't deliver reaction webhooks, so any
+ * later comment activity on the issue is used as a cheap trigger to poll them).
+ *
+ * Returns true when the issue has an unresolved held run — the comment then
+ * belongs to the approval flow and must not also resume a run.
+ */
+async function handleApprovalComment(
+  payload: IssueCommentPayload,
+): Promise<boolean> {
+  if (payload.action !== "created") return false;
+
+  const repoFullName = payload.repository.full_name;
+  const issueNumber = payload.issue.number;
+  const run = await getUnresolvedPendingRun(db, repoFullName, issueNumber);
+  if (!run) return false;
+
+  const botToken = await getRepoBotToken(db, repoFullName, Date.now());
+  const text = (payload.comment.body ?? "").toLowerCase();
+  const isApproveCmd = APPROVE_COMMANDS.some((c) => text.includes(c));
+  const isDeclineCmd = DECLINE_COMMANDS.some((c) => text.includes(c));
+
+  // A command in the comment is attributed to its sender — verify their
+  // privilege before acting. Ignore the bot's own comments.
+  if (isApproveCmd || isDeclineCmd) {
+    const permToken = botToken ?? null;
+    const permission = permToken
+      ? await getUserRepoPermission(
+          permToken,
+          repoFullName,
+          payload.sender.login,
+        )
+      : "none";
+    if (!isMaintainerOrHigher(permission)) {
+      console.log(
+        "[bandolier:webhook] approval command ignored — sender not a maintainer",
+        { issue: issueNumber, sender: payload.sender.login, permission },
+      );
+      return true;
+    }
+    if (isDeclineCmd) {
+      await markResolved(db, run.id, "declined", payload.sender.login);
+      console.log("[bandolier:webhook] held run declined", {
+        issue: issueNumber,
+        by: payload.sender.login,
+      });
+      if (botToken) {
+        await postIssueCommentWithFallback(
+          [{ token: botToken, source: "app-installation" }],
+          repoFullName,
+          issueNumber,
+          `🤖 Declined by @${payload.sender.login}. This run will not be dispatched.`,
+        );
+      }
+      return true;
+    }
+    await approveAndDispatch(run, payload.sender.login, botToken);
+    return true;
+  }
+
+  // Not a command — poll reactions on the bot's approval comment for an
+  // approving 👍/🚀 from a maintainer. (GitHub sends no reaction webhook, so we
+  // piggyback on comment activity to check.)
+  if (run.approvalCommentId && botToken) {
+    try {
+      const reactions = await listCommentReactions(
+        botToken,
+        repoFullName,
+        Number(run.approvalCommentId),
+      );
+      for (const r of reactions) {
+        if (!APPROVAL_REACTIONS.has(r.content) || !r.user) continue;
+        const permission = await getUserRepoPermission(
+          botToken,
+          repoFullName,
+          r.user.login,
+        );
+        if (isMaintainerOrHigher(permission)) {
+          await approveAndDispatch(run, r.user.login, botToken);
+          return true;
+        }
+      }
+    } catch (err) {
+      console.warn("[bandolier:webhook] failed to read approval reactions", {
+        issue: issueNumber,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  return true;
+}
+
 /**
  * Maintains the repo → installation mapping from the App's `installation` and
  * `installation_repositories` events. Both deliver the same shape; the action
@@ -823,19 +1072,24 @@ export async function POST(req: NextRequest) {
       event === "issue_comment" &&
       (payload as IssueCommentPayload).action === "created"
     ) {
-      // A comment on an issue or PR resumes that item's most recent run.
-      const repoConfig = repoFullName
-        ? await getRepoWebhookConfig(db, repoFullName)
-        : null;
-      await handleIssueComment(
-        payload as IssueCommentPayload,
-        repoConfig?.prefix ?? null,
-        repoConfig?.agentImage ?? null,
-        repoConfig?.defaultWebhookModel ?? null,
-        repoConfig?.defaultWebhookEffort ?? null,
-        repoConfig?.systemPrompt ?? null,
-        repoConfig?.networkPolicy,
-      );
+      // A held, credential-gated run claims the issue's comments first: they
+      // approve/decline it rather than resuming anything. Otherwise a comment
+      // on an issue or PR resumes that item's most recent run.
+      const gated = await handleApprovalComment(payload as IssueCommentPayload);
+      if (!gated) {
+        const repoConfig = repoFullName
+          ? await getRepoWebhookConfig(db, repoFullName)
+          : null;
+        await handleIssueComment(
+          payload as IssueCommentPayload,
+          repoConfig?.prefix ?? null,
+          repoConfig?.agentImage ?? null,
+          repoConfig?.defaultWebhookModel ?? null,
+          repoConfig?.defaultWebhookEffort ?? null,
+          repoConfig?.systemPrompt ?? null,
+          repoConfig?.networkPolicy,
+        );
+      }
     } else if (event === "installation") {
       // App installed/uninstalled, or repos added/removed for an installation.
       const p = payload as InstallationPayload;

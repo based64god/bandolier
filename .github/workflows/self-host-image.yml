@@ -5,33 +5,59 @@ name: bandolier-self-host image
 # (ghcr.io). Pull requests build it as a CI check but do not push; pushes to the
 # default branch and version tags publish.
 #
-# Rebuilds when the image definition changes, when the harness base changes
-# (the harness image rebuilds from agent-harness/**), or when the repo's Go or
-# Node versions change (go.mod / package.json) — the versions are read from
-# those files and baked in, so the image always matches the repo's build.
+# This image is layered on `bandolier-agent-harness:latest` (see
+# self-host/Dockerfile), so it must build *after* that image is published, on the
+# fresh harness. It used to also build on the `agent-harness/**` push path, which
+# raced the harness build on a `main` push: both started at once and self-host
+# pulled the *previous* harness `:latest` (the new one hadn't finished pushing),
+# shipping a self-host image on a stale harness. Instead we trigger off the
+# harness workflow's completion (workflow_run) so the harness `:latest` is already
+# published, and force a fresh base pull. Self-host's own inputs (Dockerfile,
+# node version) still rebuild it directly via the push path.
 on:
+  # Rebuild automatically once the harness image publishes — the harness `:latest`
+  # is settled by the time this fires, so self-host always layers on the newest
+  # harness without anyone re-running anything.
+  workflow_run:
+    workflows: ["agent-harness image"]
+    types: [completed]
+    branches: [main]
+  # Allow a manual rebuild (e.g. to pick up a harness image that changed without a
+  # corresponding self-host change).
+  workflow_dispatch:
   push:
     branches: [main]
     tags: ["v*.*.*"]
     paths:
+      # agent-harness changes are handled by the workflow_run trigger above, not
+      # here, to avoid racing the harness build.
       - "self-host/**"
-      - "agent-harness/**"
-      - "agent-harness/go.mod"
       - "package.json"
       - ".github/workflows/self-host-image.yml"
   pull_request:
     paths:
       - "self-host/**"
       - "agent-harness/**"
-      - "agent-harness/go.mod"
       - "package.json"
       - ".github/workflows/self-host-image.yml"
+
+# Serialize main builds so a workflow_run build (fresh harness) supersedes an
+# in-flight push build of the same ref. Without this, a single commit touching
+# both agent-harness/** and self-host/** could end with whichever build finished
+# last winning `:latest` — possibly the push build, which layered on the old
+# harness. The workflow_run build is queued later, so it cancels/outlives the
+# push build and the fresh-harness image wins.
+concurrency:
+  group: self-host-image-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   IMAGE: ghcr.io/${{ github.repository_owner }}/bandolier-self-host
 
 jobs:
   build-and-push:
+    # Don't rebuild on a failed/cancelled harness run.
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -40,6 +66,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # On workflow_run, build the exact commit the harness was built from so
+          # the baked Go/Node versions match it; otherwise the event's own ref.
+          ref: ${{ github.event.workflow_run.head_sha || '' }}
 
       # Pin the toolchain base images to the exact versions the repo builds with,
       # read straight from go.mod and package.json so they can't drift.
@@ -89,6 +119,9 @@ jobs:
           context: ./self-host
           file: ./self-host/Dockerfile
           platforms: linux/amd64
+          # Always re-pull the FROM images so the build layers on the current
+          # agent-harness:latest, never a base cached from an earlier run.
+          pull: true
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

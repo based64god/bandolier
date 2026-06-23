@@ -177,6 +177,7 @@ type config struct {
 	baseBranch       string // base branch for the PR
 	interactive      bool   // long-lived session driven by user input between turns
 	inputURL         string // Bandolier endpoint the interactive loop polls for input
+	acpURL           string // Bandolier ACP relay endpoint the proxy pulls/pushes frames on
 	outputType       string // "pr" (default) or "issue": what the run produces when done
 }
 
@@ -244,6 +245,7 @@ func loadConfig() (config, error) {
 		baseBranch:       baseBranch,
 		interactive:      os.Getenv("INTERACTIVE") == "1",
 		inputURL:         os.Getenv("BANDOLIER_INPUT_URL"),
+		acpURL:           os.Getenv("BANDOLIER_ACP_URL"),
 		outputType:       outputType,
 	}, nil
 }
@@ -1109,8 +1111,7 @@ func run(ctx context.Context, cfg config) error {
 			if cfg.issueNumber == "" {
 				cfg.systemPrompt = interactiveFraming(issueOutput, prBranch)
 			}
-			log.Printf("[harness] interactive mode via codex (model=%s)", cfg.model)
-			if err := runCodexInteractive(ctx, cfg, cfg.task); err != nil {
+			if err := runACPProxy(ctx, cfg); err != nil {
 				if ctx.Err() != nil {
 					log.Printf("[harness] terminated by signal")
 					return nil
@@ -1153,8 +1154,7 @@ func run(ctx context.Context, cfg config) error {
 		if cfg.issueNumber == "" {
 			cfg.systemPrompt = interactiveFraming(issueOutput, prBranch)
 		}
-		log.Printf("[harness] interactive mode (model=%s)", cfg.model)
-		if err := runClaudeInteractive(ctx, cfg, cfg.task); err != nil {
+		if err := runACPProxy(ctx, cfg); err != nil {
 			if ctx.Err() != nil {
 				log.Printf("[harness] terminated by signal")
 				return nil
@@ -1327,10 +1327,11 @@ type claudeEvent struct {
 	IsError  bool   `json:"is_error"`
 	Message  struct {
 		Content []struct {
-			Type  string          `json:"type"`
-			Text  string          `json:"text"`
-			Name  string          `json:"name"`
-			Input json.RawMessage `json:"input"`
+			Type     string          `json:"type"`
+			Text     string          `json:"text"`
+			Thinking string          `json:"thinking"`
+			Name     string          `json:"name"`
+			Input    json.RawMessage `json:"input"`
 		} `json:"content"`
 	} `json:"message"`
 }
@@ -1520,54 +1521,6 @@ func runCodex(ctx context.Context, cfg config, prBranch string) error {
 
 	args := codexArgs(cfg, foldSystemPrompt(sysPrompt, cfg.task), false, true)
 	return runCodexStreaming(ctx, cfg.workDir, buildEnv(cfg.provider), args...)
-}
-
-// runCodexInteractive drives a long-lived Codex conversation. Codex exec is
-// one-shot per process, so each turn is a separate invocation: the first creates
-// a session, and each follow-up resumes it (codex exec resume --last) with the
-// next user message. Between turns it pauses for the user's input polled from
-// Bandolier, exactly like the claude interactive loop — but the codex process
-// only exists during a turn, so the blocking call itself is the turn boundary
-// (no result-event signalling needed). The session must persist across turns, so
-// it is NOT ephemeral. Ends on the end sentinel, idle timeout, or cancellation.
-func runCodexInteractive(ctx context.Context, cfg config, first string) error {
-	idle := interactiveIdleTimeout()
-	env := buildEnv(cfg.provider)
-
-	// First turn: fold the session framing into the opening message and create the
-	// session (no resume, no --ephemeral so it can be resumed below). The
-	// repo-attached prompt rides along on the first turn's framing.
-	sysPrompt := cfg.withRepoPrompt(cfg.systemPrompt)
-	logCodexPrompt("sending initial message:", sysPrompt, first)
-	firstArgs := codexArgs(cfg, foldSystemPrompt(sysPrompt, first), false, false)
-	if err := runCodexStreaming(ctx, cfg.workDir, env, firstArgs...); err != nil {
-		if ctx.Err() != nil {
-			return nil
-		}
-		return err
-	}
-
-	for {
-		// The turn finished when the codex process exited above — wait for the
-		// user's next message.
-		log.Printf("[harness] %s", awaitInputMarker)
-		content, ended := awaitInput(ctx, cfg, idle)
-		if ended {
-			log.Printf("[harness] interactive session ending")
-			break
-		}
-		log.Printf("[harness] %s", resumeMarker)
-
-		resumeArgs := codexArgs(cfg, content, true, false)
-		if err := runCodexStreaming(ctx, cfg.workDir, env, resumeArgs...); err != nil {
-			if ctx.Err() != nil {
-				return nil
-			}
-			log.Printf("[harness] warn: codex resume turn failed: %v", err)
-			break
-		}
-	}
-	return nil
 }
 
 // runCodexStreaming runs `codex exec --json`, rendering each NDJSON event as it
@@ -1880,119 +1833,6 @@ func interactiveFraming(issueOutput bool, branchName string) string {
 	return buildInteractiveSystemPrompt(branchName)
 }
 
-// runClaudeInteractive drives a long-lived `claude` process over streaming JSON:
-// it sends the first message, renders streamed output, and after each turn waits
-// for the next user message (polled from Bandolier) before continuing. The
-// session ends on the end sentinel, an idle timeout, or context cancellation.
-func runClaudeInteractive(ctx context.Context, cfg config, first string) error {
-	args := []string{
-		"--print",
-		"--model", cfg.model,
-		"--dangerously-skip-permissions",
-		"--input-format", "stream-json",
-		"--output-format", "stream-json",
-		"--verbose",
-	}
-	sysPrompt := cfg.withRepoPrompt(cfg.systemPrompt)
-	if sysPrompt != "" {
-		args = append(args, "--append-system-prompt", sysPrompt)
-	}
-	// Log the system prompt line-by-line so each line keeps the [harness] tag
-	// (matching the non-interactive claude path and logCodexPrompt). Without this
-	// the repo-attached system prompt never appears in the harness logs.
-	if sysPrompt != "" {
-		log.Printf("[harness] system prompt:")
-		for _, line := range strings.Split(sysPrompt, "\n") {
-			log.Printf("[harness]   %s", line)
-		}
-	}
-	cmd := exec.CommandContext(ctx, "claude", args...)
-	cmd.Dir = cfg.workDir
-	cmd.Env = buildEnv(cfg.provider)
-	stderr := &prefixWriter{}
-	cmd.Stderr = stderr
-
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return err
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return err
-	}
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-
-	// Reader goroutine: render every event and signal when a turn completes (a
-	// `result` event means Claude is idle, waiting for the next stdin message).
-	turnDone := make(chan struct{}, 1)
-	go func() {
-		reader := bufio.NewReader(stdout)
-		for {
-			line, readErr := reader.ReadBytes('\n')
-			if len(bytes.TrimSpace(line)) > 0 {
-				handleClaudeEvent(line)
-				if isResultEvent(line) {
-					select {
-					case turnDone <- struct{}{}:
-					default:
-					}
-				}
-			}
-			if readErr != nil {
-				return
-			}
-		}
-	}()
-
-	// Record the seed prompt as user input so it opens the rendered chat history
-	// the same way follow-up messages do (the dashboard renders [user] lines as
-	// the user's turns, distinct from harness diagnostics and Claude's output).
-	logUserInput(first)
-	if err := writeUserMessage(stdin, first); err != nil {
-		_ = stdin.Close()
-		_ = cmd.Wait()
-		return fmt.Errorf("write initial message: %w", err)
-	}
-
-	idle := interactiveIdleTimeout()
-	for {
-		select {
-		case <-ctx.Done():
-			_ = stdin.Close()
-			_ = cmd.Wait()
-			return nil
-		case <-turnDone:
-		}
-
-		// Turn finished — wait for the user's next message.
-		log.Printf("[harness] %s", awaitInputMarker)
-		content, ended := awaitInput(ctx, cfg, idle)
-		if ended {
-			log.Printf("[harness] interactive session ending")
-			break
-		}
-		log.Printf("[harness] %s", resumeMarker)
-		// Record the message so it appears in the rendered chat history as the
-		// user's turn, sitting between Claude's responses.
-		logUserInput(content)
-		if err := writeUserMessage(stdin, content); err != nil {
-			log.Printf("[harness] warn: write message failed: %v", err)
-			break
-		}
-	}
-
-	// Closing stdin tells `claude` to exit; then run the post-run PR step.
-	_ = stdin.Close()
-	waitErr := cmd.Wait()
-	stderr.flush()
-	if ctx.Err() != nil {
-		return nil
-	}
-	return waitErr
-}
-
 // awaitInput polls Bandolier for the next user message. It returns ended=true on
 // the end sentinel, the idle timeout, or context cancellation.
 func awaitInput(ctx context.Context, cfg config, idle time.Duration) (string, bool) {
@@ -2073,20 +1913,19 @@ func writeUserMessage(w io.Writer, text string) error {
 	return err
 }
 
-// isResultEvent reports whether a stream-json line is a turn-completion event.
-func isResultEvent(raw []byte) bool {
-	var ev struct {
-		Type string `json:"type"`
-	}
-	if err := json.Unmarshal(raw, &ev); err != nil {
-		return false
-	}
-	return ev.Type == "result"
-}
-
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 func main() {
+	// `harness acp-agent` runs the ACP agent server: it speaks JSON-RPC on
+	// stdin/stdout, so it must claim the process before the normal harness
+	// logging setup tees diagnostics onto stdout.
+	if len(os.Args) > 1 && os.Args[1] == "acp-agent" {
+		if err := runACPAgent(); err != nil {
+			log.Fatalf("acp-agent: %v", err)
+		}
+		return
+	}
+
 	log.SetFlags(log.Ltime)
 	// Mirror all pod-log output into the transcript so it can be persisted.
 	log.SetOutput(io.MultiWriter(os.Stderr, transcript))

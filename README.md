@@ -27,6 +27,8 @@ When you deploy an agent, the web app:
 
 The harness then clones the repo, runs `claude --print`, commits the work, pushes a branch, and opens a PR. The PR title and description are written out-of-band by the latest Sonnet model, regardless of which model performed the task. Logs stream back to the dashboard; if artifact storage is configured, the full transcript is uploaded to S3 so it outlives the Job's TTL.
 
+**Interactive sessions** work a little differently. Instead of a one-shot `claude --print`, the harness runs as a transparent proxy speaking the [Agent Client Protocol](https://agentclientprotocol.com) (ACP): it spawns `harness acp-agent` (an ACP server wrapping the Claude/Codex CLI over stdio) and relays JSON-RPC frames between it and the dashboard. The **dashboard is the ACP client** — it renders the agent's `session/update` stream (messages, tool calls) and sends follow-up prompts — while the harness keeps doing all the git/PR orchestration. Frames travel over the same outbound-only HTTP path as the rest of the pod's traffic (a small relay endpoint backed by Postgres), so this works the same whether Bandolier is on Vercel or self-hosted. One-shot (non-interactive) runs are unchanged.
+
 ```
 Browser ──▶ Next.js app ──▶ Kubernetes API ──▶ Job (harness pod)
                 │                                   │

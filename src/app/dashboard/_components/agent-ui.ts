@@ -59,7 +59,9 @@ export function isAgentOutputResolved(agent: {
   createdIssueState: GithubItemState | null;
 }): boolean {
   if (agent.createdIssueUrl) {
-    return agent.createdIssueState != null && agent.createdIssueState !== "open";
+    return (
+      agent.createdIssueState != null && agent.createdIssueState !== "open"
+    );
   }
   if (agent.pullRequestUrl) {
     return agent.pullRequestState != null && agent.pullRequestState !== "open";

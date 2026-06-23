@@ -583,18 +583,6 @@ func TestToolSummaryUnknownShape(t *testing.T) {
 	}
 }
 
-func TestIsResultEvent(t *testing.T) {
-	if !isResultEvent([]byte(`{"type":"result","num_turns":3}`)) {
-		t.Error("expected result event to be detected")
-	}
-	if isResultEvent([]byte(`{"type":"assistant"}`)) {
-		t.Error("non-result event should not be detected")
-	}
-	if isResultEvent([]byte(`not json`)) {
-		t.Error("invalid JSON should not be detected as a result event")
-	}
-}
-
 func TestDetectProvider(t *testing.T) {
 	// Clear all provider-selecting vars, then assert each selection path.
 	for _, k := range []string{"CLAUDE_CODE_USE_BEDROCK", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_PROJECT_CREDENTIALS", "GOOGLE_APPLICATION_CREDENTIALS", "ANTIGRAVITY_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"} {

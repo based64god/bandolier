@@ -2,7 +2,7 @@ import { randomUUID } from "crypto";
 
 import { setHeaderOptions, type V1Pod } from "@kubernetes/client-node";
 import { TRPCError } from "@trpc/server";
-import { eq, inArray } from "drizzle-orm";
+import { and, asc, eq, gt, inArray } from "drizzle-orm";
 import { z } from "zod";
 
 import { env } from "~/env";
@@ -52,7 +52,7 @@ import {
   getRepoSystemPrompt,
 } from "~/server/agents/webhook-config";
 import { type db } from "~/server/db";
-import { agentInput, taskRun } from "~/server/db/schema";
+import { acpFrame, agentInput, taskRun } from "~/server/db/schema";
 import { getBatchV1Api, getCoreV1Api } from "~/server/k8s/client";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
 
@@ -854,6 +854,75 @@ export const agentsRouter = createTRPCRouter({
         content: END_SESSION_SENTINEL,
       });
       return { success: true };
+    }),
+
+  // ── ACP relay (interactive sessions) ──────────────────────────────────────
+  // The frontend is the ACP client; these procedures are its HTTP transport. The
+  // harness proxies between the acp_frame queue and the in-pod agent. Ownership
+  // is enforced by the spawned-by label, like sendInput/endSession.
+
+  // Enqueue one client→agent frame (a raw JSON-RPC string from the frontend
+  // client: initialize/session.new/prompt/cancel or a Bandolier control frame).
+  acpSend: protectedProcedure
+    .input(
+      z.object({
+        namespace: z.string().min(1),
+        jobName: z.string().min(1),
+        frame: z.string().min(1).max(200000),
+        repoFullName: z.string().optional(),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      await assertOwnsInteractiveJob(
+        ctx.db,
+        ctx.session.user.id,
+        input.namespace,
+        input.jobName,
+        input.repoFullName,
+      );
+      await ctx.db.insert(acpFrame).values({
+        jobName: input.jobName,
+        direction: "c2a",
+        payload: input.frame,
+      });
+      return { success: true };
+    }),
+
+  // Poll for agent→client frames after a cursor (the last seq seen). Returns the
+  // frames oldest-first plus the new cursor; the frontend client feeds them into
+  // its ACP connection and advances the cursor.
+  acpPull: protectedProcedure
+    .input(
+      z.object({
+        namespace: z.string().min(1),
+        jobName: z.string().min(1),
+        cursor: z.number().int().nonnegative().default(0),
+        repoFullName: z.string().optional(),
+      }),
+    )
+    .query(async ({ input, ctx }) => {
+      await assertOwnsInteractiveJob(
+        ctx.db,
+        ctx.session.user.id,
+        input.namespace,
+        input.jobName,
+        input.repoFullName,
+      );
+      const rows = await ctx.db
+        .select({ seq: acpFrame.seq, payload: acpFrame.payload })
+        .from(acpFrame)
+        .where(
+          and(
+            eq(acpFrame.jobName, input.jobName),
+            eq(acpFrame.direction, "a2c"),
+            gt(acpFrame.seq, input.cursor),
+          ),
+        )
+        .orderBy(asc(acpFrame.seq))
+        .limit(500);
+      const cursor =
+        rows.length > 0 ? rows[rows.length - 1]!.seq : input.cursor;
+      return { frames: rows, cursor };
     }),
 
   deploy: protectedProcedure

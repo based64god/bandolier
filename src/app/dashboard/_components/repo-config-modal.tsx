@@ -652,6 +652,134 @@ function RepoCredentialsSection({ repoFullName }: { repoFullName: string }) {
   );
 }
 
+// Per-repo network-policy egress toggles. Both loosen the default agent
+// NetworkPolicy (deny inbound; egress only to DNS + the public internet on
+// 80/443, with in-cluster private ranges blocked) and are OFF by default.
+// Enabling either trades isolation for reach, so a prominent security warning
+// sits above the toggles. Admin-only (the whole modal is gated server-side).
+function RepoNetworkPolicySection({ repoFullName }: { repoFullName: string }) {
+  const utils = api.useUtils();
+  const { data: config, isLoading } = api.webhooks.getConfig.useQuery({
+    repoFullName,
+  });
+  const setPolicy = api.webhooks.setNetworkPolicy.useMutation({
+    onSuccess: () => utils.webhooks.getConfig.invalidate({ repoFullName }),
+  });
+
+  const allowPrivate = config?.allowPrivateEgress ?? false;
+  const allowAllPorts = config?.allowAllPortsEgress ?? false;
+
+  return (
+    <div className="space-y-4 border-t border-white/10 pt-5">
+      <div className="space-y-1">
+        <h3 className="text-xs font-semibold tracking-wider text-white/50 uppercase">
+          Network policy egress
+        </h3>
+        <p className="text-xs text-white/40">
+          By default this repo&apos;s agent pods are locked down: all inbound
+          traffic is denied and egress is limited to DNS and the public internet
+          over HTTP(S), with in-cluster private ranges blocked. These toggles
+          loosen that per repo. They only take effect when{" "}
+          <code className="rounded bg-white/10 px-1 text-white/60">
+            AGENT_NETWORK_POLICY
+          </code>{" "}
+          is enabled and the cluster runs a policy-enforcing CNI (Calico/Cilium).
+        </p>
+      </div>
+
+      {/* Security warning — loosening egress weakens pod isolation. */}
+      <div className="flex gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5">
+        <span aria-hidden className="text-amber-300">
+          ⚠
+        </span>
+        <p className="text-xs text-amber-200/90">
+          <span className="font-semibold">
+            Loosening egress weakens agent isolation — enable only when you trust
+            the workloads this repo runs.
+          </span>{" "}
+          Agents run model-generated code with your credentials. Allowing
+          in-cluster egress opens lateral movement to other pods and internal
+          services; allowing all ports widens what an agent can connect to and
+          exfiltrate over. Leave these off unless a specific task needs them, and
+          turn them back off when it&apos;s done.
+        </p>
+      </div>
+
+      {isLoading ? (
+        <p className="text-xs text-white/30">Loading…</p>
+      ) : (
+        <div className="space-y-2">
+          <NetworkPolicyToggle
+            label="Allow in-cluster (private) egress"
+            description="Drop the block on RFC-1918 ranges so agents can reach other pods and in-cluster services. Lateral-movement risk."
+            enabled={allowPrivate}
+            disabled={setPolicy.isPending}
+            onChange={(v) =>
+              setPolicy.mutate({ repoFullName, allowPrivateEgress: v })
+            }
+          />
+          <NetworkPolicyToggle
+            label="Allow all egress ports"
+            description="Permit outbound TCP on any port instead of only 80/443. Widens the exfiltration / arbitrary-protocol surface."
+            enabled={allowAllPorts}
+            disabled={setPolicy.isPending}
+            onChange={(v) =>
+              setPolicy.mutate({ repoFullName, allowAllPortsEgress: v })
+            }
+          />
+          {setPolicy.error && (
+            <p className="text-xs text-red-400">{setPolicy.error.message}</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// A single on/off egress toggle, styled to match the two-button preference
+// toggle used for credential preference.
+function NetworkPolicyToggle({
+  label,
+  description,
+  enabled,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  description: string;
+  enabled: boolean;
+  disabled: boolean;
+  onChange: (value: boolean) => void;
+}) {
+  return (
+    <div className="space-y-2 rounded-lg border border-white/10 bg-white/[0.03] p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 space-y-1">
+          <h4 className="text-xs font-semibold text-white/70">{label}</h4>
+          <p className="text-[11px] text-white/40">{description}</p>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={enabled}
+          aria-label={label}
+          onClick={() => onChange(!enabled)}
+          disabled={disabled}
+          className={`relative h-5 w-9 shrink-0 rounded-full transition-colors disabled:opacity-50 ${
+            enabled ? "bg-amber-500/70" : "bg-white/15"
+          }`}
+        >
+          <span
+            className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white transition-transform ${
+              enabled ? "translate-x-4" : "translate-x-0"
+            }`}
+          />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function RepoConfigModal({
   repoFullName,
   onClose,
@@ -874,6 +1002,8 @@ export function RepoConfigModal({
           <RepoDefaultModelSection repoFullName={repoFullName} />
 
           <RepoCredentialsSection repoFullName={repoFullName} />
+
+          <RepoNetworkPolicySection repoFullName={repoFullName} />
         </div>
       </div>
     </div>

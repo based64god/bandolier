@@ -129,6 +129,9 @@ async function handleIssueOpened(
   agentImage: string | null,
   defaultModel: string | null,
   repoSystemPrompt: string | null,
+  networkPolicy:
+    | { allowPrivateEgress: boolean; allowAllPortsEgress: boolean }
+    | undefined,
 ): Promise<void> {
   const { issue, repository, sender } = payload;
 
@@ -361,6 +364,7 @@ async function handleIssueOpened(
     agentImage: agentImage ?? undefined,
     imagePullSecret,
     repoSystemPrompt: repoSystemPrompt ?? undefined,
+    networkPolicy,
   });
 
   // Notify the issue author that the task was received and is being worked on.
@@ -488,6 +492,7 @@ export async function POST(req: NextRequest) {
         repoConfig?.agentImage ?? null,
         repoConfig?.defaultWebhookModel ?? null,
         repoConfig?.systemPrompt ?? null,
+        repoConfig?.networkPolicy,
       );
     } else if (event === "installation") {
       // App installed/uninstalled, or repos added/removed for an installation.

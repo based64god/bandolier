@@ -81,6 +81,8 @@ export const webhooksRouter = createTRPCRouter({
           agentImage: repoWebhookConfig.agentImage,
           defaultWebhookModel: repoWebhookConfig.defaultWebhookModel,
           systemPrompt: repoWebhookConfig.systemPrompt,
+          allowPrivateEgress: repoWebhookConfig.allowPrivateEgress,
+          allowAllPortsEgress: repoWebhookConfig.allowAllPortsEgress,
         })
         .from(repoWebhookConfig)
         .where(eq(repoWebhookConfig.repoFullName, input.repoFullName))
@@ -93,7 +95,42 @@ export const webhooksRouter = createTRPCRouter({
         agentImage: row?.agentImage ?? "",
         defaultWebhookModel: row?.defaultWebhookModel ?? null,
         systemPrompt: row?.systemPrompt ?? "",
+        // Network-policy egress toggles (both off unless a row turns them on).
+        allowPrivateEgress: row?.allowPrivateEgress ?? false,
+        allowAllPortsEgress: row?.allowAllPortsEgress ?? false,
       };
+    }),
+
+  // Set the per-repo network-policy egress toggles. Both loosen the default
+  // agent NetworkPolicy and are admin-only. SECURITY: enabling either trades
+  // pod isolation for reach — the repo-config UI surfaces a warning. Partial
+  // upsert so each toggle can be set without clobbering other config.
+  setNetworkPolicy: protectedProcedure
+    .input(
+      z.object({
+        repoFullName: z.string().min(1),
+        // Allow egress to private / in-cluster (RFC-1918) ranges.
+        allowPrivateEgress: z.boolean().optional(),
+        // Allow egress on any TCP port instead of only 80/443.
+        allowAllPortsEgress: z.boolean().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await requireRepoAdmin(ctx, input.repoFullName);
+      const values: Partial<typeof repoWebhookConfig.$inferInsert> = {};
+      if (input.allowPrivateEgress !== undefined) {
+        values.allowPrivateEgress = input.allowPrivateEgress;
+      }
+      if (input.allowAllPortsEgress !== undefined) {
+        values.allowAllPortsEgress = input.allowAllPortsEgress;
+      }
+      await upsertRepoConfig(
+        ctx.db,
+        input.repoFullName,
+        ctx.session.user.id,
+        values,
+      );
+      return { success: true };
     }),
 
   setConfig: protectedProcedure

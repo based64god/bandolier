@@ -58,7 +58,13 @@ describe("applyFrames", () => {
     );
     expect(items).toEqual<TimelineItem[]>([
       { type: "message", role: "user", id: "u-1", text: "do it" },
-      { type: "message", role: "assistant", id: "m1", text: "working" },
+      {
+        type: "message",
+        role: "assistant",
+        id: "a-2",
+        messageId: "m1",
+        text: "working",
+      },
       {
         type: "tool",
         id: "t-3",
@@ -89,6 +95,37 @@ describe("applyFrames", () => {
     ]);
     expect(items).toHaveLength(1);
     expect(items[0]).toMatchObject({ text: "Hello world", role: "assistant" });
+  });
+
+  it("gives distinct keys to same-message bubbles split by a tool call", () => {
+    // The agent reuses one messageId for a whole turn, so text before and after
+    // a tool call shares it. Each bubble must still get a unique id (React key),
+    // or the later bubbles collide and don't render.
+    const { items } = applyFrames(
+      [],
+      [
+        update(1, "s", {
+          sessionUpdate: "agent_message_chunk",
+          messageId: "m1",
+          content: { text: "reading" },
+        }),
+        update(2, "s", {
+          sessionUpdate: "tool_call",
+          kind: "read",
+          title: "Read: a.ts",
+        }),
+        update(3, "s", {
+          sessionUpdate: "agent_message_chunk",
+          messageId: "m1",
+          content: { text: "done" },
+        }),
+      ],
+    );
+    expect(items).toHaveLength(3);
+    const ids = items.map((i) => i.id);
+    expect(new Set(ids).size).toBe(3); // all keys unique
+    expect(items[0]).toMatchObject({ type: "message", text: "reading" });
+    expect(items[2]).toMatchObject({ type: "message", text: "done" });
   });
 
   it("starts a new bubble when the messageId changes", () => {

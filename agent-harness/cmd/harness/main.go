@@ -1322,10 +1322,14 @@ func runCmd(ctx context.Context, dir string, env []string, name string, args ...
 
 // claudeEvent is the subset of Claude Code's stream-json events we render.
 type claudeEvent struct {
-	Type     string `json:"type"`
-	NumTurns int    `json:"num_turns"`
-	IsError  bool   `json:"is_error"`
-	Message  struct {
+	Type    string `json:"type"`
+	Subtype string `json:"subtype"`
+	// SlashCommands is carried by the system/init event: the command names
+	// (no leading slash, no descriptions) the session supports.
+	SlashCommands []string `json:"slash_commands"`
+	NumTurns      int      `json:"num_turns"`
+	IsError       bool     `json:"is_error"`
+	Message       struct {
 		Content []struct {
 			Type     string          `json:"type"`
 			Text     string          `json:"text"`

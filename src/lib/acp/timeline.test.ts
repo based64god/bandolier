@@ -150,6 +150,70 @@ describe("applyFrames", () => {
     ]);
   });
 
+  it("surfaces available_commands_update as the commands list, not a timeline item", () => {
+    const { items, commands } = applyFrames(
+      [],
+      [
+        update(1, "sess-1", {
+          sessionUpdate: "available_commands_update",
+          availableCommands: [
+            { name: "code-review", description: "Review the diff" },
+            { name: "verify" },
+          ],
+        }),
+      ],
+    );
+    expect(items).toEqual([]);
+    expect(commands).toEqual([
+      { name: "code-review", description: "Review the diff" },
+      { name: "verify" },
+    ]);
+  });
+
+  it("drops malformed command entries (missing name)", () => {
+    const { commands } = applyFrames(
+      [],
+      [
+        update(1, "sess-1", {
+          sessionUpdate: "available_commands_update",
+          availableCommands: [{ name: "ok" }, { description: "no name" }, {}],
+        }),
+      ],
+    );
+    expect(commands).toEqual([{ name: "ok" }]);
+  });
+
+  it("lets the latest available_commands_update replace the previous list", () => {
+    const { commands } = applyFrames(
+      [],
+      [
+        update(1, "sess-1", {
+          sessionUpdate: "available_commands_update",
+          availableCommands: [{ name: "old" }],
+        }),
+        update(2, "sess-1", {
+          sessionUpdate: "available_commands_update",
+          availableCommands: [{ name: "new" }],
+        }),
+      ],
+    );
+    expect(commands).toEqual([{ name: "new" }]);
+  });
+
+  it("leaves commands undefined when no update was seen", () => {
+    const { commands } = applyFrames(
+      [],
+      [
+        update(1, "sess-1", {
+          sessionUpdate: "agent_message_chunk",
+          messageId: "m1",
+          content: { text: "hi" },
+        }),
+      ],
+    );
+    expect(commands).toBeUndefined();
+  });
+
   it("ignores non-update frames (responses) but still harvests their nothing", () => {
     const { items, sessionId } = applyFrames(
       [],

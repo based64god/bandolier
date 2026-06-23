@@ -27,6 +27,12 @@ export interface RawAcpFrame {
   payload: string;
 }
 
+/** A slash command advertised by the agent via available_commands_update. */
+export interface AvailableCommand {
+  name: string;
+  description?: string;
+}
+
 interface ParsedUpdate {
   sessionUpdate?: string;
   messageId?: string;
@@ -34,6 +40,7 @@ interface ParsedUpdate {
   kind?: string;
   status?: string;
   content?: { text?: string };
+  availableCommands?: AvailableCommand[];
 }
 
 interface ParsedFrame {
@@ -46,15 +53,23 @@ interface ParsedFrame {
  * items and the session id if one was observed. Assistant message chunks that
  * share a messageId are coalesced into a single bubble; tool calls become their
  * own rows; user_message_chunk frames (the proxy's seed echo) become user
- * bubbles. Frames that aren't session/update notifications (responses, etc.) are
- * ignored for rendering — only their sessionId is harvested.
+ * bubbles. An available_commands_update surfaces the session's slash commands
+ * (for the input's typeahead) rather than a timeline item. Frames that aren't
+ * session/update notifications (responses, etc.) are ignored for rendering —
+ * only their sessionId is harvested.
  */
 export function applyFrames(
   prev: TimelineItem[],
   frames: RawAcpFrame[],
-): { items: TimelineItem[]; sessionId?: string } {
+): {
+  items: TimelineItem[];
+  sessionId?: string;
+  /** Present only when an available_commands_update was seen in this batch. */
+  commands?: AvailableCommand[];
+} {
   const items = [...prev];
   let sessionId: string | undefined;
+  let commands: AvailableCommand[] | undefined;
 
   for (const f of frames) {
     let msg: ParsedFrame;
@@ -110,10 +125,16 @@ export function applyFrames(
         });
         break;
       }
+      case "available_commands_update": {
+        // Keep only well-formed entries; the latest update wins (it replaces the
+        // list rather than appending), matching how an agent re-advertises.
+        commands = (u.availableCommands ?? []).filter((c) => c?.name);
+        break;
+      }
     }
   }
 
-  return { items, sessionId };
+  return { items, sessionId, commands };
 }
 
 /** Builds a session/prompt JSON-RPC frame for the frontend client to enqueue. */

@@ -128,6 +128,49 @@ func TestClaudeDriverToolCallTranslation(t *testing.T) {
 	}
 }
 
+// collectAvailableCommands parses the available_commands_update frames in buf.
+func collectAvailableCommands(t *testing.T, buf interface{ String() string }) []acp.AvailableCommand {
+	t.Helper()
+	var cmds []acp.AvailableCommand
+	for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+		if line == "" {
+			continue
+		}
+		var f struct {
+			Params struct {
+				Update json.RawMessage `json:"update"`
+			} `json:"params"`
+		}
+		if json.Unmarshal([]byte(line), &f) != nil {
+			continue
+		}
+		if acp.UpdateKind(f.Params.Update) == acp.UpdateAvailableCommands {
+			var u acp.AvailableCommandsUpdate
+			_ = json.Unmarshal(f.Params.Update, &u)
+			cmds = append(cmds, u.AvailableCommands...)
+		}
+	}
+	return cmds
+}
+
+func TestClaudeDriverAvailableCommands(t *testing.T) {
+	var buf bytes.Buffer
+	a := captureEmits(&buf)
+	d := &claudeDriver{agent: a}
+	// The init event lists the session's slash commands.
+	d.handle([]byte(`{"type":"system","subtype":"init","slash_commands":["code-review","","verify"]}`))
+	// A non-init system event carries no commands and must emit nothing.
+	d.handle([]byte(`{"type":"system","subtype":"other","slash_commands":["nope"]}`))
+
+	cmds := collectAvailableCommands(t, &buf)
+	if len(cmds) != 2 {
+		t.Fatalf("got %d commands, want 2 (blank dropped): %+v", len(cmds), cmds)
+	}
+	if cmds[0].Name != "code-review" || cmds[1].Name != "verify" {
+		t.Errorf("commands = %+v", cmds)
+	}
+}
+
 func TestCodexEventToolCallTranslation(t *testing.T) {
 	var buf bytes.Buffer
 	a := captureEmits(&buf)

@@ -9,8 +9,8 @@ import { expiresAtLocal, taskNameTooltip } from "./agent-ui";
 import { OutputBadge, SourceBadge } from "./output-badge";
 import {
   applySlashCommand,
-  DEFAULT_SLASH_COMMANDS,
   filterSlashCommands,
+  resolveSlashCommands,
   slashQuery,
   type SlashCommand,
 } from "./slash-commands";
@@ -111,11 +111,12 @@ export function InteractiveRow({
 
   // Slash-command typeahead. The menu opens while the draft is a single
   // `/`-prefixed token (see slashQuery) and filters by prefix as the user types.
-  // The command list is a curated default today; once the harness forwards the
-  // agent's ACP available_commands_update it can feed this list instead.
+  // The list is the agent's advertised commands (ACP available_commands_update)
+  // when present, falling back to curated defaults until one arrives.
+  const availableCommands = resolveSlashCommands(session.commands);
   const query = slashQuery(draft);
   const commandMatches: SlashCommand[] =
-    query === null ? [] : filterSlashCommands(DEFAULT_SLASH_COMMANDS, query);
+    query === null ? [] : filterSlashCommands(availableCommands, query);
   const menuOpen = running && commandMatches.length > 0;
   // Clamp at render time rather than in an effect: as matches narrow (the user
   // types more letters) the stored index can fall out of range, and clamping

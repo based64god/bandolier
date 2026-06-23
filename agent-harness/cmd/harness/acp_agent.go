@@ -227,6 +227,12 @@ func (d *claudeDriver) handle(raw []byte) {
 	}
 	a := d.agent
 	switch ev.Type {
+	case "system":
+		// The init event (emitted once at startup) lists the session's slash
+		// commands. Forward them so the client can offer a typeahead menu.
+		if ev.Subtype == "init" && len(ev.SlashCommands) > 0 {
+			a.emitAvailableCommands(ev.SlashCommands)
+		}
 	case "assistant":
 		for _, c := range ev.Message.Content {
 			switch c.Type {
@@ -348,6 +354,25 @@ func (a *acpAgent) handleCodexEvent(raw []byte) {
 			a.emitToolCall("tool", acp.ToolKindOther, "tool: "+n)
 		}
 	}
+}
+
+// emitAvailableCommands forwards the session's slash-command names to the client
+// as an available_commands_update. The claude CLI reports only names (no
+// descriptions), so the description is left empty for the client to fill.
+func (a *acpAgent) emitAvailableCommands(names []string) {
+	cmds := make([]acp.AvailableCommand, 0, len(names))
+	for _, n := range names {
+		if n = strings.TrimSpace(n); n != "" {
+			cmds = append(cmds, acp.AvailableCommand{Name: n})
+		}
+	}
+	if len(cmds) == 0 {
+		return
+	}
+	a.emit(acp.AvailableCommandsUpdate{
+		SessionUpdate:     acp.UpdateAvailableCommands,
+		AvailableCommands: cmds,
+	})
 }
 
 func (a *acpAgent) emitToolCall(idPrefix, kind, title string) {

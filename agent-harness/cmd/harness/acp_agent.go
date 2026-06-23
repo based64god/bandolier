@@ -68,7 +68,10 @@ func serveACPAgent(in io.Reader, out io.Writer) error {
 	conn.Handle(acp.MethodPrompt, a.prompt)
 	conn.HandleNotification(acp.MethodCancel, a.cancel)
 	conn.OnError(func(err error) { log.Printf("acp-agent: %v", err) })
+	// Log before Start: newSession (dispatched once the loops run) can mutate
+	// a.workDir, so read it here, before the read loop launches.
 	log.Printf("acp-agent: ready (provider=%s model=%s cwd=%s)", a.provider, a.model, a.workDir)
+	conn.Start()
 	return conn.Wait()
 }
 

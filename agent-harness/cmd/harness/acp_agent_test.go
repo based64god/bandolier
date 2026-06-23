@@ -185,6 +185,7 @@ func TestACPAgentClaudeTurn(t *testing.T) {
 		chunks = append(chunks, u.Content.Text)
 		mu.Unlock()
 	})
+	client.Start()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -220,11 +221,15 @@ func TestACPAgentClaudeTurn(t *testing.T) {
 		}
 	}
 
+	// Message chunks are delivered asynchronously as session/update
+	// notifications, which can lag the prompt response, so wait for both turns.
+	waitFor(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(chunks) == 2
+	})
 	mu.Lock()
 	defer mu.Unlock()
-	if len(chunks) != 2 {
-		t.Fatalf("got %d message chunks, want 2: %v", len(chunks), chunks)
-	}
 	if chunks[0] != "echo: hello" || chunks[1] != "echo: again" {
 		t.Fatalf("unexpected chunks: %v", chunks)
 	}

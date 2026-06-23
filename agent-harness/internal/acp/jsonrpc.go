@@ -84,10 +84,10 @@ type Conn struct {
 	onError  func(error)
 }
 
-// NewConn starts a connection reading from r and writing to w. A reader
-// goroutine runs until r reaches EOF or errors; call Wait to block on it.
+// NewConn creates a connection over r/w. It does not read or write until Start
+// is called, so handlers can be registered first without racing the read loop.
 func NewConn(r io.Reader, w io.Writer) *Conn {
-	c := &Conn{
+	return &Conn{
 		w:       w,
 		r:       bufio.NewReaderSize(r, 1<<20),
 		methods: map[string]MethodHandler{},
@@ -96,13 +96,19 @@ func NewConn(r io.Reader, w io.Writer) *Conn {
 		notifQ:  make(chan wireMessage, 256),
 		done:    make(chan struct{}),
 	}
-	go c.notifyLoop()
-	go c.readLoop()
-	return c
 }
 
-// Handle registers a handler for an inbound request method. Not safe to call
-// concurrently with active traffic; register all handlers before use.
+// Start begins the reader and notification loops. Register all handlers (Handle,
+// HandleNotification, OnError) before calling it: launching the goroutines here
+// establishes a happens-before from registration to dispatch, so the handler
+// maps need no further synchronization and are read-only thereafter. Call once.
+func (c *Conn) Start() {
+	go c.notifyLoop()
+	go c.readLoop()
+}
+
+// Handle registers a handler for an inbound request method. Call before Start;
+// the handler maps are read-only once the loops are running.
 func (c *Conn) Handle(method string, h MethodHandler) { c.methods[method] = h }
 
 // HandleNotification registers a handler for an inbound notification method.

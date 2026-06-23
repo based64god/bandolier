@@ -86,6 +86,25 @@ export function taskNameTooltip(agent: {
   return agent.displayName;
 }
 
+/**
+ * Picks the next session for Tab to jump to when cycling through the tasks
+ * awaiting input. `names` is the awaiting sessions in table order; `current` is
+ * the one Tab last landed on (or null/unknown). Returns the next name, wrapping
+ * past the end back to the start, or null when nothing is waiting.
+ *
+ * A `current` that's no longer waiting (resolved since, so absent from `names`)
+ * indexes to -1, and `(-1 + 1) % len === 0` restarts the cycle from the top —
+ * the same first-entry result as having no current target at all.
+ */
+export function nextAwaitingTarget(
+  names: string[],
+  current: string | null,
+): string | null {
+  if (names.length === 0) return null;
+  const idx = current ? names.indexOf(current) : -1;
+  return names[(idx + 1) % names.length]!;
+}
+
 // When the finished job will be garbage-collected, shown as a local clock time
 // (e.g. "3:25 PM"). Null/running → "—"; an already-passed expiry → "expiring…".
 // The date is appended when the expiry doesn't fall on the current local day, so

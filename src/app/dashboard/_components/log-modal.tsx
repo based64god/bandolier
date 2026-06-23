@@ -2,8 +2,10 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
+import type { TokenUsage } from "~/lib/tokens";
 import { api } from "~/trpc/react";
 import { parseSegments } from "./log-segments";
+import { TokenReadout } from "./token-readout";
 
 // Lines fetched initially (enough to fill the modal) and per scroll-up page.
 const INITIAL_LINES = 100;
@@ -93,6 +95,7 @@ export function LogModal({
   jobName,
   repoFullName,
   prompt,
+  tokens,
   onClose,
 }: {
   podName: string;
@@ -100,6 +103,7 @@ export function LogModal({
   jobName?: string;
   repoFullName?: string;
   prompt: string | null;
+  tokens?: TokenUsage | null;
   onClose: () => void;
 }) {
   const [copied, setCopied] = useState(false);
@@ -203,6 +207,7 @@ export function LogModal({
             {podName}
           </code>
           <div className="flex shrink-0 items-center gap-3 pl-2">
+            <TokenReadout tokens={tokens} className="text-xs" />
             <span className="flex items-center gap-1.5 text-xs text-white/40">
               <span
                 className={`h-1.5 w-1.5 rounded-full ${pinned ? "bg-green-400" : "bg-white/30"}`}

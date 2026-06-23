@@ -3,6 +3,7 @@ import { type NextRequest, NextResponse } from "next/server";
 
 import { env } from "~/env";
 import { verifyIngestToken } from "~/lib/ingest";
+import { parseTokenMarkerPayload } from "~/lib/tokens";
 import {
   getArtifact,
   putArtifact,
@@ -135,6 +136,12 @@ export async function POST(req: NextRequest) {
   const pullRequestUrl = req.headers.get("x-bandolier-pr-url");
   const createdIssueUrl = req.headers.get("x-bandolier-issue-url");
 
+  // The run's final token usage, reported as the harness's token-marker JSON.
+  // Persisting it keeps the readout recoverable after the pod (and its logs,
+  // where it's otherwise re-derived) are gone.
+  const tokensHeader = req.headers.get("x-bandolier-tokens");
+  const tokens = tokensHeader ? parseTokenMarkerPayload(tokensHeader) : null;
+
   // Record the output (and transcript key, if uploaded). No-op if the run row
   // was pruned.
   await db
@@ -143,6 +150,12 @@ export async function POST(req: NextRequest) {
       ...(key && { transcriptKey: key }),
       ...(pullRequestUrl && { pullRequestUrl }),
       ...(createdIssueUrl && { createdIssueUrl }),
+      ...(tokens && {
+        inputTokens: tokens.inputTokens,
+        outputTokens: tokens.outputTokens,
+        cacheReadInputTokens: tokens.cacheReadInputTokens,
+        cacheCreationInputTokens: tokens.cacheCreationInputTokens,
+      }),
       updatedAt: new Date(),
     })
     .where(eq(taskRun.jobName, jobName));

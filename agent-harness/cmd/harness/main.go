@@ -103,6 +103,11 @@ func uploadTranscript() {
 	if outputIssueURL != "" {
 		req.Header.Set("X-Bandolier-Issue-URL", outputIssueURL)
 	}
+	// Report the run's final token usage (the most recent marker in the
+	// transcript) so it's persisted on the run row and survives pod-log loss.
+	if tokens := latestTokenMarker(transcript.String()); tokens != "" {
+		req.Header.Set("X-Bandolier-Tokens", tokens)
+	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -1500,6 +1505,9 @@ type claudeEvent struct {
 			Input    json.RawMessage `json:"input"`
 		} `json:"content"`
 	} `json:"message"`
+	// Usage is carried by the terminal `result` event: the run's cumulative
+	// token totals across every turn. Zero-valued for non-result events.
+	Usage tokenUsage `json:"usage"`
 }
 
 // toolSummary renders the concrete invocation for a tool_use — the actual
@@ -1571,6 +1579,9 @@ func handleClaudeEvent(raw []byte) {
 		} else {
 			log.Printf("[harness] claude finished (turns=%d)", ev.NumTurns)
 		}
+		// The result event's usage is the run's cumulative total — emit it as the
+		// token marker so Bandolier can surface and persist it.
+		logTokenUsage(ev.Usage)
 	}
 }
 

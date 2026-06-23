@@ -9,6 +9,7 @@ import { expiresAtLocal, taskNameTooltip } from "./agent-ui";
 import { OutputBadge, SourceBadge } from "./output-badge";
 import { SessionComposer } from "./session-composer";
 import { StatusBadge } from "./status-badge";
+import { TokenReadout } from "./token-readout";
 import {
   ACTION_ROW_MIN_H,
   MOBILE_TASK_COLUMNS,
@@ -194,6 +195,7 @@ export function InteractiveRow({
             >
               {agent.displayName}
             </span>
+            <TokenReadout tokens={agent.tokens} className="text-[11px]" />
           </div>
         </td>
 
@@ -288,7 +290,7 @@ export function InteractiveRow({
             colSpan={isDesktop ? TASK_COLUMNS : MOBILE_TASK_COLUMNS}
             className="p-0"
           >
-            <SessionHeader podName={agent.name} />
+            <SessionHeader podName={agent.name} tokens={agent.tokens} />
             <Conversation items={session.items} />
             <SessionComposer
               running={running}
@@ -311,12 +313,19 @@ export function InteractiveRow({
  * Pod name header for an expanded interactive session. The seed prompt shows as
  * the first user message in the conversation below, so it isn't repeated here.
  */
-function SessionHeader({ podName }: { podName: string }) {
+function SessionHeader({
+  podName,
+  tokens,
+}: {
+  podName: string;
+  tokens: Task["tokens"];
+}) {
   return (
-    <div className="border-b border-white/10 px-4 py-3">
-      <code className="inline-block max-w-full truncate rounded bg-purple-500/20 px-2 py-0.5 align-middle text-sm text-purple-300">
+    <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
+      <code className="min-w-0 truncate rounded bg-purple-500/20 px-2 py-0.5 align-middle text-sm text-purple-300">
         {podName}
       </code>
+      <TokenReadout tokens={tokens} className="text-xs" />
     </div>
   );
 }

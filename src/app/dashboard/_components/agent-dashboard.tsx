@@ -783,6 +783,7 @@ export function AgentDashboard({
           jobName={agents.find((a) => a.name === logPod)?.jobName}
           repoFullName={repoSlug ?? undefined}
           prompt={agents.find((a) => a.name === logPod)?.prompt ?? null}
+          tokens={agents.find((a) => a.name === logPod)?.tokens ?? null}
           onClose={() => setLogPod(null)}
         />
       )}

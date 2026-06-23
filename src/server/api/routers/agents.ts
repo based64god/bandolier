@@ -21,6 +21,7 @@ import {
   makeIssueBranch,
 } from "~/lib/issue-prompt";
 import { EFFORT_LEVELS, providerSupportsEffort } from "~/lib/effort";
+import { parseTokenUsageFromLogs, type TokenUsage } from "~/lib/tokens";
 import {
   createAgentJob,
   DEFAULT_MAX_TURNS,
@@ -90,6 +91,12 @@ interface PodInspection {
   createdIssueUrl: string | null;
   /** True when an interactive agent is currently waiting for user input. */
   awaitingInput: boolean;
+  /**
+   * The run's token usage, parsed from the harness's most recent token marker
+   * in the logs. Null when no marker is present (run hasn't reported yet, or a
+   * provider that doesn't report tokens).
+   */
+  tokens: TokenUsage | null;
 }
 
 // Terminal pods' logs are immutable, so their inspection is cached. Running pods
@@ -143,6 +150,7 @@ async function inspectPod(
       pullRequestUrl: PR_MARKER.exec(logs)?.[1] ?? null,
       createdIssueUrl: ISSUE_MARKER.exec(logs)?.[1] ?? null,
       awaitingInput: !terminal && lastAwait >= 0 && lastAwait > lastResume,
+      tokens: parseTokenUsageFromLogs(logs),
     };
     if (terminal) terminalInspectionCache.set(podName, result);
     return result;
@@ -153,6 +161,7 @@ async function inspectPod(
       pullRequestUrl: null,
       createdIssueUrl: null,
       awaitingInput: false,
+      tokens: null,
     };
   }
 }
@@ -330,6 +339,8 @@ async function resolveItemStates(
 interface OutputUrls {
   pullRequestUrl: string | null;
   createdIssueUrl: string | null;
+  /** Persisted token usage (null when the run never reported any). */
+  tokens: TokenUsage | null;
 }
 
 /** A pod's stable job name (falls back to the pod name for legacy pods). */
@@ -369,6 +380,10 @@ async function loadPersistedOutputs(
       jobName: taskRun.jobName,
       pullRequestUrl: taskRun.pullRequestUrl,
       createdIssueUrl: taskRun.createdIssueUrl,
+      inputTokens: taskRun.inputTokens,
+      outputTokens: taskRun.outputTokens,
+      cacheReadInputTokens: taskRun.cacheReadInputTokens,
+      cacheCreationInputTokens: taskRun.cacheCreationInputTokens,
     })
     .from(taskRun)
     .where(inArray(taskRun.jobName, jobNames));
@@ -376,6 +391,20 @@ async function loadPersistedOutputs(
     byJob.set(row.jobName, {
       pullRequestUrl: row.pullRequestUrl,
       createdIssueUrl: row.createdIssueUrl,
+      // Only treat the row as carrying usage when at least one field was
+      // recorded — an un-reported run leaves all four null.
+      tokens:
+        row.inputTokens != null ||
+        row.outputTokens != null ||
+        row.cacheReadInputTokens != null ||
+        row.cacheCreationInputTokens != null
+          ? {
+              inputTokens: row.inputTokens ?? 0,
+              outputTokens: row.outputTokens ?? 0,
+              cacheReadInputTokens: row.cacheReadInputTokens ?? 0,
+              cacheCreationInputTokens: row.cacheCreationInputTokens ?? 0,
+            }
+          : null,
     });
   }
   return byJob;
@@ -393,6 +422,9 @@ function mergeOutput(
     pullRequestUrl: logUrls.pullRequestUrl ?? persisted?.pullRequestUrl ?? null,
     createdIssueUrl:
       logUrls.createdIssueUrl ?? persisted?.createdIssueUrl ?? null,
+    // Prefer the live log figure (it includes the latest interactive turn);
+    // fall back to the persisted total once the pod's logs are gone.
+    tokens: logUrls.tokens ?? persisted?.tokens ?? null,
   };
 }
 
@@ -435,7 +467,7 @@ async function podToTask(
   const jobName = podJobName(pod);
   // Fall back to the persisted output when logs didn't yield it (pod gone or a
   // transient log-read failure) — the harness records it on the run row.
-  const { pullRequestUrl, createdIssueUrl } = mergeOutput(
+  const { pullRequestUrl, createdIssueUrl, tokens } = mergeOutput(
     inspection,
     persistedOutputs.get(jobName),
   );
@@ -496,6 +528,7 @@ async function podToTask(
         : ("pr" as const),
     interactive,
     awaitingInput: interactive && awaitingInput,
+    tokens,
   };
 }
 
@@ -594,7 +627,7 @@ export const agentsRouter = createTRPCRouter({
           const jobName = podJobName(pod);
           // Fall back to the persisted output when the logs are gone (TTL
           // deletion, eviction) or unreadable — kept on the durable run row.
-          const { pullRequestUrl, createdIssueUrl } = mergeOutput(
+          const { pullRequestUrl, createdIssueUrl, tokens } = mergeOutput(
             inspection,
             persistedOutputs.get(jobName),
           );
@@ -645,6 +678,7 @@ export const agentsRouter = createTRPCRouter({
                 : ("pr" as const),
             interactive,
             awaitingInput: interactive && awaitingInput,
+            tokens,
           };
         }),
       );

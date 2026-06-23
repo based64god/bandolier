@@ -188,10 +188,10 @@ export function DeployModal({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-lg overflow-hidden rounded-xl border border-white/20 bg-[var(--surface-panel)]"
+        className="flex max-h-full w-full max-w-lg flex-col overflow-hidden rounded-xl border border-white/20 bg-[var(--surface-panel)]"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
+        <div className="flex shrink-0 items-center justify-between border-b border-white/10 px-5 py-4">
           <div className="flex items-center gap-3">
             <h2 className="text-sm font-semibold text-white">Deploy Agent</h2>
             {providerInfo && (
@@ -214,7 +214,10 @@ export function DeployModal({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4 px-5 py-5">
+        <form
+          onSubmit={handleSubmit}
+          className="space-y-4 overflow-y-auto px-5 py-5"
+        >
           {/* No-provider warning */}
           {providerInfo?.provider === "none" && (
             <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">

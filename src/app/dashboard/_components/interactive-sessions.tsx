@@ -2,11 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import type { TimelineItem } from "~/lib/acp/timeline";
 import { api } from "~/trpc/react";
 import type { RouterOutputs } from "~/trpc/react";
 import { expiresAtLocal, taskNameTooltip } from "./agent-ui";
-import { HarnessSegment, UserSegment } from "./log-modal";
-import { parseSegments } from "./log-segments";
 import { OutputBadge, SourceBadge } from "./output-badge";
 import { StatusBadge } from "./status-badge";
 import {
@@ -14,6 +13,7 @@ import {
   MOBILE_TASK_COLUMNS,
   TASK_COLUMNS,
 } from "./task-row";
+import { useAcpSession } from "./use-acp-session";
 
 type Task = RouterOutputs["agents"]["list"][number];
 
@@ -41,9 +41,12 @@ function useIsDesktop() {
 
 /**
  * Renders an interactive agent as a row in the task table: the same columns as a
- * non-interactive task when collapsed, expanding in place to reveal streamed
- * logs and an input box. Auto-expands when it starts awaiting input and
+ * non-interactive task when collapsed, expanding in place to reveal the live ACP
+ * conversation and an input box. Auto-expands when it starts awaiting input and
  * auto-collapses when the session finishes.
+ *
+ * The conversation is driven over the Agent Client Protocol: the frontend is the
+ * ACP client (see useAcpSession), the harness proxies it to the in-pod agent.
  */
 export function InteractiveRow({
   agent,
@@ -55,15 +58,22 @@ export function InteractiveRow({
   repoFullName?: string;
 }) {
   const [draft, setDraft] = useState("");
+  const [ending, setEnding] = useState(false);
   const running = agent.status === "Running" || agent.status === "Pending";
   // Default closed for sessions that are already done when first mounted —
   // there's nothing to interact with, so keep them out of the way. Live
   // sessions start open. The effects below handle later status transitions.
   const [collapsed, setCollapsed] = useState(!running);
   const isDesktop = useIsDesktop();
-  const utils = api.useUtils();
 
   const awaiting = agent.awaitingInput;
+
+  const session = useAcpSession({
+    namespace,
+    jobName: agent.jobName,
+    repoFullName,
+    running,
+  });
 
   // An agent that starts waiting for input pops back open even if the user had
   // collapsed it — that's the moment they need to see it. We expand only on the
@@ -84,36 +94,13 @@ export function InteractiveRow({
     wasRunning.current = running;
   }, [running]);
 
-  const { data: logs } = api.agents.getLogs.useQuery(
-    {
-      podName: agent.name,
-      namespace,
-      jobName: agent.jobName,
-      repoFullName,
-      tailLines: 400,
-    },
-    { refetchInterval: running ? 2500 : false },
-  );
-
-  const sendInput = api.agents.sendInput.useMutation({
-    onSuccess: () => {
-      setDraft("");
-      // Nudge the log poll so the agent's RESUME shows up promptly.
-      void utils.agents.getLogs.invalidate({ podName: agent.name, namespace });
-    },
-  });
-  const endSession = api.agents.endSession.useMutation();
   const terminate = api.agents.terminate.useMutation();
 
   function send() {
     const content = draft.trim();
-    if (!content || sendInput.isPending) return;
-    sendInput.mutate({
-      namespace,
-      jobName: agent.jobName,
-      content,
-      repoFullName,
-    });
+    if (!content || !session.ready || session.sendPending) return;
+    session.sendPrompt(content);
+    setDraft("");
   }
 
   const rowTint = awaiting ? "bg-amber-500/[0.06]" : "hover:bg-white/[0.04]";
@@ -242,18 +229,15 @@ export function InteractiveRow({
           >
             {running && (
               <button
-                onClick={() =>
-                  endSession.mutate({
-                    namespace,
-                    jobName: agent.jobName,
-                    repoFullName,
-                  })
-                }
-                disabled={endSession.isPending || endSession.isSuccess}
+                onClick={() => {
+                  setEnding(true);
+                  session.endSession();
+                }}
+                disabled={ending}
                 className="rounded-md border border-white/10 px-3 py-1.5 text-xs whitespace-nowrap text-white/60 hover:bg-white/10 disabled:opacity-40"
                 title="Close the session and open a PR if there are commits"
               >
-                {endSession.isSuccess ? "Ending…" : "End session"}
+                {ending ? "Ending…" : "End session"}
               </button>
             )}
             <button
@@ -276,7 +260,8 @@ export function InteractiveRow({
         </td>
       </tr>
 
-      {/* Expanded body — live logs + input, spanning the full table width. */}
+      {/* Expanded body — live conversation + input, spanning the full table
+          width. */}
       {!collapsed && (
         <tr className={awaiting ? "bg-amber-500/[0.06]" : undefined}>
           {/* Span only the columns that exist at the current breakpoint. The
@@ -287,11 +272,8 @@ export function InteractiveRow({
             colSpan={isDesktop ? TASK_COLUMNS : MOBILE_TASK_COLUMNS}
             className="p-0"
           >
-            {/* Pod name only — the seed prompt is logged as the first [user]
-                line in the transcript below, so a separate prompt block would
-                just duplicate it. */}
             <SessionHeader podName={agent.name} />
-            <LogView text={logs ?? ""} />
+            <Conversation items={session.items} />
             <div className="border-t border-white/10 p-3">
               <div className="flex items-end gap-2">
                 <textarea
@@ -319,15 +301,20 @@ export function InteractiveRow({
                 />
                 <button
                   onClick={send}
-                  disabled={!running || !draft.trim() || sendInput.isPending}
+                  disabled={
+                    !running ||
+                    !draft.trim() ||
+                    !session.ready ||
+                    session.sendPending
+                  }
                   className="rounded-lg bg-purple-600 px-3 py-2 text-sm font-medium text-black hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  {sendInput.isPending ? "Sending…" : "Send"}
+                  {session.sendPending ? "Sending…" : "Send"}
                 </button>
               </div>
-              {sendInput.error && (
+              {session.sendError && (
                 <p className="mt-1.5 text-xs text-red-400">
-                  {sendInput.error.message}
+                  {session.sendError}
                 </p>
               )}
             </div>
@@ -339,9 +326,8 @@ export function InteractiveRow({
 }
 
 /**
- * Pod name header for an expanded interactive session. The seed prompt is no
- * longer shown here — it's logged as the first [user] line in the transcript
- * below, so a separate prompt block would just duplicate it.
+ * Pod name header for an expanded interactive session. The seed prompt shows as
+ * the first user message in the conversation below, so it isn't repeated here.
  */
 function SessionHeader({ podName }: { podName: string }) {
   return (
@@ -353,8 +339,12 @@ function SessionHeader({ podName }: { podName: string }) {
   );
 }
 
-/** Scrollable log pane that dims harness lines and auto-sticks to the bottom. */
-function LogView({ text }: { text: string }) {
+/**
+ * Scrollable conversation pane rendering the ACP timeline: user and assistant
+ * messages plus structured tool-call rows. Auto-sticks to the bottom as new
+ * items stream in.
+ */
+function Conversation({ items }: { items: TimelineItem[] }) {
   const ref = useRef<HTMLDivElement>(null);
   // Whether the view is pinned to the bottom. Mirrored into state so the
   // "scroll to bottom" button can show/hide as the user scrolls away.
@@ -364,7 +354,7 @@ function LogView({ text }: { text: string }) {
   useEffect(() => {
     const el = ref.current;
     if (el && stick.current) el.scrollTop = el.scrollHeight;
-  }, [text]);
+  }, [items]);
 
   function scrollToBottom() {
     const el = ref.current;
@@ -373,10 +363,6 @@ function LogView({ text }: { text: string }) {
     stick.current = true;
     setPinned(true);
   }
-
-  // Group lines so runs of [harness] diagnostics collapse the same way they do
-  // in the non-interactive LogModal, keeping Claude's output front and center.
-  const segments = text ? parseSegments(text) : [];
 
   return (
     <div className="relative">
@@ -389,25 +375,18 @@ function LogView({ text }: { text: string }) {
           stick.current = atBottom;
           setPinned(atBottom);
         }}
-        className="h-72 overflow-auto bg-black/30 px-4 py-3 font-mono text-[11px] leading-5"
+        className="h-72 space-y-2 overflow-auto bg-black/30 px-4 py-3 text-[13px] leading-5"
       >
-        {segments.length === 0 ? (
-          <span className="text-white/30">Waiting for output…</span>
+        {items.length === 0 ? (
+          <span className="font-mono text-[11px] text-white/30">
+            Waiting for output…
+          </span>
         ) : (
-          segments.map((seg, i) =>
-            seg.kind === "harness" ? (
-              <HarnessSegment key={i} lines={seg.lines} />
-            ) : seg.kind === "user" ? (
-              <UserSegment key={i} lines={seg.lines} />
+          items.map((item) =>
+            item.type === "tool" ? (
+              <ToolRow key={item.id} item={item} />
             ) : (
-              seg.lines.map((line, j) => (
-                <div
-                  key={`${i}-${j}`}
-                  className="break-words whitespace-pre-wrap text-white/80"
-                >
-                  {line || " "}
-                </div>
-              ))
+              <MessageRow key={item.id} item={item} />
             ),
           )
         )}
@@ -424,6 +403,51 @@ function LogView({ text }: { text: string }) {
           Scroll to bottom
         </button>
       )}
+    </div>
+  );
+}
+
+function MessageRow({
+  item,
+}: {
+  item: Extract<TimelineItem, { type: "message" }>;
+}) {
+  if (item.role === "user") {
+    return (
+      <div className="flex justify-end">
+        <div className="max-w-[85%] rounded-lg border border-purple-400/30 bg-purple-500/10 px-3 py-1.5 break-words whitespace-pre-wrap text-purple-100">
+          {item.text}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="break-words whitespace-pre-wrap text-white/85">
+      {item.text}
+    </div>
+  );
+}
+
+// Single-glyph badge per ACP tool-call kind, so the action reads at a glance.
+const TOOL_KIND_GLYPH: Record<string, string> = {
+  read: "◇",
+  edit: "✎",
+  execute: "›_",
+  search: "⌕",
+  fetch: "↗",
+  think: "✦",
+  other: "▢",
+};
+
+function ToolRow({ item }: { item: Extract<TimelineItem, { type: "tool" }> }) {
+  const glyph = TOOL_KIND_GLYPH[item.kind] ?? TOOL_KIND_GLYPH.other;
+  return (
+    <div className="flex items-start gap-2 font-mono text-[11px] text-white/45">
+      <span className="mt-px shrink-0 text-white/30 select-none">{glyph}</span>
+      <span className="shrink-0 uppercase">{item.kind}</span>
+      <span className="min-w-0 break-words whitespace-pre-wrap text-white/55">
+        {item.title}
+      </span>
     </div>
   );
 }

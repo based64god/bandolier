@@ -179,6 +179,14 @@ func (p *acpProxy) handleAgentFrame(ctx context.Context, frame []byte) {
 		}
 	}
 
+	// A prompt response (stopReason) means the agent finished its turn and is now
+	// awaiting the next user message. Emitting the await marker keeps the
+	// dashboard's server-side awaiting detection (and the overview/notifications)
+	// working without the frontend needing to parse turn state.
+	if frameStopReason(frame) != "" {
+		log.Printf("[harness] %s", awaitInputMarker)
+	}
+
 	renderFrameToTranscript(frame)
 	if err := p.acpPush(ctx, string(frame)); err != nil {
 		log.Printf("[harness] warn: acp push: %v", err)
@@ -196,6 +204,7 @@ func (p *acpProxy) seedPrompt() {
 	if err := p.acpPush(context.Background(), userMessageFrame(p.sessionID, task)); err != nil {
 		log.Printf("[harness] warn: acp push (seed echo): %v", err)
 	}
+	log.Printf("[harness] %s", resumeMarker)
 	if err := writeFrame(p.stdin, seedPromptID, "session/prompt", map[string]any{
 		"sessionId": p.sessionID,
 		"prompt":    []map[string]any{{"type": "text", "text": task}},
@@ -220,10 +229,15 @@ func (p *acpProxy) c2aPump(ctx context.Context) {
 		}
 		for _, f := range frames {
 			deadline = time.Now().Add(idle)
-			if frameMethod(f) == endSessionMethod {
+			switch frameMethod(f) {
+			case endSessionMethod:
 				log.Printf("[harness] received end-session control frame")
 				p.endSession()
 				return
+			case "session/prompt":
+				// A follow-up turn is starting; mirror the resume marker so the
+				// dashboard's awaiting detection flips back to "working".
+				log.Printf("[harness] %s", resumeMarker)
 			}
 			if _, err := p.stdin.Write(append([]byte(f), '\n')); err != nil {
 				log.Printf("[harness] warn: agent stdin write: %v", err)
@@ -378,6 +392,16 @@ func newSessionID(raw []byte) string {
 	}
 	_ = json.Unmarshal(raw, &m)
 	return m.Result.SessionID
+}
+
+func frameStopReason(raw []byte) string {
+	var m struct {
+		Result struct {
+			StopReason string `json:"stopReason"`
+		} `json:"result"`
+	}
+	_ = json.Unmarshal(raw, &m)
+	return m.Result.StopReason
 }
 
 // renderFrameToTranscript mirrors assistant text and tool activity from the

@@ -76,3 +76,27 @@ export async function fetchAccessibleRepos(
     isAdmin: r.permissions?.admin === true,
   }));
 }
+
+/**
+ * Whether the user (via their GitHub OAuth token) can reach the given repository
+ * at all — i.e. GitHub returns the repo for that token. Used to gate access to a
+ * repo's shared cluster/credentials so they're never handed to a non-member.
+ * Fails closed (returns false) on any error.
+ */
+export async function userHasRepoAccess(
+  token: string,
+  repoFullName: string,
+): Promise<boolean> {
+  try {
+    const res = await fetch(`https://api.github.com/repos/${repoFullName}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/vnd.github.v3+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}

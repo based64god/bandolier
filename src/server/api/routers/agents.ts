@@ -30,6 +30,7 @@ import {
   getRegistryPullSecret,
   getRepoBotToken,
 } from "~/server/agents/github-app";
+import { userHasRepoAccess } from "~/server/agents/github-repos";
 import {
   getGithubIdentity,
   getUserGithubToken,
@@ -199,6 +200,53 @@ async function assertOwnsInteractiveJob(
       message: `Interactive agent ${jobName} not found.`,
     });
   }
+}
+
+/**
+ * Label selector that restricts a pod query to the agents the given user spawned.
+ * Pods carry SPAWNED_BY_LABEL, so this enforces per-user ownership on a shared
+ * cluster/namespace (the same control overview and assertOwnsInteractiveJob use).
+ * Pass `extra` to AND in a further selector (e.g. a specific job).
+ */
+function ownedSelector(userId: string, extra?: string): string {
+  const base = `${LABEL_SELECTOR},${SPAWNED_BY_LABEL}=${spawnedByLabelValue(userId)}`;
+  return extra ? `${base},${extra}` : base;
+}
+
+// Short-TTL cache of confirmed (user → repo) access, so polled procedures (list,
+// getLogs run every ~5s) don't hit the GitHub API on every call. Only positive
+// results are cached: a member's checks are served from memory, while a
+// non-member's repeated probes are never cached, so the map can't be grown by
+// guessing repo names and revoked access is re-verified within the TTL.
+const repoAccessCache = new Map<string, number>();
+const REPO_ACCESS_TTL_MS = 60_000;
+
+/**
+ * Gates access to repo-scoped resources (a repo's shared kubeconfig/credentials
+ * and its namespace). When a repoFullName is supplied, the caller must be able to
+ * reach that repo through their own GitHub token — otherwise we refuse rather
+ * than resolve another team's shared cluster/credentials for them. A no-op for
+ * repo-less (personal) operations, which only ever use the caller's own creds.
+ */
+async function assertRepoAccess(
+  db: Parameters<typeof resolveKubeconfig>[0],
+  userId: string,
+  repoFullName?: string,
+): Promise<void> {
+  if (!repoFullName) return;
+  const key = `${userId} ${repoFullName}`;
+  const cachedUntil = repoAccessCache.get(key);
+  if (cachedUntil !== undefined && cachedUntil > Date.now()) return;
+
+  const token = await getUserGithubToken(db, userId);
+  if (!token || !(await userHasRepoAccess(token, repoFullName))) {
+    repoAccessCache.delete(key);
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `You do not have access to ${repoFullName}.`,
+    });
+  }
+  repoAccessCache.set(key, Date.now() + REPO_ACCESS_TTL_MS);
 }
 
 /**
@@ -581,17 +629,19 @@ export const agentsRouter = createTRPCRouter({
       }),
     )
     .query(async ({ input, ctx }) => {
+      const userId = ctx.session.user.id;
+      await assertRepoAccess(ctx.db, userId, input.repoFullName);
       const kubeconfig = await requireKubeconfig(
         ctx.db,
-        ctx.session.user.id,
+        userId,
         input.repoFullName,
       );
-      const githubToken = await getUserGithubToken(ctx.db, ctx.session.user.id);
+      const githubToken = await getUserGithubToken(ctx.db, userId);
       const nowMs = Date.now();
       try {
         const res = await getCoreV1Api(kubeconfig).listNamespacedPod({
           namespace: input.namespace,
-          labelSelector: LABEL_SELECTOR,
+          labelSelector: ownedSelector(userId),
         });
         // One batched query recovers persisted output for every terminal pod
         // whose logs are gone — rather than a lookup per pod.
@@ -628,15 +678,20 @@ export const agentsRouter = createTRPCRouter({
       }),
     )
     .query(async ({ input, ctx }) => {
+      const userId = ctx.session.user.id;
+      await assertRepoAccess(ctx.db, userId, input.repoFullName);
       const kubeconfig = await requireKubeconfig(
         ctx.db,
-        ctx.session.user.id,
+        userId,
         input.repoFullName,
       );
       try {
         const res = await getCoreV1Api(kubeconfig).listNamespacedPod({
           namespace: input.namespace,
-          labelSelector: `${LABEL_SELECTOR},bandolier.io/job=${input.jobName}`,
+          labelSelector: ownedSelector(
+            userId,
+            `bandolier.io/job=${input.jobName}`,
+          ),
         });
         const pod = res.items[0];
         if (!pod) {
@@ -645,10 +700,7 @@ export const agentsRouter = createTRPCRouter({
             message: `Task ${input.jobName} not found`,
           });
         }
-        const githubToken = await getUserGithubToken(
-          ctx.db,
-          ctx.session.user.id,
-        );
+        const githubToken = await getUserGithubToken(ctx.db, userId);
         const persistedOutputs = await loadPersistedOutputs(ctx.db, [pod]);
         return await podToTask(
           pod,
@@ -681,9 +733,11 @@ export const agentsRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ input, ctx }) => {
+      const userId = ctx.session.user.id;
+      await assertRepoAccess(ctx.db, userId, input.repoFullName);
       const kubeconfig = await requireKubeconfig(
         ctx.db,
-        ctx.session.user.id,
+        userId,
         input.repoFullName,
       );
       const core = getCoreV1Api(kubeconfig);
@@ -697,14 +751,25 @@ export const agentsRouter = createTRPCRouter({
         },
       };
       try {
+        // Confirm the caller owns this job before mutating it; this also yields
+        // the exact pods (theirs) to patch.
+        const pods = await core.listNamespacedPod({
+          namespace: input.namespace,
+          labelSelector: ownedSelector(
+            userId,
+            `bandolier.io/job=${input.jobName}`,
+          ),
+        });
+        if (pods.items.length === 0) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: `Task ${input.jobName} not found`,
+          });
+        }
         await getBatchV1Api(kubeconfig).patchNamespacedJob(
           { name: input.jobName, namespace: input.namespace, body },
           merge,
         );
-        const pods = await core.listNamespacedPod({
-          namespace: input.namespace,
-          labelSelector: `${LABEL_SELECTOR},bandolier.io/job=${input.jobName}`,
-        });
         await Promise.all(
           pods.items.map((p) =>
             core.patchNamespacedPod(
@@ -715,6 +780,7 @@ export const agentsRouter = createTRPCRouter({
         );
         return { success: true };
       } catch (err) {
+        if (err instanceof TRPCError) throw err;
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
           message: err instanceof Error ? err.message : "Failed to rename task",
@@ -737,39 +803,56 @@ export const agentsRouter = createTRPCRouter({
       }),
     )
     .query(async ({ input, ctx }) => {
+      const userId = ctx.session.user.id;
+      await assertRepoAccess(ctx.db, userId, input.repoFullName);
       const kubeconfig = await requireKubeconfig(
         ctx.db,
-        ctx.session.user.id,
+        userId,
         input.repoFullName,
       );
       try {
-        return await getCoreV1Api(kubeconfig).readNamespacedPodLog({
-          name: input.podName,
+        // Only read logs for a pod the caller owns: a non-owner's pod simply
+        // won't appear among their pods, so we never read across tenants.
+        const owned = await getCoreV1Api(kubeconfig).listNamespacedPod({
           namespace: input.namespace,
-          container: input.container,
-          tailLines: input.tailLines,
+          labelSelector: ownedSelector(userId),
         });
-      } catch (err) {
-        // Pod likely deleted after its TTL — serve the persisted transcript.
-        const jobName = input.jobName;
-        if (jobName) {
-          const [run] = await ctx.db
-            .select({ transcriptKey: taskRun.transcriptKey })
-            .from(taskRun)
-            .where(eq(taskRun.jobName, jobName))
-            .limit(1);
-          if (run?.transcriptKey) {
-            const transcript = await getArtifact(run.transcriptKey);
-            if (transcript !== null) return transcript;
-          }
+        const owns = owned.items.some(
+          (p) => p.metadata?.name === input.podName,
+        );
+        if (owns) {
+          return await getCoreV1Api(kubeconfig).readNamespacedPodLog({
+            name: input.podName,
+            namespace: input.namespace,
+            container: input.container,
+            tailLines: input.tailLines,
+          });
         }
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message:
-            err instanceof Error ? err.message : "Failed to get pod logs",
-          cause: err,
-        });
+        // Pod isn't among the caller's pods — it may be gone after its TTL. Fall
+        // through to the persisted transcript, which is itself owner-scoped.
+      } catch {
+        // Listing/log read failed transiently — try the transcript fallback.
       }
+      // Persisted-transcript fallback, scoped to the owner so a guessable
+      // jobName can't surface another user's transcript.
+      const jobName = input.jobName;
+      if (jobName) {
+        const [run] = await ctx.db
+          .select({ transcriptKey: taskRun.transcriptKey })
+          .from(taskRun)
+          .where(
+            and(eq(taskRun.jobName, jobName), eq(taskRun.spawnedBy, userId)),
+          )
+          .limit(1);
+        if (run?.transcriptKey) {
+          const transcript = await getArtifact(run.transcriptKey);
+          if (transcript !== null) return transcript;
+        }
+      }
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: "Logs not found",
+      });
     }),
 
   terminate: protectedProcedure
@@ -781,18 +864,36 @@ export const agentsRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ input, ctx }) => {
+      const userId = ctx.session.user.id;
+      await assertRepoAccess(ctx.db, userId, input.repoFullName);
       const kubeconfig = await requireKubeconfig(
         ctx.db,
-        ctx.session.user.id,
+        userId,
         input.repoFullName,
       );
       try {
+        // Only terminate a pod the caller owns — never delete another user's pod
+        // by raw name on a shared namespace.
+        const owned = await getCoreV1Api(kubeconfig).listNamespacedPod({
+          namespace: input.namespace,
+          labelSelector: ownedSelector(userId),
+        });
+        const owns = owned.items.some(
+          (p) => p.metadata?.name === input.podName,
+        );
+        if (!owns) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: `Pod ${input.podName} not found`,
+          });
+        }
         await getCoreV1Api(kubeconfig).deleteNamespacedPod({
           name: input.podName,
           namespace: input.namespace,
         });
         return { success: true };
       } catch (err) {
+        if (err instanceof TRPCError) throw err;
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
           message:
@@ -990,6 +1091,11 @@ export const agentsRouter = createTRPCRouter({
       });
 
       const userId = ctx.session.user.id;
+
+      // A repo's shared cluster and credentials are only for users who can reach
+      // that repo. Verify access before resolving anything repo-scoped, so a
+      // non-member can't deploy under another team's kubeconfig/cloud creds.
+      await assertRepoAccess(ctx.db, userId, input.repoFullName);
 
       // Resolve the cluster: server-wide, then repo-scoped vs. the user's own
       // per the repo's prefer-credentials flag.

@@ -4,6 +4,7 @@ import {
   applySlashCommand,
   DEFAULT_SLASH_COMMANDS,
   filterSlashCommands,
+  resolveSlashCommands,
   slashQuery,
   type SlashCommand,
 } from "~/app/dashboard/_components/slash-commands";
@@ -80,6 +81,35 @@ describe("applySlashCommand", () => {
 
   it("yields a draft that closes the menu (whitespace starts the args)", () => {
     expect(slashQuery(applySlashCommand("verify"))).toBeNull();
+  });
+});
+
+describe("resolveSlashCommands", () => {
+  it("falls back to the defaults when the agent has advertised nothing", () => {
+    expect(resolveSlashCommands(undefined)).toBe(DEFAULT_SLASH_COMMANDS);
+    expect(resolveSlashCommands([])).toBe(DEFAULT_SLASH_COMMANDS);
+  });
+
+  it("uses the live list when present", () => {
+    const live = [{ name: "deploy", description: "Ship it" }];
+    expect(resolveSlashCommands(live)).toEqual(live);
+  });
+
+  it("borrows a default description for a live command that has none", () => {
+    // The claude CLI reports names only; known commands get their default blurb.
+    const resolved = resolveSlashCommands([{ name: "code-review" }]);
+    expect(resolved).toEqual([
+      {
+        name: "code-review",
+        description: "Review the current diff for bugs",
+      },
+    ]);
+  });
+
+  it("leaves an unknown live command's description empty", () => {
+    expect(resolveSlashCommands([{ name: "mystery" }])).toEqual([
+      { name: "mystery", description: "" },
+    ]);
   });
 });
 

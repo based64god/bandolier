@@ -6,6 +6,7 @@ import {
   applyFrames,
   END_SESSION_FRAME,
   promptFrame,
+  type AvailableCommand,
   type TimelineItem,
 } from "~/lib/acp/timeline";
 import { api } from "~/trpc/react";
@@ -40,6 +41,7 @@ export function useAcpSession({
   const utils = api.useUtils();
   const [items, setItems] = useState<TimelineItem[]>([]);
   const [sessionId, setSessionId] = useState<string | undefined>(undefined);
+  const [commands, setCommands] = useState<AvailableCommand[]>([]);
 
   const itemsRef = useRef<TimelineItem[]>([]);
   const cursorRef = useRef(0);
@@ -70,13 +72,15 @@ export function useAcpSession({
         );
         if (!active || res.frames.length === 0) return;
         cursorRef.current = res.cursor;
-        const { items: next, sessionId: sid } = applyFrames(
-          itemsRef.current,
-          res.frames,
-        );
+        const {
+          items: next,
+          sessionId: sid,
+          commands: cmds,
+        } = applyFrames(itemsRef.current, res.frames);
         itemsRef.current = next;
         setItems(next);
         if (sid) setSessionId(sid);
+        if (cmds) setCommands(cmds);
       } catch {
         // transient; retry on the next tick
       }
@@ -121,6 +125,8 @@ export function useAcpSession({
 
   return {
     items,
+    /** Slash commands the agent advertised, or [] until one is seen. */
+    commands,
     /** True once the session id is known and a prompt can be sent. */
     ready: !!sessionId,
     sendPrompt,

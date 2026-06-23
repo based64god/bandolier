@@ -3,11 +3,11 @@
 // can be unit tested in isolation — the component is a thin shell over these.
 //
 // Native Claude Code populates its slash-command menu dynamically from the
-// agent's ACP `available_commands_update` notification. The harness here does
-// not yet emit or forward that frame, so we seed a curated default list and let
-// callers pass a `commands` source. Once the harness forwards
-// `available_commands_update`, the live list can replace DEFAULT_SLASH_COMMANDS
-// without touching the menu UI or these helpers.
+// agent's ACP `available_commands_update` notification. The harness forwards
+// that frame (acp_agent.go derives it from claude's stream-json init event),
+// and useAcpSession surfaces it as `commands`; resolveSlashCommands below feeds
+// it into the menu, falling back to DEFAULT_SLASH_COMMANDS until one arrives
+// (e.g. for the codex provider, which reports no command set).
 
 export interface SlashCommand {
   /** Command name without the leading slash, e.g. "code-review". */
@@ -22,7 +22,10 @@ export interface SlashCommand {
  */
 export const DEFAULT_SLASH_COMMANDS: SlashCommand[] = [
   { name: "code-review", description: "Review the current diff for bugs" },
-  { name: "security-review", description: "Security review of pending changes" },
+  {
+    name: "security-review",
+    description: "Security review of pending changes",
+  },
   { name: "review", description: "Review a GitHub pull request" },
   { name: "simplify", description: "Clean up the changed code" },
   { name: "verify", description: "Run the app and confirm a change works" },
@@ -31,6 +34,28 @@ export const DEFAULT_SLASH_COMMANDS: SlashCommand[] = [
   { name: "clear", description: "Clear the conversation history" },
   { name: "neon-postgres", description: "Neon Serverless Postgres guidance" },
 ];
+
+/**
+ * Picks the command list to show: the agent's live list when it has advertised
+ * one (via ACP available_commands_update), otherwise the curated defaults. The
+ * claude CLI reports command names without descriptions, so each live command
+ * borrows the matching default's description when its own is empty — the menu
+ * stays informative without the harness having to source descriptions.
+ */
+export function resolveSlashCommands(
+  live: { name: string; description?: string }[] | undefined,
+): SlashCommand[] {
+  if (!live || live.length === 0) return DEFAULT_SLASH_COMMANDS;
+  const descriptions = new Map(
+    DEFAULT_SLASH_COMMANDS.map((c) => [c.name, c.description]),
+  );
+  return live.map((c) => {
+    // The agent's own description wins; an empty/absent one borrows the
+    // matching default's blurb, else stays empty.
+    const own = c.description?.trim();
+    return { name: c.name, description: own ?? descriptions.get(c.name) ?? "" };
+  });
+}
 
 /**
  * Returns the active command query when the slash menu should be open, or null

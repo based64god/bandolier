@@ -293,7 +293,7 @@ export function LogModal({
           {!pinned && (
             <button
               onClick={jumpToLatest}
-              className="absolute right-4 bottom-4 flex items-center gap-1 rounded-full border border-white/15 bg-[#0a2414] px-3 py-1.5 text-xs text-white/80 shadow-lg hover:bg-[#0f3a1f]"
+              className="absolute right-4 bottom-4 flex items-center gap-1 rounded-full border border-white/15 bg-[var(--surface-panel)] px-3 py-1.5 text-xs text-white/80 shadow-lg hover:brightness-125"
             >
               <svg
                 viewBox="0 0 16 16"

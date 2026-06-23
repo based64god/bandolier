@@ -68,11 +68,15 @@ export function InteractiveRow({
 
   const awaiting = agent.awaitingInput;
 
+  // Poll only while the conversation is open: a collapsed session's waiting
+  // state still surfaces via the agents.list query, and expanding replays the
+  // backlog from the cursor, so there's no reason to stream a chat no one is
+  // looking at.
   const session = useAcpSession({
     namespace,
     jobName: agent.jobName,
     repoFullName,
-    running,
+    enabled: running && !collapsed,
   });
 
   // An agent that starts waiting for input pops back open even if the user had

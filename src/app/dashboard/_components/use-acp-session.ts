@@ -19,17 +19,23 @@ const POLL_INTERVAL_MS = 1500;
  * enqueue client→agent frames via agents.acpSend. The harness proxy establishes
  * and seeds the session, so this attaches to a running session rather than
  * performing the handshake itself.
+ *
+ * Polls only while `enabled` (wire it to running && expanded). A collapsed
+ * session stops polling entirely — its waiting/notification state comes from the
+ * separate agents.list query, and expanding replays the full backlog from the
+ * cursor — so we don't hit the relay (and its per-poll k8s ownership check) for
+ * conversations no one is looking at.
  */
 export function useAcpSession({
   namespace,
   jobName,
   repoFullName,
-  running,
+  enabled,
 }: {
   namespace: string;
   jobName: string;
   repoFullName?: string;
-  running: boolean;
+  enabled: boolean;
 }) {
   const utils = api.useUtils();
   const [items, setItems] = useState<TimelineItem[]>([]);
@@ -43,16 +49,25 @@ export function useAcpSession({
   // a useQuery keyed by the cursor) keeps the advancing cursor from churning
   // react-query keys on every batch.
   useEffect(() => {
-    if (!running) return;
+    if (!enabled) return;
     let active = true;
     const tick = async () => {
       try {
-        const res = await utils.agents.acpPull.fetch({
-          namespace,
-          jobName,
-          repoFullName,
-          cursor: cursorRef.current,
-        });
+        const res = await utils.agents.acpPull.fetch(
+          {
+            namespace,
+            jobName,
+            repoFullName,
+            cursor: cursorRef.current,
+          },
+          // Bypass the global 30s staleTime. fetch() is react-query's
+          // fetchQuery; between batches the cursor doesn't change, so every tick
+          // reuses the same query key and would be served the cached (usually
+          // empty) result for 30s — the chat would sit a turn behind. We poll
+          // only while expanded (see `enabled`), so re-fetching each tick is
+          // cheap and scoped to the conversation on screen.
+          { staleTime: 0 },
+        );
         if (!active || res.frames.length === 0) return;
         cursorRef.current = res.cursor;
         const { items: next, sessionId: sid } = applyFrames(
@@ -72,7 +87,7 @@ export function useAcpSession({
       active = false;
       clearInterval(handle);
     };
-  }, [running, namespace, jobName, repoFullName, utils]);
+  }, [enabled, namespace, jobName, repoFullName, utils]);
 
   const send = api.agents.acpSend.useMutation();
 

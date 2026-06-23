@@ -29,6 +29,7 @@ import (
 type acpAgent struct {
 	provider  providerKind
 	model     string
+	effort    string
 	workDir   string
 	sysPrompt string
 
@@ -58,6 +59,7 @@ func serveACPAgent(in io.Reader, out io.Writer) error {
 	a := &acpAgent{
 		provider:  detectProvider(),
 		model:     getenvDefault("CLAUDE_MODEL", "claude-sonnet-4-6"),
+		effort:    normalizeEffort(os.Getenv("CLAUDE_EFFORT")),
 		workDir:   getenvDefault("WORKING_DIR", "/workspace"),
 		sysPrompt: os.Getenv("ACP_SYSTEM_PROMPT"),
 	}
@@ -178,6 +180,9 @@ func startClaudeDriver(a *acpAgent) (*claudeDriver, error) {
 		"--input-format", "stream-json",
 		"--output-format", "stream-json",
 		"--verbose",
+	}
+	if a.effort != "" {
+		args = append(args, "--effort", a.effort)
 	}
 	if a.sysPrompt != "" {
 		args = append(args, "--append-system-prompt", a.sysPrompt)

@@ -1,0 +1,1 @@
+ALTER TABLE "repo_webhook_config" ADD COLUMN "default_webhook_effort" text;

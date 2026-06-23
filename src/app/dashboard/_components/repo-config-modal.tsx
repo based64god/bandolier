@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { env } from "~/env";
+import { EFFORT_LEVELS, providerSupportsEffort } from "~/lib/effort";
 import { api } from "~/trpc/react";
 import { parseAwsCredentials } from "./parse-aws";
 import { ProviderTag } from "./provider-tag";
@@ -537,6 +538,78 @@ function RepoDefaultModelSection({ repoFullName }: { repoFullName: string }) {
   );
 }
 
+// Default reasoning effort for webhook-triggered Claude agents on this repo.
+// Claude-only (Anthropic / Bedrock): hidden when the repo's configured provider
+// can't use it. An issue `effort:<level>` label overrides it per issue.
+function RepoDefaultEffortSection({ repoFullName }: { repoFullName: string }) {
+  const utils = api.useUtils();
+  const { data: config } = api.webhooks.getConfig.useQuery({ repoFullName });
+  const { data: providerInfo } = api.agents.providerInfo.useQuery({
+    repoFullName,
+  });
+  const [result, setResult] = useState<string | null>(null);
+
+  const setDefault = api.webhooks.setDefaultEffort.useMutation({
+    onSuccess: () => {
+      void utils.webhooks.getConfig.invalidate({ repoFullName });
+      setResult("Saved ✓");
+    },
+  });
+
+  // Only the Claude providers run the `claude` CLI, which takes the effort flag.
+  // Hide the control entirely for OpenAI/Gemini (or no provider).
+  if (
+    !providerInfo ||
+    providerInfo.provider === "none" ||
+    !providerSupportsEffort(providerInfo.provider)
+  ) {
+    return null;
+  }
+
+  const current = config?.defaultWebhookEffort ?? "";
+
+  return (
+    <div className="space-y-2 border-t border-white/10 pt-5">
+      <h3 className="text-xs font-semibold tracking-wider text-white/50 uppercase">
+        Default webhook effort
+      </h3>
+      <p className="text-xs text-white/40">
+        Reasoning effort for webhook-triggered Claude agents on this repo. An
+        issue label like{" "}
+        <code className="rounded bg-white/10 px-1 text-white/60">
+          effort:high
+        </code>{" "}
+        overrides it per issue. Leave as &ldquo;default&rdquo; to let the model
+        decide.
+      </p>
+      <div className="flex gap-1.5">
+        {(["", ...EFFORT_LEVELS] as const).map((level) => {
+          const active = current === level;
+          return (
+            <button
+              key={level || "default"}
+              type="button"
+              disabled={setDefault.isPending}
+              onClick={() => {
+                setResult(null);
+                setDefault.mutate({ repoFullName, effort: level });
+              }}
+              className={`flex-1 rounded-lg border px-2 py-1.5 text-xs capitalize transition disabled:opacity-50 ${
+                active
+                  ? "border-purple-500/50 bg-purple-500/15 text-white"
+                  : "border-white/10 bg-white/5 text-white/60 hover:bg-white/10"
+              }`}
+            >
+              {level || "default"}
+            </button>
+          );
+        })}
+      </div>
+      <CredFeedback error={setDefault.error?.message} ok={result} />
+    </div>
+  );
+}
+
 // Repo-scoped shared infrastructure: kubeconfig + model credentials, plus the
 // user-vs-repo preference toggle and a prominent security warning.
 function RepoCredentialsSection({ repoFullName }: { repoFullName: string }) {
@@ -999,6 +1072,8 @@ export function RepoConfigModal({
           </p>
 
           <RepoDefaultModelSection repoFullName={repoFullName} />
+
+          <RepoDefaultEffortSection repoFullName={repoFullName} />
 
           <RepoCredentialsSection repoFullName={repoFullName} />
 

@@ -68,6 +68,8 @@ func runACPProxy(ctx context.Context, cfg config) error {
 	agentEnv := append(os.Environ(),
 		"ACP_SYSTEM_PROMPT="+sysPrompt,
 		"CLAUDE_MODEL="+cfg.model,
+		// Pass the normalized effort so the agent doesn't re-validate the raw env.
+		"CLAUDE_EFFORT="+cfg.effort,
 		"WORKING_DIR="+cfg.workDir,
 	)
 	cmd := exec.CommandContext(ctx, exe, "acp-agent")

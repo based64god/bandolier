@@ -204,6 +204,23 @@ The harness image (`ghcr.io/based64god/bandolier-agent-harness:latest`, always p
 | `AGENT_NETWORK_POLICY`       | `true`          | Apply a `NetworkPolicy` denying inbound and limiting egress to DNS + the public internet. Needs a policy-enforcing CNI (Calico/Cilium); a no-op under kindnet. |
 | `AGENT_EGRESS_BLOCKED_CIDRS` | RFC-1918 ranges | Comma-separated CIDRs agents cannot reach (blocks lateral movement to in-cluster services).                                                                    |
 
+A repo admin can loosen these egress rules **per repository** from the repo
+configuration modal (Network policy egress). Both toggles are **off by default**
+— they only relax the baseline above:
+
+- **Allow in-cluster (private) egress** — drops the `AGENT_EGRESS_BLOCKED_CIDRS`
+  exclusion so the repo's agents can reach other pods and in-cluster services.
+- **Allow all egress ports** — permits outbound TCP on any port instead of only
+  80/443.
+
+> ⚠️ **Security:** loosening egress weakens agent isolation. Agents run
+> model-generated code with your credentials; in-cluster egress opens lateral
+> movement and all-ports egress widens the exfiltration surface. Enable only for
+> repos whose workloads you trust, and turn the toggles back off when done. The
+> toggles take effect only when `AGENT_NETWORK_POLICY` is enabled and a
+> policy-enforcing CNI is present; the policy is re-applied on each deploy, so a
+> change applies to the next agent run.
+
 ### GitHub App / webhooks
 
 | Variable                                            | Description                                                                                                                                                 |

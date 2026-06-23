@@ -48,6 +48,7 @@ import {
 } from "~/server/agents/resolve-credentials";
 import {
   getRepoAgentImage,
+  getRepoNetworkPolicy,
   getRepoSystemPrompt,
 } from "~/server/agents/webhook-config";
 import { type db } from "~/server/db";
@@ -1106,6 +1107,11 @@ export const agentsRouter = createTRPCRouter({
           | { registry: string; dockerConfigJson: string }
           | undefined;
         let repoSystemPrompt: string | undefined;
+        // Per-repo network-policy egress toggles (both off by default, keeping
+        // the locked-down baseline). Best-effort like the other repo lookups.
+        let networkPolicy:
+          | { allowPrivateEgress: boolean; allowAllPortsEgress: boolean }
+          | undefined;
         if (input.repoFullName) {
           try {
             agentImage =
@@ -1136,6 +1142,15 @@ export const agentsRouter = createTRPCRouter({
               },
             );
           }
+          try {
+            networkPolicy =
+              (await getRepoNetworkPolicy(ctx.db, input.repoFullName)) ??
+              undefined;
+          } catch (err) {
+            console.warn("[bandolier:deploy] network policy lookup failed", {
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
         }
 
         const jobName = await createAgentJob({
@@ -1164,6 +1179,7 @@ export const agentsRouter = createTRPCRouter({
           agentImage: agentImage ?? undefined,
           imagePullSecret,
           repoSystemPrompt,
+          networkPolicy,
           createdBy: ctx.session.user.name ?? ctx.session.user.email,
           gitName: gitIdentity.name,
           gitEmail: gitIdentity.email,

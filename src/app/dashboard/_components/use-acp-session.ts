@@ -47,12 +47,21 @@ export function useAcpSession({
     let active = true;
     const tick = async () => {
       try {
-        const res = await utils.agents.acpPull.fetch({
-          namespace,
-          jobName,
-          repoFullName,
-          cursor: cursorRef.current,
-        });
+        const res = await utils.agents.acpPull.fetch(
+          {
+            namespace,
+            jobName,
+            repoFullName,
+            cursor: cursorRef.current,
+          },
+          // Always hit the server. fetch() is react-query's fetchQuery, which
+          // honors the global 30s staleTime: between batches the cursor doesn't
+          // change, so every poll reuses the same query key and would be served
+          // the cached (often empty) result for 30s instead of re-querying —
+          // freezing the UI on "Waiting for output…" until the first frames
+          // finally slip through. staleTime: 0 forces each tick to re-fetch.
+          { staleTime: 0 },
+        );
         if (!active || res.frames.length === 0) return;
         cursorRef.current = res.cursor;
         const { items: next, sessionId: sid } = applyFrames(

@@ -163,6 +163,22 @@ export function SearchableSelect({
     ...filtered.map((o) => o.value),
   ];
 
+  // The nav index of the currently-selected value within the unfiltered list,
+  // so opening can start arrow-key navigation on the current selection rather
+  // than always at the top. Computed against `options` (not `filtered`) since
+  // the search box is empty on open. Falls back to the first row.
+  function selectedNavIndex() {
+    const i = options.findIndex((o) => o.value === value);
+    if (i < 0) return 0;
+    return i + (clearLabel !== undefined ? 1 : 0);
+  }
+
+  function openDropdown() {
+    setSearch("");
+    setHighlight(value === null ? 0 : selectedNavIndex());
+    setOpen(true);
+  }
+
   // Keep the highlighted row scrolled into view as it moves past the fold.
   useEffect(() => {
     if (!open) return;
@@ -177,16 +193,24 @@ export function SearchableSelect({
   }
 
   function handleNavKey(e: React.KeyboardEvent) {
+    const last = navValues.length - 1;
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      setHighlight((h) => Math.min(navValues.length - 1, h + 1));
+      // Wrap to the top so the list cycles instead of dead-ending.
+      setHighlight((h) => (h >= last ? 0 : h + 1));
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
-      setHighlight((h) => Math.max(0, h - 1));
+      setHighlight((h) => (h <= 0 ? last : h - 1));
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      setHighlight(0);
+    } else if (e.key === "End") {
+      e.preventDefault();
+      setHighlight(last);
     } else if (e.key === "Enter") {
       e.preventDefault();
       if (navValues.length > 0) {
-        choose(navValues[Math.min(highlight, navValues.length - 1)] ?? null);
+        choose(navValues[Math.min(highlight, last)] ?? null);
       }
     }
   }
@@ -196,9 +220,22 @@ export function SearchableSelect({
       <button
         type="button"
         onClick={() => {
-          setSearch("");
-          setHighlight(0);
-          setOpen((o) => !o);
+          if (open) setOpen(false);
+          else openDropdown();
+        }}
+        onKeyDown={(e) => {
+          // Open on arrow/Enter/Space from the closed trigger, then let the
+          // search box take over navigation (it auto-focuses on open).
+          if (
+            !open &&
+            (e.key === "ArrowDown" ||
+              e.key === "ArrowUp" ||
+              e.key === "Enter" ||
+              e.key === " ")
+          ) {
+            e.preventDefault();
+            openDropdown();
+          }
         }}
         disabled={loading || disabled}
         className="flex w-full items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm transition hover:border-white/20 hover:bg-white/10 disabled:opacity-40"

@@ -1,6 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { eq } from "drizzle-orm";
 
+import { totalTokens, type TokenUsage } from "~/lib/tokens";
 import { resolveApiKey } from "~/server/agents/api-keys";
 import { getUserGithubToken } from "~/server/agents/github-token";
 import { auth } from "~/server/better-auth";
@@ -153,6 +154,7 @@ export function toTaskResource(t: {
   currently: string | null;
   expiresAt: string | null;
   pullRequestUrl: string | null;
+  tokens?: TokenUsage | null;
 }) {
   return {
     id: t.jobName,
@@ -168,5 +170,10 @@ export function toTaskResource(t: {
     currently: t.currently,
     pullRequestUrl: t.pullRequestUrl,
     expiresAt: t.expiresAt,
+    // The run's token usage: the per-category breakdown plus the grand total,
+    // or null when the run hasn't reported any (or the provider doesn't).
+    tokens: t.tokens
+      ? { ...t.tokens, totalTokens: totalTokens(t.tokens) }
+      : null,
   };
 }

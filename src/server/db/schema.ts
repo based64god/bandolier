@@ -3,6 +3,7 @@ import {
   bigserial,
   boolean,
   index,
+  integer,
   pgTable,
   pgTableCreator,
   text,
@@ -144,6 +145,17 @@ export const taskRun = pgTable("task_run", {
    */
   pullRequestUrl: text("pull_request_url"),
   createdIssueUrl: text("created_issue_url"),
+  /**
+   * The run's cumulative token usage, reported by the harness ingest callback
+   * (parsed from the agent CLI's result event). Like the output URLs, pod logs
+   * are the live source while the pod exists, but persisting it here keeps a
+   * finished run's token readout recoverable after the pod is gone. Null until
+   * the run reports usage (or for providers that don't report tokens).
+   */
+  inputTokens: integer("input_tokens"),
+  outputTokens: integer("output_tokens"),
+  cacheReadInputTokens: integer("cache_read_input_tokens"),
+  cacheCreationInputTokens: integer("cache_creation_input_tokens"),
   createdAt: timestamp("created_at")
     .$defaultFn(() => /* @__PURE__ */ new Date())
     .notNull(),

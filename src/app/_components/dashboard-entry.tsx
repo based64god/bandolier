@@ -20,9 +20,9 @@ export async function DashboardEntry({
       <main className="flex min-h-screen flex-col items-center justify-center bg-black text-white">
         <div className="flex flex-col items-center gap-8">
           <div className="flex flex-col items-center gap-4">
-            <BandolierIcon className="h-16 w-16 text-purple-300" />
+            <BandolierIcon className="h-16 w-16" />
             <div className="text-center">
-              <h1 className="text-5xl font-extrabold tracking-tight">
+              <h1 className="text-5xl font-extrabold tracking-[0.18em] uppercase">
                 Bandolier
               </h1>
               <p className="mt-3 text-lg text-white/50">

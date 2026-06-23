@@ -14,8 +14,10 @@ export default async function GatePage({
     <main className="flex min-h-screen flex-col items-center justify-center bg-black p-4 text-white">
       <div className="flex w-full max-w-sm flex-col items-center gap-8">
         <div className="flex flex-col items-center gap-4">
-          <BandolierIcon className="h-14 w-14 text-purple-300" />
-          <h1 className="text-3xl font-extrabold tracking-tight">Bandolier</h1>
+          <BandolierIcon className="h-14 w-14" />
+          <h1 className="text-3xl font-extrabold tracking-[0.18em] uppercase">
+            Bandolier
+          </h1>
         </div>
 
         <form

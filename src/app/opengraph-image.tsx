@@ -32,7 +32,12 @@ export default function OpengraphImage() {
         }}
       >
         <div
-          style={{ fontSize: 84, fontWeight: 800, letterSpacing: "-0.03em" }}
+          style={{
+            fontSize: 84,
+            fontWeight: 800,
+            letterSpacing: "0.12em",
+            textTransform: "uppercase",
+          }}
         >
           Bandolier
         </div>

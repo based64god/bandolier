@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { AvailableCommand } from "~/lib/acp/timeline";
 import {
@@ -164,8 +164,19 @@ function SlashCommandMenu({
   onHighlight: (index: number) => void;
   onChoose: (name: string) => void;
 }) {
+  const listRef = useRef<HTMLDivElement>(null);
+
+  // Keep the arrow-key-highlighted command scrolled into view as it moves past
+  // the fold (the list can be taller than max-h-60). Mirrors SearchableSelect.
+  useEffect(() => {
+    listRef.current
+      ?.querySelector(`[data-nav="${highlight}"]`)
+      ?.scrollIntoView({ block: "nearest" });
+  }, [highlight]);
+
   return (
     <div
+      ref={listRef}
       role="listbox"
       aria-label="Slash commands"
       className="absolute bottom-full left-0 z-20 mb-2 max-h-60 w-80 max-w-[calc(100%-1rem)] overflow-y-auto rounded-xl border border-white/10 bg-[var(--surface-panel)] py-1 shadow-2xl"
@@ -177,6 +188,7 @@ function SlashCommandMenu({
             key={c.name}
             type="button"
             role="option"
+            data-nav={i}
             aria-selected={isHighlighted}
             // onMouseDown (not onClick) so the choice registers before the
             // textarea's blur, keeping focus in the input after selection.

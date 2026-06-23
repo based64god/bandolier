@@ -36,6 +36,8 @@ func TestCallResponse(t *testing.T) {
 		}
 		return map[string]string{"reply": "got:" + p.Msg}, nil
 	})
+	server.Start()
+	client.Start()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -56,6 +58,8 @@ func TestCallError(t *testing.T) {
 	server.Handle("boom", func(context.Context, json.RawMessage) (any, error) {
 		return nil, &RPCError{Code: CodeInvalidRequest, Message: "nope"}
 	})
+	server.Start()
+	client.Start()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -71,7 +75,9 @@ func TestCallError(t *testing.T) {
 }
 
 func TestMethodNotFound(t *testing.T) {
-	client, _ := pipePair(t)
+	client, server := pipePair(t)
+	server.Start()
+	client.Start()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_, err := client.Call(ctx, "missing", nil)
@@ -102,6 +108,8 @@ func TestNotificationsOrdered(t *testing.T) {
 		}
 		mu.Unlock()
 	})
+	server.Start()
+	client.Start()
 
 	for i := 0; i < n; i++ {
 		if err := server.Notify("tick", map[string]int{"seq": i}); err != nil {
@@ -140,6 +148,8 @@ func TestBidirectionalDuringRequest(t *testing.T) {
 		}
 		return map[string]bool{"done": r.OK}, nil
 	})
+	server.Start()
+	client.Start()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

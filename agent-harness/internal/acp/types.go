@@ -22,6 +22,7 @@ const (
 	UpdateToolCall          = "tool_call"
 	UpdateToolCallUpdate    = "tool_call_update"
 	UpdatePlan              = "plan"
+	UpdateAvailableCommands = "available_commands_update"
 )
 
 // session/prompt stop reasons.
@@ -199,6 +200,21 @@ type PlanEntry struct {
 	Content  string `json:"content"`
 	Priority string `json:"priority,omitempty"`
 	Status   string `json:"status,omitempty"`
+}
+
+// AvailableCommandsUpdate advertises the slash commands the session supports, so
+// a client can offer a typeahead menu. The agent emits it once the underlying
+// CLI reports its command set (e.g. claude's stream-json init event).
+type AvailableCommandsUpdate struct {
+	SessionUpdate     string             `json:"sessionUpdate"` // UpdateAvailableCommands
+	AvailableCommands []AvailableCommand `json:"availableCommands"`
+}
+
+// AvailableCommand is one entry in an AvailableCommandsUpdate: the command name
+// (without a leading slash) and a human-readable description for the menu.
+type AvailableCommand struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
 }
 
 // UpdateKind extracts the sessionUpdate discriminator from a raw update object,

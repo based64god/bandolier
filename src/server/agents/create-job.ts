@@ -484,6 +484,12 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
         name: "BANDOLIER_INPUT_URL",
         value: `${env.BETTER_AUTH_URL}/api/agent-input`,
       },
+      // ACP relay: the harness proxy pulls client→agent frames from / pushes
+      // agent→client frames to this endpoint (GET/POST on the same URL).
+      {
+        name: "BANDOLIER_ACP_URL",
+        value: `${env.BETTER_AUTH_URL}/api/acp`,
+      },
     );
   }
 

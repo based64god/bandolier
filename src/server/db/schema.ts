@@ -1,5 +1,6 @@
 import { relations } from "drizzle-orm";
 import {
+  bigserial,
   boolean,
   index,
   pgTable,
@@ -153,6 +154,30 @@ export const agentInput = pgTable(
     deliveredAt: timestamp("delivered_at"),
   },
   (t) => [index("agent_input_job_idx").on(t.jobName)],
+);
+
+// Ordered log of Agent Client Protocol (ACP) frames relayed between an
+// interactive session's frontend (the ACP client) and the in-pod agent (the ACP
+// server), with the harness proxying between this table and the agent's stdio.
+// Each row is one raw JSON-RPC frame. `direction` is "c2a" (client→agent:
+// initialize/session.new/prompt/cancel and Bandolier control frames) or "a2c"
+// (agent→client: session/update notifications, responses, permission requests).
+// The monotonic `seq` doubles as the cursor the frontend polls by; c2a rows are
+// claimed exactly once by the harness via `deliveredAt`, like agent_input.
+export const acpFrame = pgTable(
+  "acp_frame",
+  {
+    seq: bigserial("seq", { mode: "number" }).primaryKey(),
+    jobName: text("job_name").notNull(),
+    direction: text("direction").notNull(),
+    payload: text("payload").notNull(),
+    createdAt: timestamp("created_at")
+      .$defaultFn(() => /* @__PURE__ */ new Date())
+      .notNull(),
+    /** Set once the harness has claimed a c2a frame, so it's delivered once. */
+    deliveredAt: timestamp("delivered_at"),
+  },
+  (t) => [index("acp_frame_job_dir_idx").on(t.jobName, t.direction)],
 );
 
 // Per-repository configuration (one row per repo, shared across any Bandolier

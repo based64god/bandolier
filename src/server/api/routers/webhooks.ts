@@ -12,6 +12,7 @@ import { getUserGithubToken } from "~/server/agents/github-token";
 import { validateOpenaiKey } from "~/server/agents/openai";
 import { validateKubeconfig } from "~/server/agents/kubeconfig";
 import { isRepoAdmin } from "~/server/agents/webhook-config";
+import { EFFORT_LEVELS } from "~/lib/effort";
 import { type db } from "~/server/db";
 import { repoWebhookConfig } from "~/server/db/schema";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
@@ -80,6 +81,7 @@ export const webhooksRouter = createTRPCRouter({
           prefix: repoWebhookConfig.prefix,
           agentImage: repoWebhookConfig.agentImage,
           defaultWebhookModel: repoWebhookConfig.defaultWebhookModel,
+          defaultWebhookEffort: repoWebhookConfig.defaultWebhookEffort,
           systemPrompt: repoWebhookConfig.systemPrompt,
           allowPrivateEgress: repoWebhookConfig.allowPrivateEgress,
           allowAllPortsEgress: repoWebhookConfig.allowAllPortsEgress,
@@ -94,6 +96,7 @@ export const webhooksRouter = createTRPCRouter({
         prefix: row?.prefix ?? "",
         agentImage: row?.agentImage ?? "",
         defaultWebhookModel: row?.defaultWebhookModel ?? null,
+        defaultWebhookEffort: row?.defaultWebhookEffort ?? null,
         systemPrompt: row?.systemPrompt ?? "",
         // Network-policy egress toggles (both off unless a row turns them on).
         allowPrivateEgress: row?.allowPrivateEgress ?? false,
@@ -183,6 +186,27 @@ export const webhooksRouter = createTRPCRouter({
       const value = input.model.trim() ? input.model.trim() : null;
       await upsertRepoConfig(ctx.db, input.repoFullName, ctx.session.user.id, {
         defaultWebhookModel: value,
+      });
+      return { success: true };
+    }),
+
+  // Set (or clear, with an empty string) the default reasoning-effort level for
+  // webhook-triggered Claude agents. Validated against the known levels; an
+  // issue's `effort:<level>` label overrides it per issue, and it's ignored for
+  // non-Claude providers. Partial upsert so it doesn't clobber other config.
+  setDefaultEffort: protectedProcedure
+    .input(
+      z.object({
+        repoFullName: z.string().min(1),
+        // Empty string clears the default (fall back to the CLI default).
+        effort: z.union([z.enum(EFFORT_LEVELS), z.literal("")]),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await requireRepoAdmin(ctx, input.repoFullName);
+      const value = input.effort ? input.effort : null;
+      await upsertRepoConfig(ctx.db, input.repoFullName, ctx.session.user.id, {
+        defaultWebhookEffort: value,
       });
       return { success: true };
     }),

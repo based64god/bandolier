@@ -233,6 +233,13 @@ export interface JobSpec {
   repoUrl?: string;
   branch: string;
   model: string;
+  /**
+   * Reasoning-effort level for the run (low|medium|high|xhigh|max), passed to the
+   * `claude` CLI as --effort. Only applies to the Claude providers (Anthropic /
+   * Bedrock); callers must not set it for OpenAI/Gemini runs, whose CLIs ignore
+   * it. Unset = the harness/CLI default.
+   */
+  effort?: string;
   maxTurns?: number;
   /**
    * Out-of-band model (the latest Sonnet) the harness uses to write the PR title
@@ -430,6 +437,12 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
     name: "MAX_TURNS",
     value: String(spec.maxTurns ?? DEFAULT_MAX_TURNS),
   });
+  // Reasoning effort is Claude-only (the `claude` CLI's --effort). Only forward it
+  // on a Claude provider run; the Codex/Antigravity CLIs don't take it. The
+  // harness validates the value and ignores an unknown one.
+  if (spec.effort && (useUserAws || useUserAnthropic)) {
+    envVars.push({ name: "CLAUDE_EFFORT", value: spec.effort });
+  }
   if (spec.prWriterModel) {
     envVars.push({ name: "PR_WRITER_MODEL", value: spec.prWriterModel });
   }

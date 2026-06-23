@@ -20,6 +20,7 @@ import {
   buildIssueUserMessage,
   makeIssueBranch,
 } from "~/lib/issue-prompt";
+import { EFFORT_LEVELS, providerSupportsEffort } from "~/lib/effort";
 import {
   createAgentJob,
   DEFAULT_MAX_TURNS,
@@ -943,6 +944,9 @@ export const agentsRouter = createTRPCRouter({
           modelProvider: z
             .enum(["anthropic", "bedrock", "openai", "gemini"])
             .optional(),
+          // Reasoning effort for the run (Claude providers only; ignored for
+          // OpenAI/Gemini). Optional — unset uses the CLI default.
+          effort: z.enum(EFFORT_LEVELS).optional(),
           maxTurns: z.number().int().min(1).max(200).optional(),
           // When set, the agent works on this GitHub issue (and the task field
           // becomes additional context).
@@ -1232,6 +1236,12 @@ export const agentsRouter = createTRPCRouter({
           repoFullName: input.repoFullName,
           branch: input.branch,
           model: input.model,
+          // Effort is Claude-only; drop it for OpenAI/Gemini runs even if a
+          // client sent one, so it's never forwarded to a CLI that rejects it.
+          effort:
+            provider && providerSupportsEffort(provider)
+              ? input.effort
+              : undefined,
           maxTurns: input.maxTurns,
           prWriterModel,
           interactive: input.interactive,

@@ -152,6 +152,30 @@ func detectProvider() providerKind {
 	return providerNone
 }
 
+// ── Reasoning effort ────────────────────────────────────────────────────────
+
+// effortLevels are the values the `claude` CLI accepts for --effort, kept in
+// sync with the dashboard/webhook side (src/lib/effort.ts). Effort is a
+// Claude-only control; the Codex and Antigravity CLIs don't take it.
+var effortLevels = map[string]bool{
+	"low":    true,
+	"medium": true,
+	"high":   true,
+	"xhigh":  true,
+	"max":    true,
+}
+
+// normalizeEffort lower-cases and validates a requested effort level, returning
+// "" for anything unrecognized so callers fall back to the CLI default rather
+// than passing an invalid flag.
+func normalizeEffort(s string) string {
+	v := strings.ToLower(strings.TrimSpace(s))
+	if effortLevels[v] {
+		return v
+	}
+	return ""
+}
+
 // ── Config ────────────────────────────────────────────────────────────────────
 
 type config struct {
@@ -164,6 +188,7 @@ type config struct {
 	title            string // short label used for branch slug, PR title, commit message
 	workDir          string
 	model            string
+	effort           string // reasoning-effort level for the claude CLI (--effort); Claude providers only
 	prWriter         string // out-of-band model for writing the PR title/description
 	repoURL          string
 	branch           string
@@ -204,6 +229,11 @@ func loadConfig() (config, error) {
 		model = "claude-sonnet-4-6"
 	}
 
+	// Reasoning effort for the claude CLI (--effort). Validate against the known
+	// levels and drop an unknown value so a bad input never breaks the run — the
+	// CLI then uses its own default.
+	effort := normalizeEffort(os.Getenv("CLAUDE_EFFORT"))
+
 	// Always cap turns; default if the Job didn't set MAX_TURNS.
 	maxTurns := os.Getenv("MAX_TURNS")
 	if maxTurns == "" {
@@ -232,6 +262,7 @@ func loadConfig() (config, error) {
 		title:            os.Getenv("AGENT_TITLE"),
 		workDir:          workDir,
 		model:            model,
+		effort:           effort,
 		prWriter:         os.Getenv("PR_WRITER_MODEL"),
 		repoURL:          os.Getenv("REPO_URL"),
 		branch:           os.Getenv("BRANCH"),
@@ -1170,6 +1201,9 @@ func run(ctx context.Context, cfg config) error {
 			"--dangerously-skip-permissions",
 			"--output-format", "stream-json",
 			"--verbose", // required for stream-json in print mode
+		}
+		if cfg.effort != "" {
+			claudeArgs = append(claudeArgs, "--effort", cfg.effort)
 		}
 		if cfg.maxTurns != "" {
 			claudeArgs = append(claudeArgs, "--max-turns", cfg.maxTurns)

@@ -33,6 +33,7 @@ import {
   buildIssueUserMessage,
   makeIssueBranch,
 } from "~/lib/issue-prompt";
+import { parseEffortQuery, providerSupportsEffort } from "~/lib/effort";
 
 // ── Webhook signature verification ────────────────────────────────────────────
 
@@ -112,6 +113,22 @@ function modelLabelQuery(labels: { name: string }[]): string | null {
   return null;
 }
 
+// An issue label of the form `effort:<level>` lets the author pick the reasoning
+// effort for that issue's Claude agent (low|medium|high|xhigh|max). Mirrors the
+// `model:` label; only meaningful on Claude runs and ignored otherwise.
+const EFFORT_LABEL_PREFIX = "effort:";
+
+function effortLabelQuery(labels: { name: string }[]): string | null {
+  for (const l of labels) {
+    const name = l.name.trim();
+    if (name.toLowerCase().startsWith(EFFORT_LABEL_PREFIX)) {
+      const q = name.slice(EFFORT_LABEL_PREFIX.length).trim();
+      if (q) return q;
+    }
+  }
+  return null;
+}
+
 // An `output:issue` label makes the agent produce sub-task issues instead of a
 // pull request: the harness analyses the issue and opens a child issue for the
 // most valuable next piece of work.
@@ -128,6 +145,7 @@ async function handleIssueOpened(
   prefix: string | null,
   agentImage: string | null,
   defaultModel: string | null,
+  defaultEffort: string | null,
   repoSystemPrompt: string | null,
   networkPolicy:
     | { allowPrivateEgress: boolean; allowAllPortsEgress: boolean }
@@ -239,6 +257,33 @@ async function handleIssueOpened(
   // A model is only ever listed when its provider's credentials resolved, so the
   // matching set is present here.
   const provider = models.find((m) => m.id === model)?.provider;
+
+  // Resolve the reasoning effort, but only for a Claude provider — the OpenAI and
+  // Gemini CLIs don't take it. Precedence mirrors the model's: an `effort:<level>`
+  // label overrides the repo's configured default; an unknown label value is
+  // ignored (falls through to the default, then the CLI default).
+  let effort: string | undefined;
+  if (provider && providerSupportsEffort(provider)) {
+    const effortQuery = effortLabelQuery(issue.labels);
+    const labelEffort = effortQuery ? parseEffortQuery(effortQuery) : undefined;
+    const repoEffort = defaultEffort
+      ? parseEffortQuery(defaultEffort)
+      : undefined;
+    effort = labelEffort ?? repoEffort;
+    if (effortQuery && !labelEffort) {
+      console.log("[bandolier:webhook] no effort matched issue label", {
+        issue: issue.number,
+        label: `${EFFORT_LABEL_PREFIX}${effortQuery}`,
+      });
+    } else if (effort) {
+      console.log("[bandolier:webhook] effort selected", {
+        issue: issue.number,
+        effort,
+        source: labelEffort ? "issue label" : "repo default",
+      });
+    }
+  }
+
   const awsCredentials = provider === "bedrock" ? resolved.aws : null;
   const anthropicApiKey =
     provider === "anthropic" ? resolved.anthropicApiKey : null;
@@ -343,6 +388,7 @@ async function handleIssueOpened(
     repoUrl: repository.clone_url,
     branch: repository.default_branch,
     model,
+    effort,
     // PR title/description are written out-of-band of the task model by a cheap
     // same-provider writer (latest Sonnet for Claude, latest GPT mini for OpenAI).
     prWriterModel,
@@ -491,6 +537,7 @@ export async function POST(req: NextRequest) {
         repoConfig?.prefix ?? null,
         repoConfig?.agentImage ?? null,
         repoConfig?.defaultWebhookModel ?? null,
+        repoConfig?.defaultWebhookEffort ?? null,
         repoConfig?.systemPrompt ?? null,
         repoConfig?.networkPolicy,
       );

@@ -31,9 +31,30 @@ const DEFAULT_NAMESPACE = "bandolier-agents";
 
 // ── Kubernetes resource bootstrap ─────────────────────────────────────────────
 
+/**
+ * Per-repo loosenings of the default agent egress rules, applied to the
+ * namespace's NetworkPolicy. Both default off (the locked-down baseline); each
+ * widens what agent pods can reach. See `repoWebhookConfig` and the repo-config
+ * UI's security warning.
+ */
+export interface NetworkPolicyOptions {
+  /**
+   * Allow egress to private / in-cluster (RFC-1918) ranges by dropping the
+   * AGENT_EGRESS_BLOCKED_CIDRS exclusion. Lets agents reach other pods and
+   * in-cluster services (lateral-movement risk).
+   */
+  allowPrivateEgress?: boolean;
+  /**
+   * Allow egress on any TCP port instead of only 80/443. Widens the
+   * exfiltration / arbitrary-protocol surface.
+   */
+  allowAllPortsEgress?: boolean;
+}
+
 export async function ensureNamespace(
   namespace: string,
   kubeconfig: string,
+  networkPolicy?: NetworkPolicyOptions,
 ): Promise<boolean> {
   let created = false;
   try {
@@ -50,9 +71,9 @@ export async function ensureNamespace(
     if ((err as { code?: number }).code !== 409) throw err;
   }
 
-  // Isolate agents in the namespace (no-op if disabled or already present). Done
-  // after the namespace is guaranteed to exist so the policy has somewhere to go.
-  await ensureNetworkPolicy(namespace, kubeconfig);
+  // Isolate agents in the namespace (no-op if disabled). Done after the
+  // namespace is guaranteed to exist so the policy has somewhere to go.
+  await ensureNetworkPolicy(namespace, kubeconfig, networkPolicy);
   return created;
 }
 
@@ -62,61 +83,108 @@ export async function ensureNamespace(
  * blocked. An agent can clone from GitHub and reach its model provider but can't
  * reach other pods or in-cluster services. Requires a policy-enforcing CNI
  * (Calico/Cilium) to take effect — it's a harmless no-op under kindnet.
+ *
+ * Per-repo toggles (`opts`) can loosen the egress rules: `allowPrivateEgress`
+ * drops the in-cluster CIDR block, and `allowAllPortsEgress` lifts the 80/443
+ * port restriction. Both default off, preserving the locked-down baseline. The
+ * policy is re-applied on every deploy (create, else replace) so flipping a
+ * toggle takes effect on an existing namespace's next run rather than being
+ * pinned to whatever it was first created with.
  */
+/** Name of the per-namespace NetworkPolicy that isolates agent pods. */
+export const NETWORK_POLICY_NAME = "bandolier-agent-isolation";
+
+/**
+ * Builds the agent-isolation NetworkPolicy body for a namespace, applying the
+ * per-repo egress toggles to the default rules. Pure (no cluster access) so the
+ * toggle logic is unit-testable. `blockedCidrs` is the configured in-cluster
+ * block list (from AGENT_EGRESS_BLOCKED_CIDRS), dropped when private egress is
+ * allowed.
+ */
+export function buildNetworkPolicyBody(
+  namespace: string,
+  blockedCidrs: string[],
+  opts?: NetworkPolicyOptions,
+): object {
+  // `allowPrivateEgress` drops the in-cluster CIDR block; otherwise the
+  // configured private ranges stay unreachable.
+  const blocked = opts?.allowPrivateEgress ? [] : blockedCidrs;
+
+  // `allowAllPortsEgress` lifts the 80/443 restriction (omitting `ports`
+  // altogether means every port); otherwise only HTTP(S) is allowed out.
+  const internetPorts = opts?.allowAllPortsEgress
+    ? undefined
+    : [
+        { protocol: "TCP" as const, port: 443 },
+        { protocol: "TCP" as const, port: 80 },
+      ];
+
+  const ipBlock =
+    blocked.length > 0
+      ? { cidr: "0.0.0.0/0", except: blocked }
+      : { cidr: "0.0.0.0/0" };
+
+  return {
+    apiVersion: "networking.k8s.io/v1",
+    kind: "NetworkPolicy",
+    metadata: {
+      name: NETWORK_POLICY_NAME,
+      namespace,
+      labels: { "app.kubernetes.io/managed-by": "bandolier" },
+    },
+    spec: {
+      podSelector: { matchLabels: { app: "bandolier-agent" } },
+      policyTypes: ["Ingress", "Egress"],
+      ingress: [], // deny all inbound
+      egress: [
+        {
+          // DNS resolution via kube-dns.
+          to: [
+            {
+              namespaceSelector: {},
+              podSelector: { matchLabels: { "k8s-app": "kube-dns" } },
+            },
+          ],
+          ports: [
+            { protocol: "UDP", port: 53 },
+            { protocol: "TCP", port: 53 },
+          ],
+        },
+        {
+          // Public internet (and, when allowed, in-cluster ranges), restricted
+          // to HTTP(S) unless all ports are permitted.
+          to: [{ ipBlock }],
+          ...(internetPorts && { ports: internetPorts }),
+        },
+      ],
+    },
+  };
+}
+
 async function ensureNetworkPolicy(
   namespace: string,
   kubeconfig: string,
+  opts?: NetworkPolicyOptions,
 ): Promise<void> {
   if (env.AGENT_NETWORK_POLICY !== "true") return;
 
-  const blocked = env.AGENT_EGRESS_BLOCKED_CIDRS.split(",")
+  const blockedCidrs = env.AGENT_EGRESS_BLOCKED_CIDRS.split(",")
     .map((c) => c.trim())
     .filter(Boolean);
+  const body = buildNetworkPolicyBody(namespace, blockedCidrs, opts);
 
+  const api = getNetworkingV1Api(kubeconfig);
   try {
-    await getNetworkingV1Api(kubeconfig).createNamespacedNetworkPolicy({
-      namespace,
-      body: {
-        apiVersion: "networking.k8s.io/v1",
-        kind: "NetworkPolicy",
-        metadata: {
-          name: "bandolier-agent-isolation",
-          namespace,
-          labels: { "app.kubernetes.io/managed-by": "bandolier" },
-        },
-        spec: {
-          podSelector: { matchLabels: { app: "bandolier-agent" } },
-          policyTypes: ["Ingress", "Egress"],
-          ingress: [], // deny all inbound
-          egress: [
-            {
-              // DNS resolution via kube-dns.
-              to: [
-                {
-                  namespaceSelector: {},
-                  podSelector: { matchLabels: { "k8s-app": "kube-dns" } },
-                },
-              ],
-              ports: [
-                { protocol: "UDP", port: 53 },
-                { protocol: "TCP", port: 53 },
-              ],
-            },
-            {
-              // Public internet over HTTP(S), minus the blocked in-cluster ranges.
-              to: [{ ipBlock: { cidr: "0.0.0.0/0", except: blocked } }],
-              ports: [
-                { protocol: "TCP", port: 443 },
-                { protocol: "TCP", port: 80 },
-              ],
-            },
-          ],
-        },
-      },
-    });
+    await api.createNamespacedNetworkPolicy({ namespace, body });
   } catch (err) {
-    if ((err as { code?: number }).code === 409) return; // already present
-    throw err;
+    if ((err as { code?: number }).code !== 409) throw err;
+    // Already present — replace it so a flipped per-repo toggle takes effect
+    // (the policy isn't pinned to whatever it was first created with).
+    await api.replaceNamespacedNetworkPolicy({
+      name: NETWORK_POLICY_NAME,
+      namespace,
+      body,
+    });
   }
 }
 
@@ -253,6 +321,13 @@ export interface JobSpec {
    * instructional framing. Unset = no repo-wide prompt.
    */
   repoSystemPrompt?: string;
+  /**
+   * Per-repo loosenings of the agent NetworkPolicy egress rules (admin-set in
+   * repo config). Both default off, preserving the locked-down baseline; each
+   * widens what this run's pod can reach. Applied to the namespace's policy
+   * before the Job is created. Unset = the default isolated egress.
+   */
+  networkPolicy?: NetworkPolicyOptions;
 }
 
 /** Per-job secret holding the acting user's credentials (GitHub / AWS / Anthropic). */
@@ -292,7 +367,7 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
 
   // Bootstrap shared (non-secret) resources.
   const [nsCreated, saCreated] = await Promise.all([
-    ensureNamespace(ns, kc),
+    ensureNamespace(ns, kc, spec.networkPolicy),
     ensureServiceAccount(ns, "bandolier-agent", kc),
   ]);
   console.log("[bandolier:deploy] resources", {

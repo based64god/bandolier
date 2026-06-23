@@ -17,6 +17,21 @@ export interface RepoWebhookConfig {
    * use on the deploy/webhook paths.
    */
   systemPrompt: string | null;
+  /** Per-repo network-policy egress toggles. See `RepoNetworkPolicy`. */
+  networkPolicy: RepoNetworkPolicy;
+}
+
+/**
+ * Per-repo loosenings of the agent NetworkPolicy egress rules (admin-only).
+ * Both default off, preserving the locked-down baseline; each widens what this
+ * repo's agent pods can reach. See `getRepoNetworkPolicy` for the loader callers
+ * use on the deploy/webhook paths.
+ */
+export interface RepoNetworkPolicy {
+  /** Allow egress to private / in-cluster (RFC-1918) ranges. */
+  allowPrivateEgress: boolean;
+  /** Allow egress on any TCP port instead of only 80/443. */
+  allowAllPortsEgress: boolean;
 }
 
 /**
@@ -88,6 +103,8 @@ export async function getRepoWebhookConfig(
       agentImage: repoWebhookConfig.agentImage,
       defaultWebhookModel: repoWebhookConfig.defaultWebhookModel,
       systemPrompt: repoWebhookConfig.systemPrompt,
+      allowPrivateEgress: repoWebhookConfig.allowPrivateEgress,
+      allowAllPortsEgress: repoWebhookConfig.allowAllPortsEgress,
     })
     .from(repoWebhookConfig)
     .where(eq(repoWebhookConfig.repoFullName, repoFullName))
@@ -98,6 +115,10 @@ export async function getRepoWebhookConfig(
     agentImage: row.agentImage ?? null,
     defaultWebhookModel: row.defaultWebhookModel ?? null,
     systemPrompt: row.systemPrompt ?? null,
+    networkPolicy: {
+      allowPrivateEgress: row.allowPrivateEgress,
+      allowAllPortsEgress: row.allowAllPortsEgress,
+    },
   };
 }
 
@@ -116,6 +137,30 @@ export async function getRepoSystemPrompt(
     .where(eq(repoWebhookConfig.repoFullName, repoFullName))
     .limit(1);
   return row?.systemPrompt ?? null;
+}
+
+/**
+ * A repo's network-policy egress toggles, or null when no config row exists
+ * (callers then apply the default isolated egress). Read on the deploy and
+ * webhook paths the same way `getRepoAgentImage` is.
+ */
+export async function getRepoNetworkPolicy(
+  database: typeof db,
+  repoFullName: string,
+): Promise<RepoNetworkPolicy | null> {
+  const [row] = await database
+    .select({
+      allowPrivateEgress: repoWebhookConfig.allowPrivateEgress,
+      allowAllPortsEgress: repoWebhookConfig.allowAllPortsEgress,
+    })
+    .from(repoWebhookConfig)
+    .where(eq(repoWebhookConfig.repoFullName, repoFullName))
+    .limit(1);
+  if (!row) return null;
+  return {
+    allowPrivateEgress: row.allowPrivateEgress,
+    allowAllPortsEgress: row.allowAllPortsEgress,
+  };
 }
 
 /**

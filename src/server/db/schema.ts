@@ -200,6 +200,25 @@ export const repoWebhookConfig = pgTable("repo_webhook_config", {
   preferRepoCredentials: boolean("prefer_repo_credentials")
     .notNull()
     .default(false),
+  // ── Network policy egress toggles (admin-only) ─────────────────────────────
+  // Per-repo loosenings of the default agent NetworkPolicy egress rules. Each
+  // widens what this repo's agent pods can reach and is OFF by default, keeping
+  // the locked-down baseline (deny inbound; egress only to DNS + the public
+  // internet on 80/443, with in-cluster private ranges blocked). Turning one on
+  // trades isolation for reach, so the repo-config UI surfaces a security
+  // warning. Only meaningful when AGENT_NETWORK_POLICY is enabled and the
+  // cluster runs a policy-enforcing CNI (Calico/Cilium). SECURITY: see the
+  // warning surfaced in the repo config UI.
+  //
+  // Allow egress to private / in-cluster (RFC-1918) ranges — drops the
+  // AGENT_EGRESS_BLOCKED_CIDRS exclusion, letting agents reach other pods and
+  // in-cluster services (lateral-movement risk).
+  allowPrivateEgress: boolean("allow_private_egress").notNull().default(false),
+  // Allow egress on any TCP port instead of only 80/443 — widens the
+  // exfiltration / arbitrary-protocol surface.
+  allowAllPortsEgress: boolean("allow_all_ports_egress")
+    .notNull()
+    .default(false),
   configuredBy: text("configured_by").references(() => user.id, {
     onDelete: "set null",
   }),

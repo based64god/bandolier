@@ -168,7 +168,7 @@ function SlashCommandMenu({
     <div
       role="listbox"
       aria-label="Slash commands"
-      className="absolute bottom-full left-0 z-20 mb-2 max-h-60 w-80 max-w-[calc(100%-1rem)] overflow-y-auto rounded-xl border border-white/10 bg-[#0a2014] py-1 shadow-2xl"
+      className="absolute bottom-full left-0 z-20 mb-2 max-h-60 w-80 max-w-[calc(100%-1rem)] overflow-y-auto rounded-xl border border-white/10 bg-[var(--surface-panel)] py-1 shadow-2xl"
     >
       {commands.map((c, i) => {
         const isHighlighted = i === highlight;

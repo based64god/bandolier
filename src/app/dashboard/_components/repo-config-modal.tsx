@@ -969,9 +969,8 @@ export function RepoConfigModal({
               <p className="text-xs text-white/30">
                 A blanket instruction appended to the system prompt of every
                 agent run for this repo — dashboard tasks, issues, and
-                webhook-triggered runs alike. Layered on top of
-                Bandolier&apos;s own framing, never replacing it. Leave blank
-                for none.
+                webhook-triggered runs alike. Layered on top of Bandolier&apos;s
+                own framing, never replacing it. Leave blank for none.
               </p>
             </div>
 

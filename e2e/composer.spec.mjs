@@ -31,7 +31,9 @@ const browser = await chromium.launch();
 const page = await browser.newPage();
 
 // ── Scenario 1: live commands advertised via ?commands= ──────────────────────
-await page.goto(`${BASE}/dev/composer?commands=code-review,clear,compact,verify`);
+await page.goto(
+  `${BASE}/dev/composer?commands=code-review,clear,compact,verify`,
+);
 const ta = page.locator("textarea");
 await ta.click();
 
@@ -64,14 +66,20 @@ check("menu closes after selection", !(await menu.isVisible()));
 // Enter now sends the message.
 await ta.press("Enter");
 const sent1 = await page.getByTestId("sent-item").allInnerTexts();
-check("Enter sends '/compact'", sent1.length === 1 && sent1[0].trim() === "/compact");
+check(
+  "Enter sends '/compact'",
+  sent1.length === 1 && sent1[0].trim() === "/compact",
+);
 
 // ── Scenario 2: Escape keeps text, drops the slash ───────────────────────────
 await ta.type("/ver");
 await menu.waitFor({ state: "visible", timeout: 5000 });
 await ta.press("Escape");
 check("Escape closes the menu", !(await menu.isVisible()));
-check("Escape drops the leading slash, keeps text", (await ta.inputValue()) === "ver");
+check(
+  "Escape drops the leading slash, keeps text",
+  (await ta.inputValue()) === "ver",
+);
 
 // ── Scenario 3: click selection + fallback defaults (no ?commands=) ───────────
 await page.goto(`${BASE}/dev/composer`);
@@ -85,7 +93,44 @@ check("falls back to curated defaults when none advertised", defaultCount >= 8);
 
 // Click the "/init" option.
 await page.getByRole("option").filter({ hasText: "/init" }).first().click();
-check("click selection inserts '/init '", (await ta2.inputValue()) === "/init ");
+check(
+  "click selection inserts '/init '",
+  (await ta2.inputValue()) === "/init ",
+);
+
+// ── Scenario 4: arrow-key navigation scrolls the highlight into view ──────────
+// With more commands than fit in max-h-60, paging down with ArrowDown must
+// keep the highlighted option scrolled into view rather than off the fold.
+const many = Array.from(
+  { length: 30 },
+  (_, i) => `cmd${String(i).padStart(2, "0")}`,
+);
+await page.goto(`${BASE}/dev/composer?commands=${many.join(",")}`);
+const ta3 = page.locator("textarea");
+await ta3.click();
+await ta3.type("/");
+const menu3 = page.getByRole("listbox", { name: "Slash commands" });
+await menu3.waitFor({ state: "visible", timeout: 5000 });
+
+const scrollTopStart = await menu3.evaluate((el) => el.scrollTop);
+for (let i = 0; i < 25; i++) await ta3.press("ArrowDown");
+const scrollTopDown = await menu3.evaluate((el) => el.scrollTop);
+const highlightVisible = await menu3.evaluate((el) => {
+  const opt = el.querySelector('[data-nav="25"]');
+  if (!opt) return false;
+  const c = el.getBoundingClientRect();
+  const o = opt.getBoundingClientRect();
+  return o.top >= c.top - 1 && o.bottom <= c.bottom + 1;
+});
+check(
+  "ArrowDown scrolls the list past the fold",
+  scrollTopDown > scrollTopStart,
+);
+check("highlighted option stays in view while navigating", highlightVisible);
+
+for (let i = 0; i < 25; i++) await ta3.press("ArrowUp");
+const scrollTopUp = await menu3.evaluate((el) => el.scrollTop);
+check("ArrowUp scrolls back toward the top", scrollTopUp < scrollTopDown);
 
 await browser.close();
 console.log(`\n${passed} passed, ${failed} failed`);

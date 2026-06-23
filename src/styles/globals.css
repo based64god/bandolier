@@ -142,3 +142,80 @@ html.h4x0r body::after {
     inset 0 0 60px 4px rgba(56, 226, 113, 0.12),
     inset 0 0 160px 20px rgba(56, 226, 113, 0.06);
 }
+
+/*
+ * CRT grain + scanlines. A second fixed, non-interactive overlay sits over the
+ * whole tube on top of the edge glow. Two layers, composited together:
+ *   1. Animated film grain — an inline SVG fractal-noise texture (feTurbulence)
+ *      tiled across the screen. Nudging its background-position every frame
+ *      makes the speckle shimmer like the analog noise floor of a CRT.
+ *   2. Faint horizontal scanlines — a 1px repeating gradient, the dark gaps
+ *      between a CRT's raster lines.
+ * Kept low-opacity so text stays legible; mix-blend-mode lets the green phosphor
+ * show through the grain instead of being washed out by a flat overlay.
+ */
+html.h4x0r body::before {
+  content: "";
+  position: fixed;
+  top: -50%;
+  right: -50%;
+  bottom: -50%;
+  left: -50%;
+  z-index: 9998;
+  pointer-events: none;
+  opacity: 0.5;
+  mix-blend-mode: screen;
+  background-image:
+    repeating-linear-gradient(
+      0deg,
+      rgba(0, 0, 0, 0.28) 0px,
+      rgba(0, 0, 0, 0.28) 1px,
+      transparent 1px,
+      transparent 3px
+    ),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.55'/%3E%3C/svg%3E");
+  background-size:
+    100% 100%,
+    160px 160px;
+  background-repeat: repeat;
+  animation: h4x0r-grain 0.6s steps(4) infinite;
+}
+
+/* Shift the grain layer (the second background) around each frame so the
+   speckle dances; the scanline layer is the first background and is pinned at
+   0 0 so it never moves. */
+@keyframes h4x0r-grain {
+  0% {
+    background-position:
+      0 0,
+      0 0;
+  }
+  25% {
+    background-position:
+      0 0,
+      -40px 30px;
+  }
+  50% {
+    background-position:
+      0 0,
+      28px -36px;
+  }
+  75% {
+    background-position:
+      0 0,
+      -24px -20px;
+  }
+  100% {
+    background-position:
+      0 0,
+      32px 24px;
+  }
+}
+
+/* Respect users who ask for less motion: keep the grain/scanline texture but
+   stop it shimmering. */
+@media (prefers-reduced-motion: reduce) {
+  html.h4x0r body::before {
+    animation: none;
+  }
+}

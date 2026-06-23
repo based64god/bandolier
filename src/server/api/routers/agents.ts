@@ -51,6 +51,11 @@ import {
   resolveModelCredentials,
 } from "~/server/agents/resolve-credentials";
 import {
+  getUserRepoPermission,
+  isMaintainerOrHigher,
+  runUsesRepoCredentials,
+} from "~/server/agents/repo-permissions";
+import {
   getRepoAgentImage,
   getRepoNetworkPolicy,
   getRepoSystemPrompt,
@@ -1287,14 +1292,52 @@ export const agentsRouter = createTRPCRouter({
           name: ctx.session.user.name,
           email: ctx.session.user.email,
         };
+        let githubLogin: string | null = null;
         if (githubToken) {
           try {
             const gh = await getGithubIdentity(githubToken);
             gitIdentity = githubGitIdentity(gh.id, gh.login);
+            githubLogin = gh.login;
           } catch (err) {
             console.warn("[bandolier:deploy] GitHub identity lookup failed", {
               error: err instanceof Error ? err.message : String(err),
             });
+          }
+        }
+
+        // Privilege gate: a run that would spend the repo's *shared* credentials
+        // (a repo-level kubeconfig or model key) is restricted to GitHub users
+        // with maintainer-or-higher on the repo. A less-privileged user can only
+        // use their own credentials. (The webhook path holds such a run for a
+        // maintainer's approval; from the dashboard/REST we reject it outright,
+        // since the actor is present to be told why.)
+        if (input.repoFullName) {
+          const usesRepoCreds = await runUsesRepoCredentials(
+            ctx.db,
+            userId,
+            input.repoFullName,
+            resolved,
+          );
+          if (usesRepoCreds) {
+            if (!githubToken || !githubLogin) {
+              throw new TRPCError({
+                code: "FORBIDDEN",
+                message:
+                  "A linked GitHub account is required to run on this repository's shared credentials.",
+              });
+            }
+            const permission = await getUserRepoPermission(
+              githubToken,
+              input.repoFullName,
+              githubLogin,
+            );
+            if (!isMaintainerOrHigher(permission)) {
+              throw new TRPCError({
+                code: "FORBIDDEN",
+                message:
+                  "This run would use the repository's shared credentials, which requires maintainer access or higher. Ask a maintainer to run it, or configure your own credentials in settings.",
+              });
+            }
           }
         }
 

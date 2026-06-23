@@ -791,11 +791,13 @@ function RepoCredentialsSection({ repoFullName }: { repoFullName: string }) {
           <span className="font-semibold">
             Repo-scoped credentials are shared infrastructure — secure them.
           </span>{" "}
-          Every Bandolier user with access to this repo, and anyone whose GitHub
-          activity triggers an agent, can run workloads with these credentials.
-          Scope the cluster and model keys to only what this group should be
-          trusted with, prefer short-lived/least-privilege credentials, and
-          rotate them when collaborators change.
+          Only collaborators with{" "}
+          <span className="font-semibold">maintainer</span> access or higher can
+          run agents on these credentials; less-privileged users must use their
+          own (webhook-triggered runs by them are held for a maintainer&apos;s
+          approval). Even so, scope the cluster and model keys to only what this
+          group should be trusted with, prefer short-lived/least-privilege
+          credentials, and rotate them when collaborators change.
         </p>
       </div>
 

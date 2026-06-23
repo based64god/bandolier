@@ -7,6 +7,13 @@ import { api } from "~/trpc/react";
 import type { RouterOutputs } from "~/trpc/react";
 import { expiresAtLocal, taskNameTooltip } from "./agent-ui";
 import { OutputBadge, SourceBadge } from "./output-badge";
+import {
+  applySlashCommand,
+  DEFAULT_SLASH_COMMANDS,
+  filterSlashCommands,
+  slashQuery,
+  type SlashCommand,
+} from "./slash-commands";
 import { StatusBadge } from "./status-badge";
 import {
   ACTION_ROW_MIN_H,
@@ -58,6 +65,8 @@ export function InteractiveRow({
   repoFullName?: string;
 }) {
   const [draft, setDraft] = useState("");
+  // Index of the arrow-key-highlighted command in the slash menu (see below).
+  const [cmdHighlight, setCmdHighlight] = useState(0);
   const [ending, setEnding] = useState(false);
   const running = agent.status === "Running" || agent.status === "Pending";
   // Default closed for sessions that are already done when first mounted —
@@ -99,6 +108,27 @@ export function InteractiveRow({
   }, [running]);
 
   const terminate = api.agents.terminate.useMutation();
+
+  // Slash-command typeahead. The menu opens while the draft is a single
+  // `/`-prefixed token (see slashQuery) and filters by prefix as the user types.
+  // The command list is a curated default today; once the harness forwards the
+  // agent's ACP available_commands_update it can feed this list instead.
+  const query = slashQuery(draft);
+  const commandMatches: SlashCommand[] =
+    query === null ? [] : filterSlashCommands(DEFAULT_SLASH_COMMANDS, query);
+  const menuOpen = running && commandMatches.length > 0;
+  // Clamp at render time rather than in an effect: as matches narrow (the user
+  // types more letters) the stored index can fall out of range, and clamping
+  // here avoids a cascading setState-in-effect render.
+  const activeHighlight = Math.min(
+    cmdHighlight,
+    Math.max(0, commandMatches.length - 1),
+  );
+
+  function chooseCommand(name: string) {
+    setDraft(applySlashCommand(name));
+    setCmdHighlight(0);
+  }
 
   function send() {
     const content = draft.trim();
@@ -279,12 +309,54 @@ export function InteractiveRow({
             <SessionHeader podName={agent.name} />
             <Conversation items={session.items} />
             <div className="border-t border-white/10 p-3">
-              <div className="flex items-end gap-2">
+              <div className="relative flex items-end gap-2">
+                {menuOpen && (
+                  <SlashCommandMenu
+                    commands={commandMatches}
+                    highlight={activeHighlight}
+                    onHighlight={setCmdHighlight}
+                    onChoose={chooseCommand}
+                  />
+                )}
                 <textarea
                   rows={2}
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
                   onKeyDown={(e) => {
+                    // While the slash menu is open, arrow keys / Tab / Enter
+                    // drive the menu instead of editing or sending. Escape just
+                    // closes it (handled implicitly: typing a space or more text
+                    // closes it; here we swallow the key so it doesn't bubble).
+                    if (menuOpen) {
+                      if (e.key === "ArrowDown") {
+                        e.preventDefault();
+                        setCmdHighlight(
+                          Math.min(
+                            commandMatches.length - 1,
+                            activeHighlight + 1,
+                          ),
+                        );
+                        return;
+                      }
+                      if (e.key === "ArrowUp") {
+                        e.preventDefault();
+                        setCmdHighlight(Math.max(0, activeHighlight - 1));
+                        return;
+                      }
+                      if (e.key === "Enter" || e.key === "Tab") {
+                        e.preventDefault();
+                        const pick = commandMatches[activeHighlight];
+                        if (pick) chooseCommand(pick.name);
+                        return;
+                      }
+                      if (e.key === "Escape") {
+                        e.preventDefault();
+                        // Drop the leading slash so the menu closes but the
+                        // typed text is kept as an ordinary message.
+                        setDraft((d) => d.replace(/^\//, ""));
+                        return;
+                      }
+                    }
                     if (e.key === "Enter" && !e.shiftKey) {
                       e.preventDefault();
                       send();
@@ -326,6 +398,53 @@ export function InteractiveRow({
         </tr>
       )}
     </>
+  );
+}
+
+/**
+ * Typeahead popup for slash commands, anchored above the message input (it opens
+ * upward so it never pushes the textarea or covers the conversation). Mirrors
+ * native Claude Code: filtered command list, arrow-key highlight, click or
+ * Enter/Tab to choose. Keyboard navigation lives in the textarea's onKeyDown so
+ * focus stays in the input as the user types; this component renders the list
+ * and handles mouse interaction.
+ */
+function SlashCommandMenu({
+  commands,
+  highlight,
+  onHighlight,
+  onChoose,
+}: {
+  commands: SlashCommand[];
+  highlight: number;
+  onHighlight: (index: number) => void;
+  onChoose: (name: string) => void;
+}) {
+  return (
+    <div className="absolute bottom-full left-0 z-20 mb-2 max-h-60 w-80 max-w-[calc(100%-1rem)] overflow-y-auto rounded-xl border border-white/10 bg-[#0a2014] py-1 shadow-2xl">
+      {commands.map((c, i) => {
+        const isHighlighted = i === highlight;
+        return (
+          <button
+            key={c.name}
+            type="button"
+            // onMouseDown (not onClick) so the choice registers before the
+            // textarea's blur, keeping focus in the input after selection.
+            onMouseDown={(e) => {
+              e.preventDefault();
+              onChoose(c.name);
+            }}
+            onMouseEnter={() => onHighlight(i)}
+            className={`flex w-full flex-col items-start gap-0.5 px-3 py-1.5 text-left transition ${
+              isHighlighted ? "bg-purple-600/40" : ""
+            }`}
+          >
+            <span className="font-mono text-sm text-white/90">/{c.name}</span>
+            <span className="text-xs text-white/40">{c.description}</span>
+          </button>
+        );
+      })}
+    </div>
   );
 }
 

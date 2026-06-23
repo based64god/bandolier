@@ -10,7 +10,7 @@ import { InstallButton } from "~/app/_components/install-button";
 import { repoToNamespace } from "~/server/agents/namespace";
 import { authClient } from "~/server/better-auth/client";
 import { api } from "~/trpc/react";
-import { isAgentOutputResolved } from "./agent-ui";
+import { isAgentOutputResolved, nextAwaitingTarget } from "./agent-ui";
 import { DeployModal } from "./deploy-modal";
 import { useHideResolved } from "./hide-resolved";
 import { InteractiveRow } from "./interactive-sessions";
@@ -180,6 +180,38 @@ export function AgentDashboard({
 
   // Interactive agents still drive the awaiting-input alerts.
   const interactiveAgents = agents.filter((a) => a.interactive);
+
+  // Tab-to-cycle: the names of the sessions currently awaiting input, in the
+  // order they appear in the table (awaiting tasks already float to the top).
+  // Pressing Tab while focus is anywhere in the task table jumps to the next
+  // one — expanding it and dropping the cursor into its message box.
+  const awaitingNames = visibleAgents
+    .filter((a) => a.awaitingInput)
+    .map((a) => a.name);
+  // The session Tab last targeted, plus a monotonic token. The token (re)bumps
+  // even when the same session is re-targeted so the row's focus effect always
+  // re-fires; the name routes the signal to the right row.
+  const [focusTarget, setFocusTarget] = useState<{
+    name: string;
+    token: number;
+  } | null>(null);
+
+  function cycleAwaiting(): boolean {
+    const next = nextAwaitingTarget(awaitingNames, focusTarget?.name ?? null);
+    if (!next) return false;
+    setFocusTarget((prev) => ({ name: next, token: (prev?.token ?? 0) + 1 }));
+    return true;
+  }
+
+  function handleTableKeyDown(e: React.KeyboardEvent) {
+    // Plain Tab only — leave Shift+Tab and the modifier combos to the browser's
+    // normal focus traversal. When no session is waiting, fall through to
+    // default tabbing too (nothing to cycle).
+    if (e.key !== "Tab" || e.shiftKey || e.altKey || e.ctrlKey || e.metaKey) {
+      return;
+    }
+    if (cycleAwaiting()) e.preventDefault();
+  }
 
   // Chime + system notification when an agent finishes or starts awaiting input.
   const [notify, setNotify] = useNotifyPref();
@@ -564,7 +596,10 @@ export function AgentDashboard({
                     </button>
                   </div>
                 ) : (
-                  <div className="overflow-hidden rounded-xl border border-white/10">
+                  <div
+                    onKeyDown={handleTableKeyDown}
+                    className="overflow-hidden rounded-xl border border-white/10"
+                  >
                     {/* table-fixed locks column geometry to the header widths
                         below, so an interactive row expanding in place (a
                         full-width colSpan cell with logs + input) can only push
@@ -660,6 +695,11 @@ export function AgentDashboard({
                               agent={agent}
                               namespace={namespace}
                               repoFullName={repoSlug ?? undefined}
+                              focusSignal={
+                                focusTarget?.name === agent.name
+                                  ? focusTarget.token
+                                  : null
+                              }
                             />
                           ) : (
                             <TaskRow

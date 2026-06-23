@@ -7,6 +7,7 @@ import { api } from "~/trpc/react";
 import type { RouterOutputs } from "~/trpc/react";
 import { expiresAtLocal, taskNameTooltip } from "./agent-ui";
 import { OutputBadge, SourceBadge } from "./output-badge";
+import { SessionComposer } from "./session-composer";
 import { StatusBadge } from "./status-badge";
 import {
   ACTION_ROW_MIN_H,
@@ -57,7 +58,6 @@ export function InteractiveRow({
   namespace: string;
   repoFullName?: string;
 }) {
-  const [draft, setDraft] = useState("");
   const [ending, setEnding] = useState(false);
   const running = agent.status === "Running" || agent.status === "Pending";
   // Default closed for sessions that are already done when first mounted —
@@ -99,13 +99,6 @@ export function InteractiveRow({
   }, [running]);
 
   const terminate = api.agents.terminate.useMutation();
-
-  function send() {
-    const content = draft.trim();
-    if (!content || !session.ready || session.sendPending) return;
-    session.sendPrompt(content);
-    setDraft("");
-  }
 
   const rowTint = awaiting ? "bg-amber-500/[0.06]" : "hover:bg-white/[0.04]";
 
@@ -278,50 +271,15 @@ export function InteractiveRow({
           >
             <SessionHeader podName={agent.name} />
             <Conversation items={session.items} />
-            <div className="border-t border-white/10 p-3">
-              <div className="flex items-end gap-2">
-                <textarea
-                  rows={2}
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      send();
-                    }
-                  }}
-                  disabled={!running}
-                  placeholder={
-                    running
-                      ? awaiting
-                        ? "The agent is waiting — type a message and press Enter…"
-                        : "Send a message (the agent will pick it up after its current turn)…"
-                      : "Session ended."
-                  }
-                  // min-w-0 lets the textarea shrink below its intrinsic width
-                  // so the auto-layout table can't be forced wider than the
-                  // viewport (which overflowed and shifted columns on mobile).
-                  className="min-h-0 w-0 min-w-0 flex-1 resize-y rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/30 focus:outline-none disabled:opacity-40"
-                />
-                <button
-                  onClick={send}
-                  disabled={
-                    !running ||
-                    !draft.trim() ||
-                    !session.ready ||
-                    session.sendPending
-                  }
-                  className="rounded-lg bg-purple-600 px-3 py-2 text-sm font-medium text-black hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  {session.sendPending ? "Sending…" : "Send"}
-                </button>
-              </div>
-              {session.sendError && (
-                <p className="mt-1.5 text-xs text-red-400">
-                  {session.sendError}
-                </p>
-              )}
-            </div>
+            <SessionComposer
+              running={running}
+              awaiting={awaiting}
+              ready={session.ready}
+              sendPending={session.sendPending}
+              sendError={session.sendError}
+              commands={session.commands}
+              onSend={session.sendPrompt}
+            />
           </td>
         </tr>
       )}

@@ -26,6 +26,7 @@ export function SessionComposer({
   sendError,
   commands,
   onSend,
+  focusSignal,
 }: {
   running: boolean;
   awaiting: boolean;
@@ -36,8 +37,23 @@ export function SessionComposer({
   /** Slash commands the agent advertised (ACP available_commands_update). */
   commands: AvailableCommand[];
   onSend: (content: string) => void;
+  /**
+   * Bumped by the parent to imperatively move keyboard focus into this
+   * textarea — used when Tab cycles through the sessions awaiting input so the
+   * user lands ready to type. Each new value (re)focuses; `null`/`0` is inert.
+   */
+  focusSignal?: number | null;
 }) {
   const [draft, setDraft] = useState("");
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Focus (and scroll into view) whenever the parent bumps the signal. The
+  // effect also runs on mount, so a request that first expands a collapsed row
+  // still lands focus once the textarea renders.
+  useEffect(() => {
+    if (!focusSignal) return;
+    textareaRef.current?.focus();
+  }, [focusSignal]);
   // Index of the arrow-key-highlighted command in the slash menu.
   const [cmdHighlight, setCmdHighlight] = useState(0);
 
@@ -82,6 +98,7 @@ export function SessionComposer({
           />
         )}
         <textarea
+          ref={textareaRef}
           rows={2}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
@@ -104,6 +121,10 @@ export function SessionComposer({
               }
               if (e.key === "Enter" || e.key === "Tab") {
                 e.preventDefault();
+                // Stop Tab here so the table's tab-to-cycle handler (which this
+                // bubbles up to) doesn't also jump to another session while the
+                // user is picking a slash command.
+                e.stopPropagation();
                 const pick = commandMatches[activeHighlight];
                 if (pick) chooseCommand(pick.name);
                 return;

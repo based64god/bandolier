@@ -53,10 +53,17 @@ export function InteractiveRow({
   agent,
   namespace,
   repoFullName,
+  focusSignal,
 }: {
   agent: Task;
   namespace: string;
   repoFullName?: string;
+  /**
+   * Bumped by the dashboard when Tab cycles to this session: expand the row (so
+   * the composer mounts) and forward the signal to the composer, which moves
+   * keyboard focus into its textarea. `null`/`0` means "not the target".
+   */
+  focusSignal?: number | null;
 }) {
   const [ending, setEnding] = useState(false);
   const running = agent.status === "Running" || agent.status === "Pending";
@@ -97,6 +104,18 @@ export function InteractiveRow({
     if (!running && wasRunning.current) setCollapsed(true);
     wasRunning.current = running;
   }, [running]);
+
+  // Tab-to-cycle: when the dashboard targets this row it bumps focusSignal. We
+  // expand so the composer mounts; the signal flows down to the composer, which
+  // focuses its textarea once rendered. Guarded on the value *changing* (mirror
+  // of the await/running effects above) so it only fires on a fresh request.
+  const lastFocusSignal = useRef(focusSignal);
+  useEffect(() => {
+    if (focusSignal && focusSignal !== lastFocusSignal.current) {
+      setCollapsed(false);
+    }
+    lastFocusSignal.current = focusSignal;
+  }, [focusSignal]);
 
   const terminate = api.agents.terminate.useMutation();
 
@@ -279,6 +298,7 @@ export function InteractiveRow({
               sendError={session.sendError}
               commands={session.commands}
               onSend={session.sendPrompt}
+              focusSignal={focusSignal}
             />
           </td>
         </tr>

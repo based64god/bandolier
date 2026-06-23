@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -71,6 +73,77 @@ func buildFakeClaude(t *testing.T) string {
 		t.Fatalf("build fake claude: %v\n%s", err, out)
 	}
 	return dir
+}
+
+// captureEmits builds an agent whose emitted session/update frames land in buf,
+// for testing event translation in isolation.
+func captureEmits(buf io.Writer) *acpAgent {
+	conn := acp.NewConn(strings.NewReader(""), buf)
+	return &acpAgent{conn: conn, sessionID: "sess-test", curMsgID: "msg-test"}
+}
+
+// collectUpdates parses the newline-delimited session/update frames in buf.
+func collectUpdates(t *testing.T, buf interface{ String() string }) []acp.ToolCall {
+	t.Helper()
+	var calls []acp.ToolCall
+	for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+		if line == "" {
+			continue
+		}
+		var f struct {
+			Params struct {
+				Update json.RawMessage `json:"update"`
+			} `json:"params"`
+		}
+		if json.Unmarshal([]byte(line), &f) != nil {
+			continue
+		}
+		if acp.UpdateKind(f.Params.Update) == acp.UpdateToolCall {
+			var tc acp.ToolCall
+			_ = json.Unmarshal(f.Params.Update, &tc)
+			calls = append(calls, tc)
+		}
+	}
+	return calls
+}
+
+func TestClaudeDriverToolCallTranslation(t *testing.T) {
+	var buf bytes.Buffer
+	a := captureEmits(&buf)
+	d := &claudeDriver{agent: a}
+	d.handle([]byte(`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"ls -la"}}]}}`))
+
+	calls := collectUpdates(t, &buf)
+	if len(calls) != 1 {
+		t.Fatalf("got %d tool calls, want 1", len(calls))
+	}
+	if calls[0].Kind != acp.ToolKindExecute {
+		t.Errorf("kind = %q, want %q", calls[0].Kind, acp.ToolKindExecute)
+	}
+	if calls[0].Title != "Bash: ls -la" {
+		t.Errorf("title = %q", calls[0].Title)
+	}
+	if calls[0].Status != acp.ToolStatusPending {
+		t.Errorf("status = %q", calls[0].Status)
+	}
+}
+
+func TestCodexEventToolCallTranslation(t *testing.T) {
+	var buf bytes.Buffer
+	a := captureEmits(&buf)
+	a.handleCodexEvent([]byte(`{"type":"item.completed","item":{"type":"command_execution","command":"go test ./..."}}`))
+	a.handleCodexEvent([]byte(`{"type":"item.completed","item":{"type":"web_search","query":"acp spec"}}`))
+
+	calls := collectUpdates(t, &buf)
+	if len(calls) != 2 {
+		t.Fatalf("got %d tool calls, want 2", len(calls))
+	}
+	if calls[0].Kind != acp.ToolKindExecute || calls[0].Title != "exec: go test ./..." {
+		t.Errorf("exec call = %+v", calls[0])
+	}
+	if calls[1].Kind != acp.ToolKindFetch || calls[1].Title != "search: acp spec" {
+		t.Errorf("search call = %+v", calls[1])
+	}
 }
 
 func TestACPAgentClaudeTurn(t *testing.T) {

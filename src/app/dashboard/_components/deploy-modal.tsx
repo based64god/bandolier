@@ -7,7 +7,10 @@ import {
   buildIssueUserMessage,
   issuePreviewBranch,
 } from "~/lib/issue-prompt";
+import { type EffortLevel, providerSupportsEffort } from "~/lib/effort";
 import { api } from "~/trpc/react";
+import { EffortPicker } from "./effort-picker";
+import { usePreferredEffort } from "./preferred-effort";
 import { usePreferredModel } from "./preferred-model";
 import { ProviderTag } from "./provider-tag";
 import { SearchableSelect } from "./searchable-select";
@@ -53,6 +56,8 @@ export function DeployModal({
   const [branch, setBranch] = useState(defaultBranch ?? "main");
   // Empty string means "use the default"; the effective model is derived below.
   const [model, setModel] = useState("");
+  // Empty string means "use the CLI default" reasoning effort.
+  const [effort, setEffort] = useState("");
   const [maxTurns, setMaxTurns] = useState("");
   // "" means no issue selected.
   const [issueNumber, setIssueNumber] = useState("");
@@ -90,6 +95,8 @@ export function DeployModal({
   // Per-browser preferred model. Used purely as a dashboard default; never sent
   // to the server, so webhook-spawned tasks are unaffected.
   const [preferredModel, setPreferredModel] = usePreferredModel();
+  // Per-browser preferred reasoning effort — same dashboard-only role.
+  const [preferredEffort, setPreferredEffort] = usePreferredEffort();
 
   const hasIssue = issueNumber !== "";
   const selectedIssue = hasIssue
@@ -108,6 +115,16 @@ export function DeployModal({
   const effectiveModel = model || defaultModel;
   const selectedModel = models.find((m) => m.id === effectiveModel) ?? null;
   const isPreferred = !!effectiveModel && effectiveModel === preferredModel;
+
+  // Reasoning effort only applies to Claude models (Anthropic / Bedrock). Hide
+  // the picker for OpenAI/Gemini and never send a value for them. Default to the
+  // browser's preferred effort; "" means the CLI default.
+  const effortSupported = selectedModel
+    ? providerSupportsEffort(selectedModel.provider)
+    : false;
+  const effectiveEffort = effort || preferredEffort;
+  const isPreferredEffort =
+    !!effectiveEffort && effectiveEffort === preferredEffort;
 
   const utils = api.useUtils();
   const deploy = api.agents.deploy.useMutation({
@@ -147,6 +164,10 @@ export function DeployModal({
       branch,
       model: effectiveModel,
       modelProvider: selectedModel?.provider,
+      effort:
+        effortSupported && effectiveEffort
+          ? (effectiveEffort as EffortLevel)
+          : undefined,
       maxTurns: maxTurns ? parseInt(maxTurns, 10) : undefined,
       issueNumber: hasIssue ? parseInt(issueNumber, 10) : undefined,
       interactive: interactive || undefined,
@@ -422,6 +443,20 @@ export function DeployModal({
               Webhook-triggered tasks aren&rsquo;t affected.
             </p>
           </div>
+
+          {/* Reasoning effort — Claude models only (Anthropic / Bedrock). Hidden
+              for OpenAI/Gemini, whose CLIs don't take an effort level. */}
+          {effortSupported && (
+            <EffortPicker
+              value={effectiveEffort}
+              onChange={setEffort}
+              preferred
+              isPreferred={isPreferredEffort}
+              onTogglePreferred={(next) =>
+                setPreferredEffort(next ? effectiveEffort : "")
+              }
+            />
+          )}
 
           {/* Repo + Branch */}
           <div className="grid grid-cols-3 gap-3">

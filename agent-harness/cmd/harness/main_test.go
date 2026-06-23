@@ -631,3 +631,23 @@ func TestDetectProvider(t *testing.T) {
 		t.Errorf("AWS keys take precedence → %v, want providerBedrock", got)
 	}
 }
+
+func TestNormalizeEffort(t *testing.T) {
+	for _, level := range []string{"low", "medium", "high", "xhigh", "max"} {
+		if got := normalizeEffort(level); got != level {
+			t.Errorf("normalizeEffort(%q) = %q, want %q", level, got, level)
+		}
+	}
+
+	// Case-insensitive and trimmed.
+	if got := normalizeEffort("  HIGH "); got != "high" {
+		t.Errorf("normalizeEffort(\"  HIGH \") = %q, want \"high\"", got)
+	}
+
+	// Unknown values drop to empty so the CLI default is used.
+	for _, bad := range []string{"", "turbo", "highest", "1"} {
+		if got := normalizeEffort(bad); got != "" {
+			t.Errorf("normalizeEffort(%q) = %q, want \"\"", bad, got)
+		}
+	}
+}

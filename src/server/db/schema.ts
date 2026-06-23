@@ -197,6 +197,11 @@ export const repoWebhookConfig = pgTable("repo_webhook_config", {
   // Null = fall back to the provider's default. An issue's `model:<query>` label
   // overrides this per issue.
   defaultWebhookModel: text("default_webhook_model"),
+  // Optional default reasoning-effort level for webhook-triggered agents on Claude
+  // models (low|medium|high|xhigh|max). Null = the harness/CLI default. An issue's
+  // `effort:<level>` label overrides this per issue. Ignored for non-Claude
+  // providers (OpenAI/Gemini), whose CLIs don't take an effort flag.
+  defaultWebhookEffort: text("default_webhook_effort"),
   // Optional repo-attached system prompt: a blanket instruction appended to the
   // system prompt of every agent run for this repo (dashboard, issue, and
   // webhook; all providers and modes), letting admins set repo-wide guidance —

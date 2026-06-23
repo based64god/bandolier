@@ -12,6 +12,12 @@ export interface RepoWebhookConfig {
   /** Default model id for webhook-triggered agents; null means provider default. */
   defaultWebhookModel: string | null;
   /**
+   * Default reasoning-effort level for webhook-triggered Claude agents
+   * (low|medium|high|xhigh|max); null means the CLI default. Ignored for
+   * non-Claude providers. An issue's `effort:<level>` label overrides it.
+   */
+  defaultWebhookEffort: string | null;
+  /**
    * Repo-attached system prompt appended to every agent run for this repo; null
    * means no repo-wide prompt. See `getRepoSystemPrompt` for the loader callers
    * use on the deploy/webhook paths.
@@ -102,6 +108,7 @@ export async function getRepoWebhookConfig(
       prefix: repoWebhookConfig.prefix,
       agentImage: repoWebhookConfig.agentImage,
       defaultWebhookModel: repoWebhookConfig.defaultWebhookModel,
+      defaultWebhookEffort: repoWebhookConfig.defaultWebhookEffort,
       systemPrompt: repoWebhookConfig.systemPrompt,
       allowPrivateEgress: repoWebhookConfig.allowPrivateEgress,
       allowAllPortsEgress: repoWebhookConfig.allowAllPortsEgress,
@@ -114,6 +121,7 @@ export async function getRepoWebhookConfig(
     prefix: row.prefix ?? null,
     agentImage: row.agentImage ?? null,
     defaultWebhookModel: row.defaultWebhookModel ?? null,
+    defaultWebhookEffort: row.defaultWebhookEffort ?? null,
     systemPrompt: row.systemPrompt ?? null,
     networkPolicy: {
       allowPrivateEgress: row.allowPrivateEgress,

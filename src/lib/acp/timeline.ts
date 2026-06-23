@@ -6,7 +6,12 @@ export type TimelineItem =
   | {
       type: "message";
       role: "user" | "assistant";
+      // Always-unique React key. NOT the messageId — the agent reuses one
+      // messageId for a whole turn, so several bubbles can share it.
       id: string;
+      // Set on assistant bubbles, for coalescing consecutive chunks of the same
+      // message. Undefined for user bubbles.
+      messageId?: string;
       text: string;
     }
   | {
@@ -66,16 +71,26 @@ export function applyFrames(
       case "agent_message_chunk": {
         const text = u.content?.text ?? "";
         if (!text) break;
-        const id = u.messageId ?? `a-${f.seq}`;
         const last = items[items.length - 1];
+        // Coalesce only with the immediately-preceding bubble of the same
+        // message. A tool call (or a new messageId) starts a fresh bubble — and
+        // it gets its own unique `id`, since chunks split by a tool call share a
+        // messageId and reusing it as the React key collides.
         if (
+          u.messageId &&
           last?.type === "message" &&
           last.role === "assistant" &&
-          last.id === id
+          last.messageId === u.messageId
         ) {
           items[items.length - 1] = { ...last, text: last.text + text };
         } else {
-          items.push({ type: "message", role: "assistant", id, text });
+          items.push({
+            type: "message",
+            role: "assistant",
+            id: `a-${f.seq}`,
+            messageId: u.messageId,
+            text,
+          });
         }
         break;
       }

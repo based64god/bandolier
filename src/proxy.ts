@@ -4,6 +4,9 @@ import { GATE_COOKIE, gateToken, timingSafeEqual } from "~/lib/gate";
 
 // Paths reachable without passing the gate:
 //  - the GitHub webhook (authenticates via HMAC signature; GitHub can't log in)
+//  - the harness callbacks — run output ingest, interactive input, and the ACP
+//    relay — which authenticate via a per-job HMAC token (the in-pod harness has
+//    no session/password to present)
 //  - the public REST API (authenticates via API key or session of its own)
 //  - the version endpoint (just a build id; clients poll it to detect deploys)
 //  - the gate page + its submit endpoint
@@ -18,6 +21,7 @@ function isExempt(pathname: string): boolean {
     pathname.startsWith("/api/v1/") ||
     pathname === "/api/agent-runs" ||
     pathname === "/api/agent-input" ||
+    pathname === "/api/acp" ||
     pathname === "/api/version" ||
     pathname === "/setup.sh" ||
     pathname === "/gate" ||

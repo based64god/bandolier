@@ -1,7 +1,8 @@
 name: CI
 
-# Lint, type-check, and test the web app (TypeScript) and the agent harness
-# (Go) on every push to the default branch and every pull request.
+# Lint, type-check, unit-test, and browser-smoke-test the web app (TypeScript)
+# and vet/test the agent harness (Go) on every push to the default branch and
+# every pull request — so the same checks gate merges and re-run on main.
 on:
   push:
     branches: [main]
@@ -59,6 +60,44 @@ jobs:
           path: coverage/
           if-no-files-found: ignore
 
+  e2e:
+    name: Browser smoke tests (playwright)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.10.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The e2e specs drive a real browser; fetch the matching Chromium plus its
+      # system libraries. Keyed off the pinned `playwright` devDependency.
+      - name: Install Playwright browser
+        run: pnpm exec playwright install --with-deps chromium
+
+      # e2e/run.mjs boots `next dev`, waits for the /dev/* routes, then runs each
+      # e2e/*.spec.mjs against it. The routes contact no real services, so inert
+      # placeholders satisfy env.js validation at import time.
+      - name: Run browser smoke tests
+        run: pnpm test:e2e
+        env:
+          BETTER_AUTH_URL: http://localhost:3137
+          BETTER_AUTH_SECRET: ci
+          BETTER_AUTH_GITHUB_CLIENT_ID: ci
+          BETTER_AUTH_GITHUB_CLIENT_SECRET: ci
+          DATABASE_URL: postgres://ci:ci@localhost:5432/ci
+
   harness:
     name: Agent harness (vet · test)
     runs-on: ubuntu-latest
@@ -97,7 +136,7 @@ jobs:
     # branch — never on pull requests, where DATABASE_URL is unavailable and a
     # migration would be premature.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: web
+    needs: [web, e2e]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

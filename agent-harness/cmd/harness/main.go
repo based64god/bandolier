@@ -1327,10 +1327,11 @@ type claudeEvent struct {
 	IsError  bool   `json:"is_error"`
 	Message  struct {
 		Content []struct {
-			Type  string          `json:"type"`
-			Text  string          `json:"text"`
-			Name  string          `json:"name"`
-			Input json.RawMessage `json:"input"`
+			Type     string          `json:"type"`
+			Text     string          `json:"text"`
+			Thinking string          `json:"thinking"`
+			Name     string          `json:"name"`
+			Input    json.RawMessage `json:"input"`
 		} `json:"content"`
 	} `json:"message"`
 }
@@ -2087,6 +2088,16 @@ func isResultEvent(raw []byte) bool {
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 func main() {
+	// `harness acp-agent` runs the ACP agent server: it speaks JSON-RPC on
+	// stdin/stdout, so it must claim the process before the normal harness
+	// logging setup tees diagnostics onto stdout.
+	if len(os.Args) > 1 && os.Args[1] == "acp-agent" {
+		if err := runACPAgent(); err != nil {
+			log.Fatalf("acp-agent: %v", err)
+		}
+		return
+	}
+
 	log.SetFlags(log.Ltime)
 	// Mirror all pod-log output into the transcript so it can be persisted.
 	log.SetOutput(io.MultiWriter(os.Stderr, transcript))

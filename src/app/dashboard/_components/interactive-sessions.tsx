@@ -266,9 +266,9 @@ export function InteractiveRow({
               }
               disabled={terminate.isPending}
               aria-label="Terminate agent"
-              className="rounded p-1 text-red-500/50 hover:bg-red-500/10 hover:text-red-400 disabled:opacity-40"
+              className="rounded p-1 text-red-500 hover:bg-red-500/10 hover:text-red-300 disabled:opacity-40"
             >
-              <svg viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4">
+              <svg viewBox="0 0 16 16" fill="currentColor" className="h-5 w-5">
                 <path d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.75.75 0 1 1 1.06 1.06L9.06 8l3.22 3.22a.75.75 0 1 1-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 0 1-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06Z" />
               </svg>
             </button>

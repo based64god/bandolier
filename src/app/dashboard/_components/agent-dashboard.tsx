@@ -239,15 +239,19 @@ export function AgentDashboard({
   // screens (thumb-friendly for phones) but moves to the horizontal centre of
   // the bar on large viewports, where a centred target better matches how
   // people drive a desktop. The button markup is shared between both slots.
-  const deployButton = (
-    <button
-      onClick={() => setShowDeploy(true)}
-      disabled={!selectedRepo || !kubeConfigured}
-      className="rounded-lg bg-purple-600 px-3 py-1.5 text-sm font-medium text-black hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-40"
-    >
-      +<span className="hidden sm:inline"> Deploy Agent</span>
-    </button>
-  );
+  //
+  // It only has any meaning once a repo is selected and a kubeconfig is
+  // present, so rather than showing a greyed-out, unclickable button we omit it
+  // entirely until both are true. `null` here collapses both slots cleanly.
+  const deployButton =
+    selectedRepo && kubeConfigured ? (
+      <button
+        onClick={() => setShowDeploy(true)}
+        className="rounded-lg bg-purple-600 px-3 py-1.5 text-sm font-medium text-black hover:bg-purple-500"
+      >
+        +<span className="hidden sm:inline"> Deploy Agent</span>
+      </button>
+    ) : null;
 
   return (
     <div className="flex min-h-screen flex-col bg-black text-white">

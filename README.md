@@ -242,16 +242,9 @@ configuration modal (Network policy egress). Both toggles are **off by default**
 
 ### Run artifacts (optional)
 
-Setting `ARTIFACTS_S3_BUCKET` enables uploading each run's full transcript to S3 so it survives the Job's one-week TTL.
+Each run's full transcript can be uploaded to S3 so it survives the Job's one-week TTL. Storage is configured **per repository** in the repo-config modal (admin-only, under Shared credentials → Run artifact storage): the repo names an S3 bucket it owns (AWS or any S3-compatible endpoint such as MinIO) plus credentials scoped to it. There is deliberately no server-wide bucket — run data belongs to the repo, never the Bandolier operator — so runs for repos without a configured bucket (and runs with no repo) simply aren't persisted. The credentials stay server-side; they are never injected into agent pods.
 
 This is independent of a run's **structured output** (the PR or issue URL), which is always persisted: the harness reports it to the app on completion and it's recorded on the run row, so a finished run's output stays recoverable from the database even when S3 isn't configured and the pod's logs are gone.
-
-| Variable                                                          | Default     | Description                                                            |
-| ----------------------------------------------------------------- | ----------- | ---------------------------------------------------------------------- |
-| `ARTIFACTS_S3_BUCKET`                                             | _(unset)_   | Enables artifact persistence when set.                                 |
-| `ARTIFACTS_S3_REGION`                                             | `us-east-1` | Bucket region.                                                         |
-| `ARTIFACTS_S3_ENDPOINT`                                           | _(unset)_   | Custom endpoint for MinIO / S3-compatible stores.                      |
-| `ARTIFACTS_AWS_ACCESS_KEY_ID` / `ARTIFACTS_AWS_SECRET_ACCESS_KEY` | _(unset)_   | Explicit S3 credentials; falls back to the default AWS provider chain. |
 
 ---
 

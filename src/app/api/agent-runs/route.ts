@@ -4,8 +4,8 @@ import { type NextRequest, NextResponse } from "next/server";
 import { env } from "~/env";
 import { verifyIngestToken } from "~/lib/ingest";
 import {
-  artifactsEnabled,
   putArtifact,
+  resolveArtifactStore,
   transcriptKey,
 } from "~/server/agents/artifacts";
 import { db } from "~/server/db";
@@ -14,7 +14,8 @@ import { taskRun } from "~/server/db/schema";
 // Harness callback: receives a finished run's structured output (its PR/issue
 // URL) and rendered transcript. The output is always recorded on the run row so
 // it survives the pod's logs; the transcript is additionally stored in object
-// storage when a bucket is configured. Authenticated by a per-job HMAC token
+// storage when the run's repo has configured its own artifact bucket (the only
+// store — the repo owns its run data). Authenticated by a per-job HMAC token
 // (the harness can't hold a session), not the password gate.
 //
 // Persisting the output is the primary, unconditional job here. Pod logs are the
@@ -36,18 +37,28 @@ export async function POST(req: NextRequest) {
 
   const transcript = await req.text();
 
+  // The run row names the repo, which decides where its transcript lives. A
+  // pruned row (or a repo-less run) means no store, so no upload.
+  const [run] = await db
+    .select({ repoFullName: taskRun.repoFullName })
+    .from(taskRun)
+    .where(eq(taskRun.jobName, jobName))
+    .limit(1);
+
   // Store the transcript in object storage when configured. Failure here is
   // logged but must not abort the request: the output persistence below is the
   // part that protects against log loss, so it has to happen regardless.
   let key: string | null = null;
-  if (artifactsEnabled()) {
+  const store = await resolveArtifactStore(db, run?.repoFullName ?? null);
+  if (store) {
     const candidate = transcriptKey(jobName);
     try {
-      await putArtifact(candidate, transcript);
+      await putArtifact(store, candidate, transcript);
       key = candidate;
     } catch (err) {
       console.error("[bandolier:ingest] upload failed", {
         job: jobName,
+        bucket: store.bucket,
         error: err instanceof Error ? err.message : String(err),
       });
     }

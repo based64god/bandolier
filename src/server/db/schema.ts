@@ -238,6 +238,21 @@ export const repoWebhookConfig = pgTable("repo_webhook_config", {
   preferRepoCredentials: boolean("prefer_repo_credentials")
     .notNull()
     .default(false),
+  // ── Run artifact storage (admin-only) ─────────────────────────────────────
+  // Repo-owned object storage for persisted run artifacts (transcripts now;
+  // historical context later). This is the only artifact store — there is
+  // deliberately no server-wide bucket — so the repo, not the Bandolier
+  // operator, owns its run data; runs for repos without one (and repo-less
+  // runs) simply aren't persisted. Credentials are dedicated to the artifact
+  // store on purpose: they're server-side only (never injected into agent
+  // pods, unlike the Bedrock credentials above) and should be scoped to just
+  // this bucket.
+  artifactsS3Bucket: text("artifacts_s3_bucket"),
+  artifactsS3Region: text("artifacts_s3_region"),
+  // Custom endpoint for MinIO / S3-compatible stores; null = AWS S3.
+  artifactsS3Endpoint: text("artifacts_s3_endpoint"),
+  artifactsAccessKeyId: text("artifacts_access_key_id"),
+  artifactsSecretAccessKey: text("artifacts_secret_access_key"),
   // ── Network policy egress toggles (admin-only) ─────────────────────────────
   // Per-repo loosenings of the default agent NetworkPolicy egress rules. Each
   // widens what this repo's agent pods can reach and is OFF by default, keeping

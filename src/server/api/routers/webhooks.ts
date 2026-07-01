@@ -8,6 +8,7 @@ import {
   summarizeGeminiCredentials,
   validateGeminiCredentials,
 } from "~/server/agents/gemini";
+import { validateArtifactStore } from "~/server/agents/artifacts";
 import { getUserGithubToken } from "~/server/agents/github-token";
 import { validateOpenaiKey } from "~/server/agents/openai";
 import { validateKubeconfig } from "~/server/agents/kubeconfig";
@@ -234,6 +235,10 @@ export const webhooksRouter = createTRPCRouter({
           awsSessionToken: repoWebhookConfig.awsSessionToken,
           awsRegion: repoWebhookConfig.awsRegion,
           preferRepoCredentials: repoWebhookConfig.preferRepoCredentials,
+          artifactsS3Bucket: repoWebhookConfig.artifactsS3Bucket,
+          artifactsS3Region: repoWebhookConfig.artifactsS3Region,
+          artifactsS3Endpoint: repoWebhookConfig.artifactsS3Endpoint,
+          artifactsAccessKeyId: repoWebhookConfig.artifactsAccessKeyId,
         })
         .from(repoWebhookConfig)
         .where(eq(repoWebhookConfig.repoFullName, input.repoFullName))
@@ -268,6 +273,17 @@ export const webhooksRouter = createTRPCRouter({
             }
           : { configured: false as const },
         preferRepoCredentials: row?.preferRepoCredentials ?? false,
+        artifacts: row?.artifactsS3Bucket
+          ? {
+              configured: true as const,
+              bucket: row.artifactsS3Bucket,
+              region: row.artifactsS3Region ?? "us-east-1",
+              endpoint: row.artifactsS3Endpoint,
+              accessKeyIdMasked: row.artifactsAccessKeyId
+                ? maskKey(row.artifactsAccessKeyId)
+                : null,
+            }
+          : { configured: false as const },
       };
     }),
 
@@ -469,6 +485,76 @@ export const webhooksRouter = createTRPCRouter({
           awsSecretAccessKey: null,
           awsSessionToken: null,
           awsRegion: null,
+          configuredBy: ctx.session.user.id,
+          updatedAt: new Date(),
+        })
+        .where(eq(repoWebhookConfig.repoFullName, input.repoFullName));
+      return { success: true };
+    }),
+
+  // Validate then store the repo's run-artifact store (an S3 bucket the repo
+  // owns). This is the only place run transcripts (and, later, historical
+  // context) can be persisted — there is deliberately no server-wide bucket —
+  // so run data always lands in storage the repo controls. Credentials are
+  // required — the server has no business reaching a repo-owned bucket through
+  // its own ambient credentials — and should be scoped to just this bucket.
+  // They stay server-side; they are never injected into agent pods.
+  setArtifacts: protectedProcedure
+    .input(
+      z.object({
+        repoFullName: z.string().min(1),
+        bucket: z.string().trim().min(1),
+        region: z.string().trim().min(1).default("us-east-1"),
+        // Custom endpoint for MinIO / S3-compatible stores; blank = AWS S3.
+        endpoint: z.string().trim().optional(),
+        accessKeyId: z.string().trim().min(1),
+        secretAccessKey: z.string().trim().min(1),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await requireRepoAdmin(ctx, input.repoFullName);
+      // Blank endpoint means AWS S3 proper, not an empty custom endpoint.
+      const endpoint = input.endpoint === "" ? undefined : input.endpoint;
+      const validation = await validateArtifactStore({
+        bucket: input.bucket,
+        region: input.region,
+        endpoint,
+        credentials: {
+          accessKeyId: input.accessKeyId,
+          secretAccessKey: input.secretAccessKey,
+        },
+      });
+      if (!validation.valid) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: validation.error ?? "Artifact storage is unreachable.",
+        });
+      }
+      await upsertRepoConfig(ctx.db, input.repoFullName, ctx.session.user.id, {
+        artifactsS3Bucket: input.bucket,
+        artifactsS3Region: input.region,
+        artifactsS3Endpoint: endpoint ?? null,
+        artifactsAccessKeyId: input.accessKeyId,
+        artifactsSecretAccessKey: input.secretAccessKey,
+      });
+      return { valid: true as const };
+    }),
+
+  // Clear the repo's artifact store. Already-uploaded artifacts stay in the
+  // repo's bucket (they're the repo's data); future runs are simply not
+  // persisted until a new bucket is configured.
+  deleteArtifacts: protectedProcedure
+    .input(z.object({ repoFullName: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      await requireRepoAdmin(ctx, input.repoFullName);
+      await ctx.db
+        .update(repoWebhookConfig)
+        .set({
+          artifactsS3Bucket: null,
+          artifactsS3Region: null,
+          artifactsS3Endpoint: null,
+          artifactsAccessKeyId: null,
+          artifactsSecretAccessKey: null,
           configuredBy: ctx.session.user.id,
           updatedAt: new Date(),
         })

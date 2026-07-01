@@ -403,6 +403,154 @@ function RepoAwsSection({
   );
 }
 
+// The S3 bucket this repo's run artifacts (transcripts; historical context
+// later) are stored in. Repo-owned and the only artifact store — there is
+// deliberately no server-wide bucket — so the repo, not the Bandolier
+// operator, owns its run data; without one, this repo's runs aren't persisted.
+// Credentials stay server-side and are never injected into agent pods.
+function RepoArtifactsSection({
+  repoFullName,
+  status,
+}: {
+  repoFullName: string;
+  status?: {
+    configured: boolean;
+    bucket?: string;
+    region?: string;
+    endpoint?: string | null;
+    accessKeyIdMasked?: string | null;
+  };
+}) {
+  const utils = api.useUtils();
+  const [bucket, setBucket] = useState("");
+  const [region, setRegion] = useState("us-east-1");
+  const [endpoint, setEndpoint] = useState("");
+  const [accessKeyId, setAccessKeyId] = useState("");
+  const [secretAccessKey, setSecretAccessKey] = useState("");
+  const [result, setResult] = useState<string | null>(null);
+
+  const save = api.webhooks.setArtifacts.useMutation({
+    onSuccess: () => {
+      void utils.webhooks.getCredentials.invalidate({ repoFullName });
+      setBucket("");
+      setEndpoint("");
+      setAccessKeyId("");
+      setSecretAccessKey("");
+      setResult("Saved and verified ✓");
+    },
+  });
+  const remove = api.webhooks.deleteArtifacts.useMutation({
+    onSuccess: () => {
+      void utils.webhooks.getCredentials.invalidate({ repoFullName });
+      setResult(null);
+    },
+  });
+
+  return (
+    <div className="space-y-2">
+      <h4 className="text-xs font-semibold text-emerald-300">
+        Run artifact storage (S3)
+      </h4>
+      <p className="text-xs text-white/40">
+        A bucket this repo owns for persisted run transcripts (and historical
+        context, later). Without one, this repo&apos;s run transcripts are not
+        persisted and vanish with the pod. Use credentials scoped to just this
+        bucket — they stay on the server and are never given to agents.
+      </p>
+      {status?.configured ? (
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm">
+          <div className="min-w-0">
+            <div className="truncate">
+              <code className="text-emerald-300">{status.bucket}</code>
+              <span className="ml-2 text-white/40">{status.region}</span>
+            </div>
+            <div className="truncate text-xs text-white/40">
+              {status.endpoint && (
+                <span className="mr-2">{status.endpoint}</span>
+              )}
+              {status.accessKeyIdMasked && (
+                <code>{status.accessKeyIdMasked}</code>
+              )}
+            </div>
+          </div>
+          <button
+            onClick={() => remove.mutate({ repoFullName })}
+            disabled={remove.isPending}
+            className="shrink-0 rounded bg-red-500/10 px-2 py-1 text-xs text-red-400 hover:bg-red-500/20 disabled:opacity-50"
+          >
+            Remove
+          </button>
+        </div>
+      ) : (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            setResult(null);
+            save.mutate({
+              repoFullName,
+              bucket,
+              region,
+              endpoint: endpoint || undefined,
+              accessKeyId,
+              secretAccessKey,
+            });
+          }}
+          className="space-y-2"
+        >
+          <div className="flex gap-2">
+            <input
+              required
+              value={bucket}
+              onChange={(e) => setBucket(e.target.value)}
+              placeholder="Bucket name"
+              className="flex-1 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 focus:border-emerald-500/50 focus:outline-none"
+            />
+            <input
+              value={region}
+              onChange={(e) => setRegion(e.target.value)}
+              placeholder="Region"
+              className="w-40 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 focus:border-emerald-500/50 focus:outline-none"
+            />
+          </div>
+          <input
+            value={endpoint}
+            onChange={(e) => setEndpoint(e.target.value)}
+            placeholder="Custom endpoint for MinIO / S3-compatible (optional)"
+            className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 focus:border-emerald-500/50 focus:outline-none"
+          />
+          <input
+            required
+            value={accessKeyId}
+            onChange={(e) => setAccessKeyId(e.target.value)}
+            placeholder="Access Key ID"
+            className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 focus:border-emerald-500/50 focus:outline-none"
+          />
+          <input
+            required
+            type="password"
+            value={secretAccessKey}
+            onChange={(e) => setSecretAccessKey(e.target.value)}
+            placeholder="Secret Access Key"
+            className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 focus:border-emerald-500/50 focus:outline-none"
+          />
+          <div className="flex justify-end">
+            <button
+              type="submit"
+              disabled={
+                save.isPending || !bucket || !accessKeyId || !secretAccessKey
+              }
+              className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-black hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {save.isPending ? "Verifying…" : "Save & verify"}
+            </button>
+          </div>
+        </form>
+      )}
+      <CredFeedback error={save.error?.message} ok={result} />
+    </div>
+  );
+}
+
 // Kubeconfig shared by everyone working on this repo — the cluster its agents
 // run on.
 function RepoKubeconfigSection({
@@ -672,6 +820,10 @@ function RepoCredentialsSection({ repoFullName }: { repoFullName: string }) {
             status={creds?.gemini}
           />
           <RepoAwsSection repoFullName={repoFullName} status={creds?.aws} />
+          <RepoArtifactsSection
+            repoFullName={repoFullName}
+            status={creds?.artifacts}
+          />
 
           {/* Prefer user vs repo credentials. */}
           <div className="space-y-2 rounded-lg border border-white/10 bg-white/[0.03] p-3">
@@ -756,7 +908,8 @@ function RepoNetworkPolicySection({ repoFullName }: { repoFullName: string }) {
           <code className="rounded bg-white/10 px-1 text-white/60">
             AGENT_NETWORK_POLICY
           </code>{" "}
-          is enabled and the cluster runs a policy-enforcing CNI (Calico/Cilium).
+          is enabled and the cluster runs a policy-enforcing CNI
+          (Calico/Cilium).
         </p>
       </div>
 
@@ -767,14 +920,14 @@ function RepoNetworkPolicySection({ repoFullName }: { repoFullName: string }) {
         </span>
         <p className="text-xs text-amber-200/90">
           <span className="font-semibold">
-            Loosening egress weakens agent isolation — enable only when you trust
-            the workloads this repo runs.
+            Loosening egress weakens agent isolation — enable only when you
+            trust the workloads this repo runs.
           </span>{" "}
           Agents run model-generated code with your credentials. Allowing
           in-cluster egress opens lateral movement to other pods and internal
           services; allowing all ports widens what an agent can connect to and
-          exfiltrate over. Leave these off unless a specific task needs them, and
-          turn them back off when it&apos;s done.
+          exfiltrate over. Leave these off unless a specific task needs them,
+          and turn them back off when it&apos;s done.
         </p>
       </div>
 

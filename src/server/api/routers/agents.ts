@@ -6,7 +6,7 @@ import { and, asc, eq, gt, inArray } from "drizzle-orm";
 import { z } from "zod";
 
 import { env } from "~/env";
-import { getArtifact } from "~/server/agents/artifacts";
+import { getArtifact, resolveArtifactStore } from "~/server/agents/artifacts";
 import { validateAwsCredentials } from "~/server/agents/aws";
 import {
   getGithubItemState,
@@ -838,15 +838,23 @@ export const agentsRouter = createTRPCRouter({
       const jobName = input.jobName;
       if (jobName) {
         const [run] = await ctx.db
-          .select({ transcriptKey: taskRun.transcriptKey })
+          .select({
+            transcriptKey: taskRun.transcriptKey,
+            repoFullName: taskRun.repoFullName,
+          })
           .from(taskRun)
           .where(
             and(eq(taskRun.jobName, jobName), eq(taskRun.spawnedBy, userId)),
           )
           .limit(1);
         if (run?.transcriptKey) {
-          const transcript = await getArtifact(run.transcriptKey);
-          if (transcript !== null) return transcript;
+          // Resolve the same store the ingest path wrote to: the run's repo
+          // bucket (the only store — no server-wide fallback exists).
+          const store = await resolveArtifactStore(ctx.db, run.repoFullName);
+          if (store) {
+            const transcript = await getArtifact(store, run.transcriptKey);
+            if (transcript !== null) return transcript;
+          }
         }
       }
       throw new TRPCError({

@@ -54,14 +54,6 @@ export const env = createEnv({
     // set, visitors must enter it before reaching anything (the GitHub webhook
     // is exempt — it authenticates via signature). Unset = gate disabled.
     APP_PASSWORD: z.string().optional(),
-    // Object storage for persisted run artifacts (transcripts now; workspaces
-    // later). Persistence is enabled only when a bucket is set. Credentials fall
-    // back to the default AWS provider chain when the explicit pair is unset.
-    ARTIFACTS_S3_BUCKET: z.string().optional(),
-    ARTIFACTS_S3_REGION: z.string().default("us-east-1"),
-    ARTIFACTS_S3_ENDPOINT: z.string().optional(), // for MinIO / S3-compatible
-    ARTIFACTS_AWS_ACCESS_KEY_ID: z.string().optional(),
-    ARTIFACTS_AWS_SECRET_ACCESS_KEY: z.string().optional(),
   },
 
   /**
@@ -98,12 +90,6 @@ export const env = createEnv({
     GITHUB_APP_CLIENT_ID: process.env.GITHUB_APP_CLIENT_ID,
     GITHUB_APP_CLIENT_SECRET: process.env.GITHUB_APP_CLIENT_SECRET,
     APP_PASSWORD: process.env.APP_PASSWORD,
-    ARTIFACTS_S3_BUCKET: process.env.ARTIFACTS_S3_BUCKET,
-    ARTIFACTS_S3_REGION: process.env.ARTIFACTS_S3_REGION,
-    ARTIFACTS_S3_ENDPOINT: process.env.ARTIFACTS_S3_ENDPOINT,
-    ARTIFACTS_AWS_ACCESS_KEY_ID: process.env.ARTIFACTS_AWS_ACCESS_KEY_ID,
-    ARTIFACTS_AWS_SECRET_ACCESS_KEY:
-      process.env.ARTIFACTS_AWS_SECRET_ACCESS_KEY,
     NEXT_PUBLIC_GITHUB_APP_SLUG: process.env.NEXT_PUBLIC_GITHUB_APP_SLUG,
   },
   /**

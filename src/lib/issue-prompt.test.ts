@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildIssueSystemPrompt,
   buildIssueUserMessage,
+  buildResumeSystemPrompt,
+  buildResumeUserMessage,
   issuePreviewBranch,
   makeIssueBranch,
 } from "~/lib/issue-prompt";
@@ -90,5 +92,47 @@ describe("buildIssueUserMessage", () => {
   it("omits the operator-context section when context is blank", () => {
     const message = buildIssueUserMessage(issue, "   ");
     expect(message).not.toContain("Additional context from the operator");
+  });
+});
+
+describe("buildResumeSystemPrompt", () => {
+  it("frames a continued branch as carrying the parent's work and open PR", () => {
+    const prompt = buildResumeSystemPrompt("issue-5-fix-abc123", true);
+    expect(prompt).toContain('You are on branch "issue-5-fix-abc123"');
+    expect(prompt).toContain("already contains the previous run's commits");
+    expect(prompt).toContain("existing pull request");
+    expect(prompt).toContain("Do NOT push");
+  });
+
+  it("frames a fresh branch like a normal run", () => {
+    const prompt = buildResumeSystemPrompt("issue-5-fix-abc123", false);
+    expect(prompt).toContain('a fresh branch "issue-5-fix-abc123"');
+    expect(prompt).not.toContain("existing pull request");
+  });
+});
+
+describe("buildResumeUserMessage", () => {
+  it("carries the item reference, commenter, and comment", () => {
+    const message = buildResumeUserMessage({
+      kind: "pull request",
+      number: 42,
+      title: "Add login",
+      commenter: "octocat",
+      comment: "Please also handle logout.",
+    });
+    expect(message).toContain("## Follow-up on pull request #42: Add login");
+    expect(message).toContain("@octocat commented:");
+    expect(message).toContain("Please also handle logout.");
+  });
+
+  it("uses a placeholder for an empty comment", () => {
+    const message = buildResumeUserMessage({
+      kind: "issue",
+      number: 1,
+      title: "Bug",
+      commenter: "octocat",
+      comment: "   ",
+    });
+    expect(message).toContain("(empty comment)");
   });
 });

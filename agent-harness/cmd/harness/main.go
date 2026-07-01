@@ -117,6 +117,80 @@ func uploadTranscript() {
 	log.Printf("[harness] transcript persisted (%d bytes)", len(body))
 }
 
+// maxParentContextBytes caps how much of the parent run's transcript is folded
+// into a resumed run's prompt. The tail is kept — it holds the parent's final
+// state and conclusions — and the cap keeps the assembled prompt well under the
+// kernel's per-argument exec limit (~128 KiB), since the task is passed to the
+// agent CLI as a single argv element.
+const maxParentContextBytes = 100_000
+
+// fetchParentContext downloads the parent run's persisted transcript from
+// Bandolier's context endpoint (set only for resumed runs), authenticated with
+// the same per-job token as the ingest callback. Returns "" when there is no
+// context to be had — no endpoint configured, no parent transcript persisted,
+// or any error — because a resume must still run without it.
+func fetchParentContext(ctx context.Context, cfg config) string {
+	url := cfg.contextURL
+	token := os.Getenv("BANDOLIER_INGEST_TOKEN")
+	job := os.Getenv("BANDOLIER_JOB")
+	if url == "" || token == "" || job == "" {
+		return ""
+	}
+
+	reqCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, url, nil)
+	if err != nil {
+		log.Printf("[harness] warn: parent context request: %v", err)
+		return ""
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-Bandolier-Job", job)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		log.Printf("[harness] warn: parent context fetch failed: %v", err)
+		return ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("[harness] no parent context available (status %d)", resp.StatusCode)
+		return ""
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
+	if err != nil {
+		log.Printf("[harness] warn: parent context read failed: %v", err)
+		return ""
+	}
+	return string(body)
+}
+
+// withParentContext folds the parent run's transcript into the task so the
+// resumed agent starts with the full context of the run it continues. When the
+// transcript exceeds the cap, the head is dropped (the tail carries the
+// parent's final state) and the truncation is called out in place.
+func withParentContext(task, transcript string) string {
+	transcript = strings.TrimSpace(transcript)
+	if transcript == "" {
+		return task
+	}
+	if len(transcript) > maxParentContextBytes {
+		cut := len(transcript) - maxParentContextBytes
+		transcript = "…(earlier transcript truncated)…\n" + transcript[cut:]
+	}
+	return fmt.Sprintf(`## Context from the parent run
+
+This task resumes a previous agent run. That run's transcript follows between the markers — use it to understand what was already done, and why, before acting on the follow-up request.
+
+<parent-run-transcript>
+%s
+</parent-run-transcript>
+
+## Follow-up request
+
+%s`, transcript, task)
+}
+
 // ── Provider detection ────────────────────────────────────────────────────────
 
 type providerKind int
@@ -204,6 +278,33 @@ type config struct {
 	inputURL         string // Bandolier endpoint the interactive loop polls for input
 	acpURL           string // Bandolier ACP relay endpoint the proxy pulls/pushes frames on
 	outputType       string // "pr" (default) or "issue": what the run produces when done
+	// resumeBranch is the existing remote branch this run resumes work on
+	// (RESUME_BRANCH): the server clones it directly (BRANCH is set to the same
+	// value), no fresh branch is cut, new work is measured against its remote tip
+	// rather than the PR base, and pushed commits land on the parent run's open
+	// PR. Empty = a normal run.
+	resumeBranch string
+	// contextURL is the Bandolier endpoint serving the parent run's persisted
+	// transcript (BANDOLIER_CONTEXT_URL); set only for resumed runs. The harness
+	// fetches it before starting and folds it into the task as context.
+	contextURL string
+}
+
+// resuming reports whether this run continues an existing branch (and PR)
+// rather than cutting a fresh one.
+func (c config) resuming() bool { return c.resumeBranch != "" }
+
+// diffBase is the ref this run's own work is measured against: the resumed
+// branch's remote tip (everything already pushed, by the parent run or anyone
+// else) when resuming, else the PR base branch. Scoping to the remote tip on a
+// resume keeps commit-author rewriting and PR-copy generation off commits that
+// are already published — rewriting those would diverge from origin and turn
+// the push into a rejected non-fast-forward.
+func (c config) diffBase() string {
+	if c.resuming() {
+		return "origin/" + c.resumeBranch
+	}
+	return "origin/" + c.baseBranch
 }
 
 // issueOutput reports whether the run should produce a GitHub issue instead of a
@@ -278,6 +379,8 @@ func loadConfig() (config, error) {
 		inputURL:         os.Getenv("BANDOLIER_INPUT_URL"),
 		acpURL:           os.Getenv("BANDOLIER_ACP_URL"),
 		outputType:       outputType,
+		resumeBranch:     strings.TrimSpace(os.Getenv("RESUME_BRANCH")),
+		contextURL:       os.Getenv("BANDOLIER_CONTEXT_URL"),
 	}, nil
 }
 
@@ -426,11 +529,12 @@ func buildIssueUserMessage(issue *githubIssue, extraContext string) string {
 	return message
 }
 
-// hasCommits reports whether branchName has diverged from the base branch,
-// i.e. whether Claude actually committed anything worth opening a PR for.
+// hasCommits reports whether branchName carries commits of this run's own —
+// beyond the PR base, or (on a resume) beyond what the branch had already
+// pushed — i.e. whether Claude actually committed anything worth publishing.
 func hasCommits(ctx context.Context, cfg config, branchName string) bool {
 	cmd := exec.CommandContext(ctx, "git", "rev-list", "--count",
-		fmt.Sprintf("origin/%s..%s", cfg.baseBranch, branchName))
+		fmt.Sprintf("%s..%s", cfg.diffBase(), branchName))
 	cmd.Dir = cfg.workDir
 	cmd.Env = os.Environ()
 	out, err := cmd.Output()
@@ -464,7 +568,7 @@ const maxPRDiffBytes = 60_000
 func buildPRPrompt(ctx context.Context, cfg config, branchName string) string {
 	// The commit list is the symmetric "reachable from branch but not base"
 	// (two-dot) range — exactly the commits this branch adds.
-	logRange := fmt.Sprintf("origin/%s..%s", cfg.baseBranch, branchName)
+	logRange := fmt.Sprintf("%s..%s", cfg.diffBase(), branchName)
 	gitLog, _ := captureCmd(ctx, cfg.workDir, "git", "log", logRange, "--pretty=format:- %s%n%b")
 
 	// The diff and diffstat use a three-dot range so they are computed against
@@ -475,7 +579,7 @@ func buildPRPrompt(ctx context.Context, cfg config, branchName string) string {
 	// can swamp or truncate the real changes — which is what made PR copy
 	// generation sometimes fail. The three-dot form diffs only what this branch
 	// introduced relative to where it diverged.
-	diffRange := fmt.Sprintf("origin/%s...%s", cfg.baseBranch, branchName)
+	diffRange := fmt.Sprintf("%s...%s", cfg.diffBase(), branchName)
 	diffstat, _ := captureCmd(ctx, cfg.workDir, "git", "diff", "--stat", diffRange)
 	diff, _ := captureCmd(ctx, cfg.workDir, "git", "diff", diffRange)
 	if len(diff) > maxPRDiffBytes {
@@ -681,7 +785,10 @@ func rewriteCommitAuthors(ctx context.Context, cfg config, branchName, name, ema
 	// -f overwrites any stale refs/original/ backup from a previous attempt. The
 	// rev-list range limits the rewrite to the commits this branch introduced.
 	env := append(os.Environ(), "FILTER_BRANCH_SQUELCH_WARNING=1")
-	rangeSpec := fmt.Sprintf("origin/%s..%s", cfg.baseBranch, branchName)
+	// Scoped to this run's own commits (diffBase): on a resume the branch's
+	// already-pushed history must not be rewritten, or the push becomes a
+	// rejected non-fast-forward.
+	rangeSpec := fmt.Sprintf("%s..%s", cfg.diffBase(), branchName)
 	return runCmd(ctx, cfg.workDir, env, "git", "filter-branch", "-f",
 		"--env-filter", envFilter,
 		"--msg-filter", msgFilter,
@@ -1052,6 +1159,15 @@ func run(ctx context.Context, cfg config) error {
 		}
 	}
 
+	// Resumed runs start with the parent run's transcript folded into the task,
+	// so the agent carries the full context of the run it continues.
+	if cfg.contextURL != "" {
+		if parentContext := fetchParentContext(ctx, cfg); parentContext != "" {
+			log.Printf("[harness] resuming with parent context (%d bytes)", len(parentContext))
+			cfg.task = withParentContext(cfg.task, parentContext)
+		}
+	}
+
 	// Determine the working mode. A PR is opened when prBranch is non-empty; in
 	// issue-output mode an issue is opened instead and no branch is created.
 	var prBranch, prTitle, prBody string
@@ -1104,6 +1220,16 @@ func run(ctx context.Context, cfg config) error {
 			if !cfg.interactive {
 				cfg.systemPrompt = buildIssueOutputSystemPrompt(nil)
 			}
+		} else if cfg.resuming() {
+			// Resume an existing branch (and its open PR): the clone already landed
+			// on it, and the server framed the run (system prompt + task), so keep
+			// that framing and only fall back to the default if it's missing.
+			prBranch = cfg.resumeBranch
+			prTitle = "Bandolier agent changes"
+			prBody = "Generated by Bandolier."
+			if !cfg.interactive && cfg.systemPrompt == "" {
+				cfg.systemPrompt = buildRepoSystemPrompt(prBranch)
+			}
 		} else {
 			branchLabel := cfg.title
 			if branchLabel == "" {
@@ -1125,8 +1251,10 @@ func run(ctx context.Context, cfg config) error {
 		log.Printf("[harness] plain mode (no repository)")
 	}
 
-	// Create and switch to the working branch for PR-producing modes.
-	if prBranch != "" {
+	// Create and switch to the working branch for PR-producing modes. A resumed
+	// run cloned the working branch directly (BRANCH == the resumed branch), so
+	// it's already checked out — cutting it again would fail.
+	if prBranch != "" && prBranch != cfg.branch {
 		log.Printf("[harness] creating branch %s", prBranch)
 		if err := runCmd(ctx, cfg.workDir, os.Environ(), "git", "checkout", "-b", prBranch); err != nil {
 			return fmt.Errorf("git checkout -b %s: %w", prBranch, err)

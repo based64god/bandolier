@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { and, desc, eq } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 
 import { env } from "~/env";
@@ -14,7 +15,10 @@ import {
   getGithubAccountByGithubId,
   githubGitIdentity,
 } from "~/server/agents/github-token";
-import { postIssueCommentWithFallback } from "~/server/agents/github-issues";
+import {
+  getPullRequestRefs,
+  postIssueCommentWithFallback,
+} from "~/server/agents/github-issues";
 import { resolveKubeconfig } from "~/server/agents/kubeconfig";
 import {
   fuzzyPickModel,
@@ -28,9 +32,12 @@ import { repoToNamespace } from "~/server/agents/namespace";
 import { resolveModelCredentials } from "~/server/agents/resolve-credentials";
 import { getRepoWebhookConfig } from "~/server/agents/webhook-config";
 import { db } from "~/server/db";
+import { taskRun } from "~/server/db/schema";
 import {
   buildIssueSystemPrompt,
   buildIssueUserMessage,
+  buildResumeSystemPrompt,
+  buildResumeUserMessage,
   makeIssueBranch,
 } from "~/lib/issue-prompt";
 import { parseEffortQuery, providerSupportsEffort } from "~/lib/effort";
@@ -76,6 +83,19 @@ interface GitHubRepository {
 interface IssuePayload {
   action: string;
   issue: GitHubIssue;
+  repository: GitHubRepository;
+  sender: { id: number; login: string };
+}
+
+// `issue_comment` event: a comment on an issue — or on a pull request, which
+// GitHub delivers through the same event with `issue.pull_request` set.
+interface IssueCommentPayload {
+  action: string;
+  issue: GitHubIssue & { pull_request?: { html_url: string } };
+  comment: {
+    body: string | null;
+    user: { id: number; login: string; type?: string };
+  };
   repository: GitHubRepository;
   sender: { id: number; login: string };
 }
@@ -138,6 +158,176 @@ function wantsIssueOutput(labels: { name: string }[]): boolean {
   return labels.some((l) => l.name.trim().toLowerCase() === OUTPUT_ISSUE_LABEL);
 }
 
+// ── Shared run prerequisites ──────────────────────────────────────────────────
+
+/**
+ * Everything a webhook-triggered run needs that doesn't depend on what
+ * triggered it: the Bandolier user linked to the sender, the model (label →
+ * repo default → provider default), the reasoning effort, the credentials for
+ * the chosen provider (AWS validated up front), the kubeconfig, and the
+ * out-of-band PR-writer model. Returns null — with the reason logged under
+ * `logCtx` — when any prerequisite is missing, so callers just skip the event.
+ */
+async function resolveWebhookRun(opts: {
+  sender: { id: number; login: string };
+  repoFullName: string;
+  /** Labels considered for `model:` / `effort:` selection (the issue's). */
+  labels: { name: string }[];
+  defaultModel: string | null;
+  defaultEffort: string | null;
+  logCtx: Record<string, unknown>;
+}) {
+  const { sender, repoFullName, labels, logCtx } = opts;
+
+  // Only user-provided credentials are ever used. Resolve the Bandolier user
+  // linked to the GitHub account that triggered the event; skip if none.
+  const linked = await getGithubAccountByGithubId(db, String(sender.id));
+  if (!linked) {
+    console.log("[bandolier:webhook] skipped — sender not a Bandolier user", {
+      ...logCtx,
+      sender: sender.login,
+    });
+    return null;
+  }
+
+  // Resolve the sender's model credentials (considering this repo's shared
+  // credentials per its prefer-credentials flag) and list the models they unlock
+  // — across every configured provider, Claude and OpenAI alike.
+  const resolved = await resolveModelCredentials(
+    db,
+    linked.userId,
+    repoFullName,
+  );
+  const { models } = await listModelsForUser(db, linked.userId, repoFullName);
+  if (models.length === 0) {
+    console.log(
+      "[bandolier:webhook] skipped — sender has no model credentials",
+      { ...logCtx, sender: sender.login },
+    );
+    return null;
+  }
+
+  // Choose the model. Precedence:
+  //   1. An issue label like `model:<query>` fuzzy-selects (e.g. model:opus →
+  //      the latest Claude Opus), letting the author pick per issue.
+  //   2. The repo's configured default webhook model, when still available.
+  //   3. The provider's sensible default (prefers Sonnet).
+  const labelQuery = modelLabelQuery(labels);
+  let model: string | undefined;
+  if (labelQuery) {
+    model = fuzzyPickModel(labelQuery, models);
+    console.log(
+      model
+        ? "[bandolier:webhook] model selected from issue label"
+        : "[bandolier:webhook] no model matched issue label",
+      { ...logCtx, label: `${MODEL_LABEL_PREFIX}${labelQuery}`, model },
+    );
+  }
+  if (!model && opts.defaultModel) {
+    model = models.find((m) => m.id === opts.defaultModel)?.id;
+    if (model) {
+      console.log("[bandolier:webhook] model selected from repo default", {
+        ...logCtx,
+        model,
+      });
+    }
+  }
+  model ??= pickDefaultModel(models);
+  if (!model) {
+    console.log("[bandolier:webhook] skipped — no models available", {
+      ...logCtx,
+      sender: sender.login,
+    });
+    return null;
+  }
+
+  // Route credentials by the chosen model's provider (mirrors the deploy path).
+  // A model is only ever listed when its provider's credentials resolved, so the
+  // matching set is present here.
+  const provider = models.find((m) => m.id === model)?.provider;
+
+  // Resolve the reasoning effort, but only for a Claude provider — the OpenAI and
+  // Gemini CLIs don't take it. Precedence mirrors the model's: an `effort:<level>`
+  // label overrides the repo's configured default; an unknown label value is
+  // ignored (falls through to the default, then the CLI default).
+  let effort: string | undefined;
+  if (provider && providerSupportsEffort(provider)) {
+    const effortQuery = effortLabelQuery(labels);
+    const labelEffort = effortQuery ? parseEffortQuery(effortQuery) : undefined;
+    const repoEffort = opts.defaultEffort
+      ? parseEffortQuery(opts.defaultEffort)
+      : undefined;
+    effort = labelEffort ?? repoEffort;
+    if (effortQuery && !labelEffort) {
+      console.log("[bandolier:webhook] no effort matched issue label", {
+        ...logCtx,
+        label: `${EFFORT_LABEL_PREFIX}${effortQuery}`,
+      });
+    } else if (effort) {
+      console.log("[bandolier:webhook] effort selected", {
+        ...logCtx,
+        effort,
+        source: labelEffort ? "issue label" : "repo default",
+      });
+    }
+  }
+
+  const awsCredentials = provider === "bedrock" ? resolved.aws : null;
+  const anthropicApiKey =
+    provider === "anthropic" ? resolved.anthropicApiKey : null;
+  const openaiApiKey = provider === "openai" ? resolved.openaiApiKey : null;
+  const geminiApiKey = provider === "gemini" ? resolved.geminiApiKey : null;
+  if (!awsCredentials && !anthropicApiKey && !openaiApiKey && !geminiApiKey) {
+    console.log(
+      "[bandolier:webhook] skipped — no credentials for the selected model",
+      { ...logCtx, sender: sender.login, model },
+    );
+    return null;
+  }
+
+  // Validate AWS credentials so we don't spawn a pod that can't authenticate.
+  if (awsCredentials) {
+    const validation = await validateAwsCredentials(awsCredentials);
+    if (!validation.valid) {
+      console.log(
+        "[bandolier:webhook] skipped — sender's AWS credentials invalid",
+        { ...logCtx, sender: sender.login, error: validation.error },
+      );
+      return null;
+    }
+  }
+
+  const kubeconfig = await resolveKubeconfig(db, linked.userId, repoFullName);
+  if (!kubeconfig) {
+    console.log(
+      "[bandolier:webhook] skipped — no server or sender kubeconfig",
+      { ...logCtx, sender: sender.login },
+    );
+    return null;
+  }
+
+  // Out-of-band PR writer from the same provider as the chosen model: the latest
+  // Sonnet for Claude, the latest GPT mini for OpenAI, the latest Flash for Gemini.
+  const prWriterModel =
+    provider === "openai"
+      ? pickLatestGptMini(models)
+      : provider === "gemini"
+        ? pickLatestGeminiFlash(models)
+        : pickLatestSonnet(models);
+
+  return {
+    linked,
+    model,
+    effort,
+    awsCredentials,
+    anthropicApiKey,
+    openaiApiKey,
+    geminiApiKey,
+    kubeconfig,
+    prWriterModel,
+  };
+}
+
 // ── Event handlers ────────────────────────────────────────────────────────────
 
 async function handleIssueOpened(
@@ -180,138 +370,26 @@ async function handleIssueOpened(
     }
   }
 
-  // Only user-provided credentials are ever used. Resolve the Bandolier user
-  // linked to the GitHub account that opened the issue; skip if none.
-  const linked = await getGithubAccountByGithubId(db, String(sender.id));
-  if (!linked) {
-    console.log(
-      "[bandolier:webhook] issue skipped — sender not a Bandolier user",
-      {
-        issue: issue.number,
-        sender: sender.login,
-      },
-    );
-    return;
-  }
-
-  // Resolve the issue author's model credentials (considering this repo's shared
-  // credentials per its prefer-credentials flag) and list the models they unlock
-  // — across every configured provider, Claude and OpenAI alike.
-  const resolved = await resolveModelCredentials(
-    db,
-    linked.userId,
-    repository.full_name,
-  );
-  const { models } = await listModelsForUser(
-    db,
-    linked.userId,
-    repository.full_name,
-  );
-  if (models.length === 0) {
-    console.log(
-      "[bandolier:webhook] issue skipped — sender has no model credentials",
-      { issue: issue.number, sender: sender.login },
-    );
-    return;
-  }
-
-  // Choose the model. Precedence:
-  //   1. An issue label like `model:<query>` fuzzy-selects (e.g. model:opus →
-  //      the latest Claude Opus), letting the author pick per issue.
-  //   2. The repo's configured default webhook model, when still available.
-  //   3. The provider's sensible default (prefers Sonnet).
-  const labelQuery = modelLabelQuery(issue.labels);
-  let model: string | undefined;
-  if (labelQuery) {
-    model = fuzzyPickModel(labelQuery, models);
-    console.log(
-      model
-        ? "[bandolier:webhook] model selected from issue label"
-        : "[bandolier:webhook] no model matched issue label",
-      {
-        issue: issue.number,
-        label: `${MODEL_LABEL_PREFIX}${labelQuery}`,
-        model,
-      },
-    );
-  }
-  if (!model && defaultModel) {
-    model = models.find((m) => m.id === defaultModel)?.id;
-    if (model) {
-      console.log("[bandolier:webhook] model selected from repo default", {
-        issue: issue.number,
-        model,
-      });
-    }
-  }
-  model ??= pickDefaultModel(models);
-  if (!model) {
-    console.log("[bandolier:webhook] issue skipped — no models available", {
-      issue: issue.number,
-      sender: sender.login,
-    });
-    return;
-  }
-
-  // Route credentials by the chosen model's provider (mirrors the deploy path).
-  // A model is only ever listed when its provider's credentials resolved, so the
-  // matching set is present here.
-  const provider = models.find((m) => m.id === model)?.provider;
-
-  // Resolve the reasoning effort, but only for a Claude provider — the OpenAI and
-  // Gemini CLIs don't take it. Precedence mirrors the model's: an `effort:<level>`
-  // label overrides the repo's configured default; an unknown label value is
-  // ignored (falls through to the default, then the CLI default).
-  let effort: string | undefined;
-  if (provider && providerSupportsEffort(provider)) {
-    const effortQuery = effortLabelQuery(issue.labels);
-    const labelEffort = effortQuery ? parseEffortQuery(effortQuery) : undefined;
-    const repoEffort = defaultEffort
-      ? parseEffortQuery(defaultEffort)
-      : undefined;
-    effort = labelEffort ?? repoEffort;
-    if (effortQuery && !labelEffort) {
-      console.log("[bandolier:webhook] no effort matched issue label", {
-        issue: issue.number,
-        label: `${EFFORT_LABEL_PREFIX}${effortQuery}`,
-      });
-    } else if (effort) {
-      console.log("[bandolier:webhook] effort selected", {
-        issue: issue.number,
-        effort,
-        source: labelEffort ? "issue label" : "repo default",
-      });
-    }
-  }
-
-  const awsCredentials = provider === "bedrock" ? resolved.aws : null;
-  const anthropicApiKey =
-    provider === "anthropic" ? resolved.anthropicApiKey : null;
-  const openaiApiKey = provider === "openai" ? resolved.openaiApiKey : null;
-  const geminiApiKey = provider === "gemini" ? resolved.geminiApiKey : null;
-  if (!awsCredentials && !anthropicApiKey && !openaiApiKey && !geminiApiKey) {
-    console.log(
-      "[bandolier:webhook] issue skipped — no credentials for the selected model",
-      { issue: issue.number, sender: sender.login, model },
-    );
-    return;
-  }
-
-  // Validate AWS credentials so we don't spawn a pod that can't authenticate.
-  if (awsCredentials) {
-    const validation = await validateAwsCredentials(awsCredentials);
-    if (!validation.valid) {
-      console.log(
-        "[bandolier:webhook] issue skipped — sender's AWS credentials invalid",
-        {
-          issue: issue.number,
-          sender: sender.login,
-          error: validation.error,
-        },
-      );
-      return;
-    }
-  }
+  const run = await resolveWebhookRun({
+    sender,
+    repoFullName: repository.full_name,
+    labels: issue.labels,
+    defaultModel,
+    defaultEffort,
+    logCtx: { issue: issue.number },
+  });
+  if (!run) return;
+  const {
+    linked,
+    model,
+    effort,
+    awsCredentials,
+    anthropicApiKey,
+    openaiApiKey,
+    geminiApiKey,
+    kubeconfig,
+    prWriterModel,
+  } = run;
 
   console.log("[bandolier:webhook] issue opened", {
     repo: repository.full_name,
@@ -320,31 +398,6 @@ async function handleIssueOpened(
     sender: sender.login,
     model,
   });
-
-  const kubeconfig = await resolveKubeconfig(
-    db,
-    linked.userId,
-    repository.full_name,
-  );
-  if (!kubeconfig) {
-    console.log(
-      "[bandolier:webhook] issue skipped — no server or sender kubeconfig",
-      {
-        issue: issue.number,
-        sender: sender.login,
-      },
-    );
-    return;
-  }
-
-  // Out-of-band PR writer from the same provider as the chosen model: the latest
-  // Sonnet for Claude, the latest GPT mini for OpenAI, the latest Flash for Gemini.
-  const prWriterModel =
-    provider === "openai"
-      ? pickLatestGptMini(models)
-      : provider === "gemini"
-        ? pickLatestGeminiFlash(models)
-        : pickLatestSonnet(models);
 
   // An `output:issue` label switches this run to producing a sub-task issue
   // instead of a PR: no working branch, and the harness frames the read-only
@@ -447,6 +500,231 @@ async function handleIssueOpened(
   }
 }
 
+/** The PR number at the end of a GitHub pull-request URL, or null. */
+function prNumberFromUrl(url: string | null): number | null {
+  if (!url) return null;
+  const m = /\/pull\/(\d+)$/.exec(url);
+  return m ? Number(m[1]) : null;
+}
+
+/**
+ * A comment on an issue or pull request resumes the most recent run for that
+ * item: a new agent run seeded with the parent run's persisted transcript
+ * (fetched by the harness via BANDOLIER_CONTEXT_URL) and, when the parent's PR
+ * is still open, working directly on its branch so follow-up commits land on
+ * the same PR. Comments with no prior run are ignored — resuming is the only
+ * thing a comment triggers.
+ */
+async function handleIssueComment(
+  payload: IssueCommentPayload,
+  prefix: string | null,
+  agentImage: string | null,
+  defaultModel: string | null,
+  defaultEffort: string | null,
+  repoSystemPrompt: string | null,
+  networkPolicy:
+    | { allowPrivateEgress: boolean; allowAllPortsEgress: boolean }
+    | undefined,
+): Promise<void> {
+  const { issue, comment, repository } = payload;
+  const isPullRequest = !!issue.pull_request;
+  const kind = isPullRequest ? ("pull request" as const) : ("issue" as const);
+  const logCtx = { issue: issue.number, kind, comment: true };
+
+  // Bot comments never trigger a resume — most importantly Bando's own
+  // "picked up / resuming" acknowledgements, which would otherwise loop.
+  if (comment.user.type === "Bot" || comment.user.login.endsWith("[bot]")) {
+    return;
+  }
+
+  const commentBody = comment.body ?? "";
+
+  // Prefix gate: if a trigger phrase is configured, the comment must contain
+  // it; otherwise act on every comment (that has a run to resume).
+  if (prefix && !commentBody.includes(prefix)) {
+    console.log("[bandolier:webhook] comment skipped — prefix not present", {
+      ...logCtx,
+      prefix,
+    });
+    return;
+  }
+
+  // The parent is the most recent run for the commented item: matched by PR
+  // URL for pull requests, by repo + issue number for issues. No parent run
+  // means there is nothing to resume.
+  const [parent] = await db
+    .select({
+      jobName: taskRun.jobName,
+      displayName: taskRun.displayName,
+      pullRequestUrl: taskRun.pullRequestUrl,
+    })
+    .from(taskRun)
+    .where(
+      isPullRequest
+        ? and(
+            eq(taskRun.repoFullName, repository.full_name),
+            eq(taskRun.pullRequestUrl, issue.pull_request!.html_url),
+          )
+        : and(
+            eq(taskRun.repoFullName, repository.full_name),
+            eq(taskRun.issueNumber, String(issue.number)),
+          ),
+    )
+    .orderBy(desc(taskRun.createdAt))
+    .limit(1);
+  if (!parent) {
+    console.log(
+      "[bandolier:webhook] comment skipped — no run to resume",
+      logCtx,
+    );
+    return;
+  }
+
+  const run = await resolveWebhookRun({
+    sender: { id: comment.user.id, login: comment.user.login },
+    repoFullName: repository.full_name,
+    labels: issue.labels,
+    defaultModel,
+    defaultEffort,
+    logCtx,
+  });
+  if (!run) return;
+  const {
+    linked,
+    model,
+    effort,
+    awsCredentials,
+    anthropicApiKey,
+    openaiApiKey,
+    geminiApiKey,
+    kubeconfig,
+    prWriterModel,
+  } = run;
+
+  // Continue on the parent's PR branch when there is one and it's still open
+  // and same-repo (a fork's branch can't be pushed to). The PR is either the
+  // one being commented on, or the one the parent run opened for the issue.
+  // Otherwise the resume starts a fresh branch — still carrying the parent's
+  // context — and produces a new PR.
+  let resumeBranch: string | undefined;
+  let baseBranch = repository.default_branch;
+  const prNumber = isPullRequest
+    ? issue.number
+    : prNumberFromUrl(parent.pullRequestUrl);
+  if (prNumber !== null && linked.accessToken) {
+    const refs = await getPullRequestRefs(
+      linked.accessToken,
+      repository.full_name,
+      prNumber,
+    );
+    if (
+      refs?.state === "open" &&
+      refs.headRepoFullName === repository.full_name
+    ) {
+      resumeBranch = refs.headRef;
+      baseBranch = refs.baseRef;
+    } else if (refs) {
+      console.log(
+        "[bandolier:webhook] resuming on a fresh branch — PR branch not continuable",
+        { ...logCtx, pr: prNumber, state: refs.state, merged: refs.merged },
+      );
+    }
+  }
+  const agentBranch =
+    resumeBranch ?? makeIssueBranch(issue.number, issue.title);
+
+  console.log("[bandolier:webhook] comment resumes run", {
+    repo: repository.full_name,
+    ...logCtx,
+    parent: parent.jobName,
+    branch: agentBranch,
+    continuesBranch: !!resumeBranch,
+    sender: comment.user.login,
+    model,
+  });
+
+  // Attribute commits to the commenter via their GitHub no-reply address, so
+  // GitHub links them to that account regardless of email privacy.
+  const gitIdentity = githubGitIdentity(comment.user.id, comment.user.login);
+
+  // A custom image on a private ghcr.io package needs pull credentials — use
+  // the commenter's GitHub OAuth token (GHCR rejects App installation tokens).
+  const imagePullSecret = agentImage
+    ? (getRegistryPullSecret(agentImage, linked.accessToken) ?? undefined)
+    : undefined;
+
+  const jobName = await createAgentJob({
+    namespace: repoToNamespace(repository.full_name),
+    task: buildResumeUserMessage({
+      kind,
+      number: issue.number,
+      title: issue.title,
+      commenter: comment.user.login,
+      comment: commentBody,
+    }),
+    systemPrompt: buildResumeSystemPrompt(agentBranch, !!resumeBranch),
+    agentBranch,
+    displayName: `↻ #${issue.number}: ${issue.title}`,
+    repoUrl: repository.clone_url,
+    // Resumes clone the branch they continue; fresh-branch resumes start from
+    // the default branch like any issue run.
+    branch: resumeBranch ?? repository.default_branch,
+    baseBranch,
+    resumeBranch,
+    parentJobName: parent.jobName,
+    parentDisplayName: parent.displayName,
+    model,
+    effort,
+    prWriterModel,
+    // Only true issues enter the harness's issue mode — a PR number isn't
+    // viewable through `gh issue view`, and the PR link comes from the run's
+    // own output anyway.
+    issueNumber: isPullRequest ? undefined : String(issue.number),
+    issueUrl: isPullRequest ? undefined : issue.html_url,
+    repoFullName: repository.full_name,
+    createdBy: comment.user.login,
+    gitName: gitIdentity.name,
+    gitEmail: gitIdentity.email,
+    userId: linked.userId,
+    githubToken: linked.accessToken ?? undefined,
+    awsCredentials: awsCredentials ?? undefined,
+    anthropicApiKey: anthropicApiKey ?? undefined,
+    openaiApiKey: openaiApiKey ?? undefined,
+    geminiApiKey: geminiApiKey ?? undefined,
+    kubeconfig,
+    agentImage: agentImage ?? undefined,
+    imagePullSecret,
+    repoSystemPrompt: repoSystemPrompt ?? undefined,
+    networkPolicy,
+  });
+
+  // Acknowledge in the thread, bot-voice only (see the matching comment on the
+  // issue-opened path for why there is deliberately no token fallback).
+  const botToken = await getRepoBotToken(db, repository.full_name, Date.now());
+  const taskUrl = `${env.BETTER_AUTH_URL}/repo/${repository.full_name}`;
+  const ackBody =
+    `🤖 Bando is resuming work on this ${kind}.\n\n` +
+    `[View task on the dashboard](${taskUrl}) (job: \`${jobName}\`, resumes \`${parent.jobName}\`)`;
+  const postedBy = await postIssueCommentWithFallback(
+    [{ token: botToken, source: "app-installation" }],
+    repository.full_name,
+    issue.number,
+    ackBody,
+  );
+  if (postedBy) {
+    console.log("[bandolier:webhook] resume comment posted", {
+      ...logCtx,
+      job: jobName,
+      via: postedBy,
+    });
+  } else {
+    console.warn(
+      "[bandolier:webhook] failed to post resume comment — no usable token",
+      logCtx,
+    );
+  }
+}
+
 /**
  * Maintains the repo → installation mapping from the App's `installation` and
  * `installation_repositories` events. Both deliver the same shape; the action
@@ -534,6 +812,23 @@ export async function POST(req: NextRequest) {
         : null;
       await handleIssueOpened(
         payload as IssuePayload,
+        repoConfig?.prefix ?? null,
+        repoConfig?.agentImage ?? null,
+        repoConfig?.defaultWebhookModel ?? null,
+        repoConfig?.defaultWebhookEffort ?? null,
+        repoConfig?.systemPrompt ?? null,
+        repoConfig?.networkPolicy,
+      );
+    } else if (
+      event === "issue_comment" &&
+      (payload as IssueCommentPayload).action === "created"
+    ) {
+      // A comment on an issue or PR resumes that item's most recent run.
+      const repoConfig = repoFullName
+        ? await getRepoWebhookConfig(db, repoFullName)
+        : null;
+      await handleIssueComment(
+        payload as IssueCommentPayload,
         repoConfig?.prefix ?? null,
         repoConfig?.agentImage ?? null,
         repoConfig?.defaultWebhookModel ?? null,

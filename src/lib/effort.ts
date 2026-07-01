@@ -14,13 +14,7 @@ import type { ModelProvider } from "~/server/agents/models";
  * Kept in sync with the harness's allow-list (agent-harness/cmd/harness/main.go)
  * and the CLI itself.
  */
-export const EFFORT_LEVELS = [
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "max",
-] as const;
+export const EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"] as const;
 
 export type EffortLevel = (typeof EFFORT_LEVELS)[number];
 

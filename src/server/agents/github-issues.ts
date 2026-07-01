@@ -148,6 +148,50 @@ export async function getGithubItemState(
   }
 }
 
+/**
+ * The refs a resumed run needs to continue a pull request: the head branch to
+ * push follow-up commits to and the base its PR targets. `headRepoFullName`
+ * lets callers refuse cross-fork PRs (we can't push to a fork the run's token
+ * doesn't own). Null on any lookup failure.
+ */
+export interface PullRequestRefs {
+  headRef: string;
+  baseRef: string;
+  headRepoFullName: string | null;
+  state: "open" | "closed";
+  merged: boolean;
+}
+
+/** Fetches a pull request's head/base refs and state. Null on any failure. */
+export async function getPullRequestRefs(
+  token: string,
+  repoFullName: string,
+  prNumber: number,
+): Promise<PullRequestRefs | null> {
+  try {
+    const res = await fetch(
+      `https://api.github.com/repos/${repoFullName}/pulls/${prNumber}`,
+      { headers: ghHeaders(token) },
+    );
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      state: string;
+      merged_at: string | null;
+      head: { ref: string; repo: { full_name: string } | null };
+      base: { ref: string };
+    };
+    return {
+      headRef: data.head.ref,
+      baseRef: data.base.ref,
+      headRepoFullName: data.head.repo?.full_name ?? null,
+      state: data.state === "closed" ? "closed" : "open",
+      merged: !!data.merged_at,
+    };
+  } catch {
+    return null;
+  }
+}
+
 /** Posts a comment on a GitHub issue. Throws on a non-2xx response. */
 export async function postIssueComment(
   token: string,

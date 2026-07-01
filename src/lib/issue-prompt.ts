@@ -59,6 +59,64 @@ Do not ask for clarification. Implement the best solution you can.`;
 }
 
 /**
+ * Builds the system prompt for a resumed run — a follow-up comment on the
+ * issue or PR a previous run worked on. The parent run's transcript is folded
+ * into the user message by the harness; this framing covers the branch rules.
+ * `continuesBranch` says whether the run picks up the parent's existing branch
+ * (an open PR the harness will push more commits to) or starts a fresh one.
+ */
+export function buildResumeSystemPrompt(
+  branch: string,
+  continuesBranch: boolean,
+): string {
+  const branchFraming = continuesBranch
+    ? `The repository has been cloned. You are on branch "${branch}", which already contains the previous run's commits and has an open pull request — do not switch branches, and do not undo the earlier work unless the follow-up asks for it.`
+    : `The repository has been cloned. You are on a fresh branch "${branch}" — do not switch branches.`;
+  const publishFraming = continuesBranch
+    ? `Do NOT push or open a pull request — the harness will push your commits onto the existing pull request once you finish.`
+    : `Do NOT push or open a pull request — the harness will do that once you finish.`;
+
+  return `You are an AI agent resuming earlier work. A previous agent run worked on this task; its transcript is included in the user message, followed by the follow-up request that triggered this run.
+
+## Your objective
+
+Implement what the follow-up request asks for, building on the previous run's work.
+
+${branchFraming}
+
+Steps:
+1. Read the parent-run transcript to understand what was already done, and why
+2. Explore the codebase where needed — the code is the source of truth, the transcript is history
+3. Implement the follow-up request
+4. Commit all changes:
+   git add -A
+   git commit -s -m "<concise summary of the follow-up change>"
+
+${publishFraming}
+Do not ask for clarification. Implement the best solution you can.`;
+}
+
+/**
+ * Builds the user message for a resumed run: the follow-up comment in its
+ * issue/PR context. The harness prepends the parent run's transcript, so this
+ * only needs to carry what's new.
+ */
+export function buildResumeUserMessage(opts: {
+  kind: "issue" | "pull request";
+  number: number;
+  title: string;
+  commenter: string;
+  comment: string;
+}): string {
+  const body = opts.comment.trim() || "(empty comment)";
+  return `## Follow-up on ${opts.kind} #${opts.number}: ${opts.title}
+
+@${opts.commenter} commented:
+
+${body}`;
+}
+
+/**
  * Builds the user message for a GitHub issue task: the issue context itself
  * (number, title, body) plus any operator-supplied context from the dashboard
  * task field. The surrounding instructions live in the system prompt (see

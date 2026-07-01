@@ -448,6 +448,9 @@ async function podToTask(
     issueNumber: annotations["bandolier.io/github-issue"] ?? null,
     issueUrl,
     createdBy: annotations["bandolier.io/created-by"] ?? null,
+    // Lineage of a resumed run: the job it continues, for the UI to surface.
+    parentJobName: annotations["bandolier.io/parent-job"] ?? null,
+    parentDisplayName: annotations["bandolier.io/parent-name"] ?? null,
     status,
     currently,
     expiresAt,
@@ -596,6 +599,9 @@ export const agentsRouter = createTRPCRouter({
             issueNumber: annotations["bandolier.io/github-issue"] ?? null,
             issueUrl,
             createdBy: annotations["bandolier.io/created-by"] ?? null,
+            // Lineage of a resumed run, surfaced next to the task name.
+            parentJobName: annotations["bandolier.io/parent-job"] ?? null,
+            parentDisplayName: annotations["bandolier.io/parent-name"] ?? null,
             status,
             pullRequestUrl,
             pullRequestState,

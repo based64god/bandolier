@@ -185,6 +185,29 @@ export function OutputBadge({
 }
 
 /**
+ * Lineage chip for a resumed run ("↻ resumed", amber): a follow-up comment on
+ * the parent run's issue or PR spawned this task with the parent's transcript
+ * as context. Hovering names the parent run. Renders nothing for normal runs.
+ */
+export function ResumedBadge({
+  parentJobName,
+  parentDisplayName,
+}: {
+  parentJobName: string | null;
+  parentDisplayName: string | null;
+}) {
+  if (!parentJobName) return null;
+  return (
+    <span
+      title={`Resumes ${parentDisplayName ?? parentJobName}`}
+      className="inline-flex shrink-0 items-center rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] whitespace-nowrap text-amber-300"
+    >
+      ↻ resumed
+    </span>
+  );
+}
+
+/**
  * The source-issue badge ("Issue #N", sky) shown for issue-triggered tasks, with
  * its open/closed indicator. Falls back to the creator name when the task didn't
  * come from a GitHub issue.

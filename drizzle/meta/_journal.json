@@ -99,6 +99,13 @@
       "when": 1782239325186,
       "tag": "0013_steep_warbird",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1782946565799,
+      "tag": "0014_chief_lila_cheney",
+      "breakpoints": true
     }
   ]
 }

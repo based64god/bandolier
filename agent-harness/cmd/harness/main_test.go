@@ -651,3 +651,46 @@ func TestNormalizeEffort(t *testing.T) {
 		}
 	}
 }
+
+func TestWithParentContext(t *testing.T) {
+	// No transcript → the task is untouched.
+	if got := withParentContext("do the thing", ""); got != "do the thing" {
+		t.Errorf("withParentContext with empty transcript = %q, want the task unchanged", got)
+	}
+
+	// Transcript and follow-up request both present, in order.
+	got := withParentContext("fix the tests", "parent did X")
+	if !strings.Contains(got, "<parent-run-transcript>\nparent did X\n</parent-run-transcript>") {
+		t.Errorf("transcript not embedded between markers:\n%s", got)
+	}
+	if !strings.HasSuffix(got, "## Follow-up request\n\nfix the tests") {
+		t.Errorf("task not appended as the follow-up request:\n%s", got)
+	}
+
+	// Oversized transcripts keep the tail (the parent's final state) and flag
+	// the truncation.
+	huge := strings.Repeat("a", maxParentContextBytes) + "THE-END"
+	got = withParentContext("task", huge)
+	if !strings.Contains(got, "…(earlier transcript truncated)…") {
+		t.Error("truncation marker missing for oversized transcript")
+	}
+	if !strings.Contains(got, "THE-END") {
+		t.Error("tail of oversized transcript was dropped")
+	}
+	if strings.Contains(got, strings.Repeat("a", maxParentContextBytes)) {
+		t.Error("oversized transcript was not truncated")
+	}
+}
+
+func TestDiffBase(t *testing.T) {
+	normal := config{baseBranch: "main"}
+	if got := normal.diffBase(); got != "origin/main" {
+		t.Errorf("diffBase() = %q, want origin/main", got)
+	}
+	// Resumed runs measure new work against the resumed branch's remote tip,
+	// not the PR base — already-pushed commits must stay untouched.
+	resumed := config{baseBranch: "main", resumeBranch: "issue-7-fix-abc123"}
+	if got := resumed.diffBase(); got != "origin/issue-7-fix-abc123" {
+		t.Errorf("diffBase() on resume = %q, want origin/issue-7-fix-abc123", got)
+	}
+}

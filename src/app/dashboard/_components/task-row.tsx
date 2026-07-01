@@ -5,7 +5,7 @@ import { useState } from "react";
 import { api } from "~/trpc/react";
 import type { RouterOutputs } from "~/trpc/react";
 import { expiresAtLocal, taskNameTooltip } from "./agent-ui";
-import { OutputBadge, SourceBadge } from "./output-badge";
+import { OutputBadge, ResumedBadge, SourceBadge } from "./output-badge";
 import { StatusBadge } from "./status-badge";
 
 type Task = RouterOutputs["agents"]["list"][number];
@@ -89,12 +89,19 @@ export function TaskRow({
       <td className="px-3 py-2 align-middle md:px-4 md:py-3">
         {/* Always clamped to one line so a long description can't wrap and grow
             the row taller than its single-line neighbours; the full text is
-            available on hover. */}
-        <span
-          title={taskNameTooltip(agent)}
-          className="block truncate text-sm text-white/90"
-        >
-          {agent.displayName}
+            available on hover. The lineage chip sits outside the truncating
+            span so it never gets clipped away by a long name. */}
+        <span className="flex items-center gap-1.5">
+          <ResumedBadge
+            parentJobName={agent.parentJobName}
+            parentDisplayName={agent.parentDisplayName}
+          />
+          <span
+            title={taskNameTooltip(agent)}
+            className="block min-w-0 truncate text-sm text-white/90"
+          >
+            {agent.displayName}
+          </span>
         </span>
       </td>
 

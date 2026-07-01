@@ -268,6 +268,28 @@ export interface JobSpec {
   issueUrl?: string;
   /** The (unique) working branch the harness should use, referenced in the prompt. */
   agentBranch?: string;
+  /**
+   * Base branch for the run's pull request (GITHUB_BASE_BRANCH). Only needed
+   * when it differs from `branch` — e.g. a resumed run clones the existing PR
+   * head branch, but its PR still targets the original base.
+   */
+  baseBranch?: string;
+  /**
+   * Job name of the run this one resumes (a follow-up comment on the parent's
+   * issue or PR). Recorded on the run row and pod so the UI can surface the
+   * lineage, and it makes the harness fetch the parent's persisted transcript
+   * as context before starting.
+   */
+  parentJobName?: string;
+  /** The parent run's display name, surfaced in the UI next to the lineage. */
+  parentDisplayName?: string;
+  /**
+   * Existing remote branch the run resumes work on (RESUME_BRANCH): the harness
+   * clones it instead of cutting a fresh branch, measures new work against its
+   * remote tip, and pushes follow-up commits to the parent's open PR. Callers
+   * must also set `branch` to the same value so the clone lands on it.
+   */
+  resumeBranch?: string;
   /** "owner/repo" — used by the harness to interact with the GitHub API. */
   repoFullName?: string;
   /** Human label of who/what created the task (e.g. user email, or issue opener). */
@@ -455,6 +477,12 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
   if (spec.agentBranch) {
     envVars.push({ name: "AGENT_BRANCH", value: spec.agentBranch });
   }
+  if (spec.baseBranch) {
+    envVars.push({ name: "GITHUB_BASE_BRANCH", value: spec.baseBranch });
+  }
+  if (spec.resumeBranch) {
+    envVars.push({ name: "RESUME_BRANCH", value: spec.resumeBranch });
+  }
   if (spec.systemPrompt) {
     envVars.push({ name: "CLAUDE_SYSTEM_PROMPT", value: spec.systemPrompt });
   }
@@ -490,6 +518,15 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
       value: `${env.BETTER_AUTH_URL}/api/agent-runs`,
     },
   );
+  // Resumed runs fetch their parent's persisted transcript from this endpoint
+  // (same URL as ingest, GET; same per-job token) before starting, so the new
+  // run carries the full context of the run it continues.
+  if (spec.parentJobName) {
+    envVars.push({
+      name: "BANDOLIER_CONTEXT_URL",
+      value: `${env.BETTER_AUTH_URL}/api/agent-runs`,
+    });
+  }
   if (spec.interactive) {
     envVars.push(
       { name: "INTERACTIVE", value: "1" },
@@ -518,6 +555,13 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
       "bandolier.io/output-type": "issue",
     }),
     ...(spec.createdBy && { "bandolier.io/created-by": spec.createdBy }),
+    // Lineage of a resumed run, read by the dashboard to show what it continues.
+    ...(spec.parentJobName && {
+      "bandolier.io/parent-job": spec.parentJobName,
+    }),
+    ...(spec.parentDisplayName && {
+      "bandolier.io/parent-name": spec.parentDisplayName,
+    }),
   };
 
   // Scopes the cross-repo overview to the user who spawned the agent (queried via
@@ -680,6 +724,7 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
     spawnedBy: spec.userId,
     repoFullName: spec.repoFullName ?? null,
     issueNumber: spec.issueNumber ?? null,
+    parentJobName: spec.parentJobName ?? null,
   });
 
   console.log("[bandolier:deploy] job created", {

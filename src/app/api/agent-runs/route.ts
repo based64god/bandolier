@@ -4,12 +4,82 @@ import { type NextRequest, NextResponse } from "next/server";
 import { env } from "~/env";
 import { verifyIngestToken } from "~/lib/ingest";
 import {
+  getArtifact,
   putArtifact,
   resolveArtifactStore,
   transcriptKey,
 } from "~/server/agents/artifacts";
 import { db } from "~/server/db";
 import { taskRun } from "~/server/db/schema";
+
+/**
+ * Authenticates a harness callback by its per-job HMAC token, returning the
+ * job name or null. Shared by the ingest POST and the parent-context GET.
+ */
+function authenticatedJob(req: NextRequest): string | null {
+  const jobName = req.headers.get("x-bandolier-job");
+  const token = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
+  if (
+    !jobName ||
+    !token ||
+    !verifyIngestToken(jobName, token, env.BETTER_AUTH_SECRET)
+  ) {
+    return null;
+  }
+  return jobName;
+}
+
+// Harness callback: serves the calling run's parent transcript, so a resumed
+// run (a follow-up comment on its parent's issue or PR) starts with the full
+// context of the run it continues. The parent is resolved server-side from the
+// run row — the harness only proves it is the job it claims to be (the same
+// per-job HMAC the ingest POST uses), so it can never fetch an arbitrary run's
+// transcript. 404s (no parent, pruned rows, no artifact store, missing object)
+// all mean "no context"; the harness proceeds without it.
+export async function GET(req: NextRequest) {
+  const jobName = authenticatedJob(req);
+  if (!jobName) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const [run] = await db
+    .select({ parentJobName: taskRun.parentJobName })
+    .from(taskRun)
+    .where(eq(taskRun.jobName, jobName))
+    .limit(1);
+  if (!run?.parentJobName) {
+    return NextResponse.json({ error: "No parent run" }, { status: 404 });
+  }
+
+  const [parent] = await db
+    .select({
+      transcriptKey: taskRun.transcriptKey,
+      repoFullName: taskRun.repoFullName,
+    })
+    .from(taskRun)
+    .where(eq(taskRun.jobName, run.parentJobName))
+    .limit(1);
+  if (!parent?.transcriptKey) {
+    return NextResponse.json(
+      { error: "No parent transcript" },
+      { status: 404 },
+    );
+  }
+
+  const store = await resolveArtifactStore(db, parent.repoFullName);
+  const transcript = store
+    ? await getArtifact(store, parent.transcriptKey)
+    : null;
+  if (transcript === null) {
+    return NextResponse.json(
+      { error: "No parent transcript" },
+      { status: 404 },
+    );
+  }
+  return new NextResponse(transcript, {
+    headers: { "Content-Type": "text/plain; charset=utf-8" },
+  });
+}
 
 // Harness callback: receives a finished run's structured output (its PR/issue
 // URL) and rendered transcript. The output is always recorded on the run row so
@@ -25,13 +95,8 @@ import { taskRun } from "~/server/db/schema";
 // the whole endpoint on artifact storage (as it once was) meant a deployment
 // without S3 lost its output the moment its pod logs went away.
 export async function POST(req: NextRequest) {
-  const jobName = req.headers.get("x-bandolier-job");
-  const token = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
-  if (
-    !jobName ||
-    !token ||
-    !verifyIngestToken(jobName, token, env.BETTER_AUTH_SECRET)
-  ) {
+  const jobName = authenticatedJob(req);
+  if (!jobName) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 
 import { api } from "~/trpc/react";
 import { useAwaitingInputAlerts, useCompletionAlerts } from "./notifications";
-import { OutputBadge, SourceBadge } from "./output-badge";
+import { OutputBadge, ResumedBadge, SourceBadge } from "./output-badge";
 import { StatusBadge } from "./status-badge";
 import { ACTION_ROW_MIN_H } from "./task-row";
 
@@ -184,8 +184,14 @@ export function OverviewPanel({ notify }: { notify: boolean }) {
                         No repository
                       </span>
                     )}
-                    <span className="hidden truncate text-xs text-white/40 md:block">
-                      {agent.displayName}
+                    <span className="hidden items-center gap-1.5 text-xs text-white/40 md:flex">
+                      <ResumedBadge
+                        parentJobName={agent.parentJobName}
+                        parentDisplayName={agent.parentDisplayName}
+                      />
+                      <span className="min-w-0 truncate">
+                        {agent.displayName}
+                      </span>
                     </span>
                   </td>
 

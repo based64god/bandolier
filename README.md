@@ -140,7 +140,7 @@ docker push <your-registry>/bandolier-agent-harness:latest
 
 To have agents launch automatically when issues are opened, install the Bandolier GitHub App:
 
-1. Create a GitHub App (Settings → Developer settings → GitHub Apps). Give it a webhook URL of `https://<your-host>/api/webhooks/github`, a webhook secret, and these repository permissions: **Issues** (read & write), **Pull requests** (read & write), **Contents** (read), and **Metadata** (read). Subscribe to the **Issues** event. Generate a private key. (Pulling private custom harness images from GHCR uses the triggering user's OAuth `read:packages` scope, not an App permission — see [The agent harness image](#the-agent-harness-image).)
+1. Create a GitHub App (Settings → Developer settings → GitHub Apps). Give it a webhook URL of `https://<your-host>/api/webhooks/github`, a webhook secret, and these repository permissions: **Issues** (read & write), **Pull requests** (read & write), **Contents** (read), and **Metadata** (read). Subscribe to the **Issues** and **Issue comment** events (the latter powers resuming a run by commenting on its issue or PR). Generate a private key. (Pulling private custom harness images from GHCR uses the triggering user's OAuth `read:packages` scope, not an App permission — see [The agent harness image](#the-agent-harness-image).)
 2. Set `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY` (PEM, `\n`-escaped), and `GITHUB_WEBHOOK_SECRET` (the App's webhook secret) in the app's environment. Optionally set `NEXT_PUBLIC_GITHUB_APP_SLUG` so the repo-config UI links to the App's install page.
 3. Install the App on the repos you want Bandolier to act on. The App delivers events automatically — there's no per-repo webhook to add.
 
@@ -149,6 +149,12 @@ When an issue is opened, Bandolier verifies the App's signature, finds the Bando
 The "Bando picked up this issue…" comment is posted exclusively via the App installation token, so it is always attributed to `bandolier[bot]`. On a repo where the App isn't installed there's no bot identity to comment as, so the comment is skipped rather than posted under a user or service token.
 
 Optional env knobs: `GITHUB_TRIGGER_LABEL` (only act on issues carrying a specific label) and, per repo, a trigger phrase that issue text must contain (set in the repo-config UI).
+
+### Resuming a run by commenting
+
+Commenting on an issue or pull request that a run already worked on **resumes** it: Bandolier finds the item's most recent run, spawns a follow-up run under the commenter's credentials, and seeds it with the parent run's persisted transcript (when the repo has [artifact storage](#run-artifacts-optional) configured) so the agent picks up with full context of what was already done. While the parent's PR is still open, the follow-up works directly on its branch and pushes onto the same PR; otherwise it starts a fresh branch. Resumed tasks carry a "↻ resumed" chip in the dashboard naming their parent.
+
+Comments from bots are ignored (including Bando's own acknowledgements), a comment only ever resumes — one with no prior run does nothing — and the repo's trigger phrase, when configured, applies to comments too.
 
 ---
 

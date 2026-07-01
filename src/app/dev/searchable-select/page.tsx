@@ -18,11 +18,13 @@ export default function SearchableSelectHarness() {
     return <p className="p-8 text-white">Not available.</p>;
   }
 
-  const options = ["alpha", "beta", "gamma", "delta", "epsilon"].map((name) => ({
-    value: name,
-    searchText: name,
-    label: <span>{name}</span>,
-  }));
+  const options = ["alpha", "beta", "gamma", "delta", "epsilon"].map(
+    (name) => ({
+      value: name,
+      searchText: name,
+      label: <span>{name}</span>,
+    }),
+  );
 
   return (
     <div className="min-h-screen bg-[#06140c] p-8 text-white">

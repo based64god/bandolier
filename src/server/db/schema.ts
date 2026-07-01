@@ -127,6 +127,13 @@ export const taskRun = pgTable("task_run", {
   spawnedBy: text("spawned_by"),
   repoFullName: text("repo_full_name"),
   issueNumber: text("issue_number"),
+  /**
+   * Job name of the run this one resumes (e.g. a follow-up comment on the
+   * parent's issue or pull request). The resumed run is seeded with the
+   * parent's persisted transcript as context, and the UI surfaces the lineage.
+   * Null for runs that aren't resumptions.
+   */
+  parentJobName: text("parent_job_name"),
   /** Object-storage key for the rendered transcript, set on harness callback. */
   transcriptKey: text("transcript_key"),
   /**

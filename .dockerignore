@@ -1,0 +1,37 @@
+# Keep the web-app build context lean and secret-free. The Dockerfile copies the
+# whole repo in the builder stage, so anything not needed to build/run the
+# Next.js app is excluded here.
+
+# dependencies & build output (reinstalled/rebuilt in-image)
+node_modules
+.next
+out
+build
+coverage
+.pnpm-store
+
+# secrets / local env — never bake these into an image
+.env
+.env.*
+!.env.example
+*.pem
+
+# VCS & CI
+.git
+.github
+
+# agent-side images build from their own contexts, not this one
+agent-harness
+self-host
+
+# deploy assets aren't needed inside the app image
+deploy
+
+# local tooling / editor cruft
+.idea
+.vscode
+*.tsbuildinfo
+.DS_Store
+npm-debug.log*
+.pnpm-debug.log*
+e2e

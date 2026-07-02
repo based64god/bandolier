@@ -136,6 +136,39 @@ docker push <your-registry>/bandolier-agent-harness:latest
 
 ---
 
+## Self-hosting on Kubernetes
+
+The web app runs anywhere Node does — Vercel, a VM, or Kubernetes. To deploy the
+**whole stack to a cluster**, this repo ships a production image and a Helm chart:
+
+- **Web-app image** (`ghcr.io/based64god/bandolier`) — a lean Next.js standalone
+  server, built from the repo-root `Dockerfile` and published by
+  `.github/workflows/web-app-image.yml`. A companion **migrator image**
+  (`ghcr.io/based64god/bandolier-migrate`) runs `drizzle-kit migrate`.
+- **Helm chart** (`deploy/helm/bandolier`) — Deployment, Service, Ingress,
+  config/secret wiring, a pre-install/pre-upgrade migration Job, health probes
+  (`/api/health`), a choice of database (external, a bundled StatefulSet, or an
+  operator-managed CloudNativePG cluster), and optional in-cluster MinIO for run
+  artifacts.
+
+```bash
+helm upgrade --install bandolier deploy/helm/bandolier \
+  --namespace bandolier --create-namespace \
+  --set config.betterAuthUrl=https://bandolier.example.com \
+  --set ingress.enabled=true --set ingress.host=bandolier.example.com \
+  --set secrets.betterAuthSecret="$(openssl rand -base64 32)" \
+  --set secrets.githubClientId=<id> --set secrets.githubClientSecret=<secret> \
+  --set secrets.databaseUrl='postgresql://user:pass@host:5432/bandolier'
+```
+
+The web app is cluster-agnostic about where agents run (it uses each user's
+kubeconfig), so it can live on the same cluster as its agents or a separate one;
+its only hard dependency is Postgres. See **[`deploy/README.md`](deploy/README.md)**
+for the full guide — quick start, production setup with external Postgres and
+TLS, keeping secrets out of Helm values, and the config reference.
+
+---
+
 ## GitHub App (optional)
 
 To have agents launch automatically when issues are opened, install the Bandolier GitHub App:
@@ -287,6 +320,11 @@ agent-harness/
   cmd/harness/main.go        The Go binary that runs inside each agent pod
   Dockerfile                 Harness image (Go binary + Node + Claude Code CLI + git/gh)
   k8s/manifest.yaml          Standalone reference Job for testing the image
+
+Dockerfile                   Web-app production image (Next.js standalone + migrator stages)
+deploy/
+  helm/bandolier/            Helm chart to self-host the web app on Kubernetes
+  README.md                  Self-hosting-on-Kubernetes guide
 ```
 
 ---

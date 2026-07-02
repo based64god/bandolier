@@ -1,0 +1,60 @@
+Bandolier has been deployed as release "{{ .Release.Name }}" in namespace "{{ .Release.Namespace }}".
+
+{{- if .Values.migrations.enabled }}
+
+Database migrations ran as a hook Job ({{ if include "bandolier.postgres.deployed" . }}post-install / pre-upgrade, since this release deploys the database{{ else }}pre-install / pre-upgrade{{ end }}). Check it with:
+  kubectl -n {{ .Release.Namespace }} logs job/{{ include "bandolier.fullname" . }}-migrate
+{{- else }}
+
+⚠  migrations.enabled=false — apply the schema yourself before first use.
+{{- end }}
+
+Reach the app:
+{{- if .Values.ingress.enabled }}
+  {{ if .Values.ingress.tls.enabled }}https{{ else }}http{{ end }}://{{ .Values.ingress.host }}
+{{- else }}
+  No ingress is enabled. Port-forward to reach it locally:
+    kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "bandolier.fullname" . }} 3000:{{ .Values.service.port }}
+  then open http://localhost:3000
+{{- end }}
+
+Make sure config.betterAuthUrl ({{ .Values.config.betterAuthUrl }}) matches the
+URL above and your GitHub OAuth app's callback ({{ .Values.config.betterAuthUrl }}/api/auth/callback/github).
+
+{{- if eq .Values.postgres.mode "bundled" }}
+
+You are running the BUNDLED Postgres (postgres.mode=bundled) — a single-replica
+StatefulSet, meant for evaluation. For production, use a managed database
+(postgres.mode=external + secrets.databaseUrl) or the operator-managed
+postgres.mode=cnpg.
+{{- if not .Values.postgres.bundled.persistence.enabled }}
+⚠  postgres.bundled.persistence.enabled=false — data is in an emptyDir and will
+   be LOST if the Postgres pod is rescheduled.
+{{- end }}
+{{- else if eq .Values.postgres.mode "cnpg" }}
+
+You are running CloudNativePG (postgres.mode=cnpg). This requires the
+CloudNativePG operator to be installed; if the Cluster isn't appearing, install
+it first (https://cloudnative-pg.io/documentation). Inspect the cluster with:
+  kubectl -n {{ .Release.Namespace }} get cluster {{ include "bandolier.postgres.fullname" . }}
+{{- end }}
+
+{{- if .Values.minio.enabled }}
+
+Bundled MinIO (in-cluster S3) is deployed and bucket "{{ .Values.minio.bucket }}"
+was created. Run-artifact storage is configured PER REPOSITORY in the app UI —
+it is NOT wired in automatically. In a repo's "Run artifact storage" settings use:
+  Endpoint:  {{ if .Values.minio.ingress.enabled }}{{ if .Values.minio.ingress.tls.enabled }}https{{ else }}http{{ end }}://{{ .Values.minio.ingress.host }}{{ else }}http://{{ include "bandolier.minio.fullname" . }}.{{ .Release.Namespace }}.svc:9000{{ end }}
+  Bucket:    {{ .Values.minio.bucket }}
+  Access key: {{ .Values.minio.auth.rootUser }}   (secret: the configured rootPassword)
+{{- if not .Values.minio.ingress.enabled }}
+  Note: the in-cluster endpoint is only reachable from agent pods running in this
+  cluster. Enable minio.ingress for off-cluster access.
+{{- end }}
+{{- if not .Values.minio.persistence.enabled }}
+⚠  minio.persistence.enabled=false — objects are in an emptyDir and will be LOST
+   if the MinIO pod is rescheduled.
+{{- end }}
+{{- end }}
+
+Health endpoint (used by k8s probes): /api/health

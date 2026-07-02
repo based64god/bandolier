@@ -1,0 +1,46 @@
+{{- if eq .Values.postgres.mode "cnpg" }}
+{{- $c := .Values.postgres.cnpg }}
+{{- $a := .Values.postgres.auth }}
+# A Secret of type kubernetes.io/basic-auth holds the app database owner's
+# credentials. CloudNativePG's initdb bootstrap references it so the created
+# role's password matches the DATABASE_URL the app is given.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "bandolier.postgres.fullname" . }}-app
+  labels:
+    {{- include "bandolier.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+type: kubernetes.io/basic-auth
+stringData:
+  username: {{ $a.username | quote }}
+  password: {{ $a.password | quote }}
+---
+# Requires the CloudNativePG operator (the postgresql.cnpg.io CRDs) to be
+# installed in the cluster. See https://cloudnative-pg.io/documentation.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ include "bandolier.postgres.fullname" . }}
+  labels:
+    {{- include "bandolier.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+spec:
+  instances: {{ $c.instances }}
+  # Explicit image wins; otherwise use the operator's community image for the
+  # requested major version.
+  imageName: {{ $c.imageName | default (printf "ghcr.io/cloudnative-pg/postgresql:%v" $c.postgresVersion) | quote }}
+  bootstrap:
+    initdb:
+      database: {{ $a.database | quote }}
+      owner: {{ $a.username | quote }}
+      secret:
+        name: {{ include "bandolier.postgres.fullname" . }}-app
+  storage:
+    size: {{ $c.storage.size | quote }}
+    {{- with $c.storage.storageClass }}
+    storageClass: {{ . | quote }}
+    {{- end }}
+  resources:
+    {{- toYaml $c.resources | nindent 4 }}
+{{- end }}

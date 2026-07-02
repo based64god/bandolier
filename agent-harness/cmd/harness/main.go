@@ -293,6 +293,12 @@ type config struct {
 	// transcript (BANDOLIER_CONTEXT_URL); set only for resumed runs. The harness
 	// fetches it before starting and folds it into the task as context.
 	contextURL string
+	// serenaPrompt is Serena's Claude-Code system-prompt override
+	// (`serena prompts print-cc-system-prompt-override`), populated once per run
+	// for Claude providers by setupSerena and appended to whatever framing the
+	// harness builds. It steers Claude toward Serena's semantic code-navigation
+	// tools over the built-in file tools. Empty for non-Claude providers.
+	serenaPrompt string
 }
 
 // resuming reports whether this run continues an existing branch (and PR)
@@ -1164,6 +1170,12 @@ func run(ctx context.Context, cfg config) error {
 		}
 	}
 
+	// Serena is part of the default harness for Claude runs: register its MCP
+	// server against the working tree and capture its Claude-Code system-prompt
+	// override. Done after the clone so the MCP server binds to the repo. Best
+	// effort — a failure here leaves Serena off but never blocks the run.
+	setupSerena(ctx, &cfg)
+
 	// Resumed runs start with the parent run's transcript folded into the task,
 	// so the agent carries the full context of the run it continues.
 	if cfg.contextURL != "" {
@@ -1622,18 +1634,62 @@ func runClaudeStreaming(ctx context.Context, dir string, env []string, args ...s
 
 // ── Codex (OpenAI) ──────────────────────────────────────────────────────────────
 
+// claudeProvider reports whether the run drives the `claude` CLI (Anthropic API
+// or AWS Bedrock), as opposed to Codex (OpenAI) or Antigravity (Gemini). Serena
+// is wired only for these: the MCP registration and system-prompt override are
+// Claude-Code specific.
+func (c config) claudeProvider() bool {
+	return c.provider == providerAnthropic || c.provider == providerBedrock
+}
+
+// setupSerena wires Serena into a Claude run: it registers Serena's MCP server
+// (user scope, so every `claude` invocation this run makes picks it up) against
+// the working tree, and captures Serena's Claude-Code system-prompt override
+// into cfg.serenaPrompt so withRepoPrompt appends it to the framing. Both steps
+// are best effort — Serena is an enhancement, so any failure is logged and the
+// run continues without it rather than aborting. No-op for non-Claude providers
+// and when SERENA_DISABLED is set (an escape hatch for debugging).
+func setupSerena(ctx context.Context, cfg *config) {
+	if !cfg.claudeProvider() || os.Getenv("SERENA_DISABLED") != "" {
+		return
+	}
+
+	// Register the MCP server for the claude CLI. --context claude-code tunes
+	// Serena's toolset/prompts for Claude Code; binding --project to the working
+	// tree scopes its language-server index to the repo under work.
+	if err := runCmd(ctx, cfg.workDir, os.Environ(),
+		"claude", "mcp", "add", "--scope", "user", "serena", "--",
+		"serena", "start-mcp-server", "--context", "claude-code", "--project", cfg.workDir,
+	); err != nil {
+		log.Printf("[harness] warn: registering serena MCP server failed, continuing without it: %v", err)
+		return
+	}
+
+	// Capture Serena's Claude-Code system-prompt override, which steers Claude
+	// toward Serena's semantic navigation tools over the built-in file tools.
+	out, err := captureCmd(ctx, cfg.workDir, "serena", "prompts", "print-cc-system-prompt-override")
+	if err != nil {
+		log.Printf("[harness] warn: fetching serena system-prompt override failed: %v", err)
+		return
+	}
+	cfg.serenaPrompt = strings.TrimSpace(out)
+	log.Printf("[harness] serena enabled (MCP server registered, system-prompt override applied)")
+}
+
 // withRepoPrompt layers the repo-attached system prompt (REPO_SYSTEM_PROMPT)
-// onto whatever framing the harness built for a run, so a repo-wide instruction
-// applies to every run regardless of mode or provider. Either side may be empty.
-// It does not replace the framing — the repo prompt is appended after it.
+// and, for Claude runs, Serena's Claude-Code system-prompt override onto
+// whatever framing the harness built for a run, so a repo-wide instruction and
+// the Serena tool-preference steer apply to every run regardless of mode. Any
+// side may be empty. It does not replace the framing — each layer is appended
+// after it, repo prompt first then the Serena override.
 func (c config) withRepoPrompt(sysPrompt string) string {
-	if c.repoSystemPrompt == "" {
-		return sysPrompt
+	parts := make([]string, 0, 3)
+	for _, p := range []string{sysPrompt, c.repoSystemPrompt, c.serenaPrompt} {
+		if strings.TrimSpace(p) != "" {
+			parts = append(parts, p)
+		}
 	}
-	if strings.TrimSpace(sysPrompt) == "" {
-		return c.repoSystemPrompt
-	}
-	return sysPrompt + "\n\n" + c.repoSystemPrompt
+	return strings.Join(parts, "\n\n")
 }
 
 // foldSystemPrompt folds the instructional framing into the prompt, for CLIs

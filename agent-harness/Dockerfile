@@ -48,7 +48,16 @@ RUN curl -fsSL https://claude.ai/install.sh | bash
 # OpenAI Codex:
 RUN curl -fsSL https://chatgpt.com/codex/install.sh | sh 
 # Google Antigravity (`agy`) — used for Gemini models:
-RUN curl -fsSL https://antigravity.google/cli/install.sh | bash 
+RUN curl -fsSL https://antigravity.google/cli/install.sh | bash
+
+# Serena — semantic code-navigation MCP server, included in the default harness
+# so Claude runs get language-server-backed symbol tools. Installed with uv (the
+# vendor's recommended path; marketplace/pip installs ship outdated launch
+# commands). `uv tool install` drops the `serena` binary into /root/.local/bin,
+# already on PATH above. The MCP server itself is registered per-run by the Go
+# harness (`claude mcp add serena`), so nothing to configure here beyond the CLI.
+RUN curl -fsSL https://astral.sh/uv/install.sh | sh \
+    && /root/.local/bin/uv tool install -p 3.13 serena-agent
 
 WORKDIR /workspace
 

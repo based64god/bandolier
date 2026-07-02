@@ -89,20 +89,27 @@ export function taskNameTooltip(agent: {
 /**
  * Picks the next session for Tab to jump to when cycling through the tasks
  * awaiting input. `names` is the awaiting sessions in table order; `current` is
- * the one Tab last landed on (or null/unknown). Returns the next name, wrapping
- * past the end back to the start, or null when nothing is waiting.
+ * the one Tab last landed on (or null/unknown). `direction` is +1 for Tab
+ * (forward) or -1 for Shift+Tab (backward). Returns the target name, wrapping
+ * around either end, or null when nothing is waiting.
  *
  * A `current` that's no longer waiting (resolved since, so absent from `names`)
- * indexes to -1, and `(-1 + 1) % len === 0` restarts the cycle from the top —
- * the same first-entry result as having no current target at all.
+ * — or null — has no position in the list, so the cycle restarts at the natural
+ * end for the direction: the first entry going forward, the last going backward.
  */
 export function nextAwaitingTarget(
   names: string[],
   current: string | null,
+  direction: 1 | -1 = 1,
 ): string | null {
-  if (names.length === 0) return null;
+  const len = names.length;
+  if (len === 0) return null;
   const idx = current ? names.indexOf(current) : -1;
-  return names[(idx + 1) % names.length]!;
+  // No current position: forward starts at the top, backward at the bottom.
+  if (idx === -1) return direction === 1 ? names[0]! : names[len - 1]!;
+  // +len keeps the operand non-negative before the modulo so backward wrapping
+  // (idx 0, direction -1) lands on the last entry rather than a negative index.
+  return names[(idx + direction + len) % len]!;
 }
 
 // When the finished job will be garbage-collected, shown as a local clock time

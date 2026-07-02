@@ -215,6 +215,66 @@ export async function postIssueComment(
   }
 }
 
+/**
+ * Posts a comment on a GitHub issue and returns the created comment's numeric
+ * id (needed to later read reactions on it for the approval flow). Throws on a
+ * non-2xx response.
+ */
+export async function postIssueCommentReturningId(
+  token: string,
+  repoFullName: string,
+  issueNumber: number,
+  body: string,
+): Promise<number> {
+  const res = await fetch(
+    `https://api.github.com/repos/${repoFullName}/issues/${issueNumber}/comments`,
+    {
+      method: "POST",
+      headers: {
+        ...ghHeaders(token),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ body }),
+    },
+  );
+  if (!res.ok) {
+    throw new Error(`GitHub API ${res.status}: ${res.statusText}`);
+  }
+  const data = (await res.json()) as { id: number };
+  return data.id;
+}
+
+/** A reaction on an issue comment, with the reacting user's login. */
+export interface CommentReaction {
+  content: string;
+  user: { login: string } | null;
+}
+
+/**
+ * Lists the reactions on an issue comment, each with the reacting user's login.
+ * Used by the approval flow to find a maintainer's 👍 / 🚀 on the bot's
+ * approval-request comment. Throws on a non-2xx response.
+ */
+export async function listCommentReactions(
+  token: string,
+  repoFullName: string,
+  commentId: number,
+): Promise<CommentReaction[]> {
+  const res = await fetch(
+    `https://api.github.com/repos/${repoFullName}/issues/comments/${commentId}/reactions`,
+    {
+      headers: {
+        ...ghHeaders(token),
+        Accept: "application/vnd.github.squirrel-girl-preview+json",
+      },
+    },
+  );
+  if (!res.ok) {
+    throw new Error(`GitHub API ${res.status}: ${res.statusText}`);
+  }
+  return (await res.json()) as CommentReaction[];
+}
+
 /** A token to try when posting a bot-voice comment, labeled for diagnostics. */
 export interface CommentTokenCandidate {
   token: string | null | undefined;

@@ -2,6 +2,13 @@ import type { AwsCredentials } from "~/server/agents/aws";
 import { env } from "~/env";
 import { ingestToken } from "~/lib/ingest";
 import { SPAWNED_BY_LABEL, spawnedByLabelValue } from "~/server/agents/labels";
+import {
+  agentEgressBlockedCidrs,
+  buildCustomNetworkPolicyBody,
+  buildNetworkPolicyBody,
+  NETWORK_POLICY_NAME,
+  type NetworkPolicyOptions,
+} from "~/server/agents/network-policy";
 import { db } from "~/server/db";
 import { taskRun } from "~/server/db/schema";
 import {
@@ -30,26 +37,6 @@ export const DEFAULT_HARNESS_IMAGE =
 const DEFAULT_NAMESPACE = "bandolier-agents";
 
 // ── Kubernetes resource bootstrap ─────────────────────────────────────────────
-
-/**
- * Per-repo loosenings of the default agent egress rules, applied to the
- * namespace's NetworkPolicy. Both default off (the locked-down baseline); each
- * widens what agent pods can reach. See `repoWebhookConfig` and the repo-config
- * UI's security warning.
- */
-export interface NetworkPolicyOptions {
-  /**
-   * Allow egress to private / in-cluster (RFC-1918) ranges by dropping the
-   * AGENT_EGRESS_BLOCKED_CIDRS exclusion. Lets agents reach other pods and
-   * in-cluster services (lateral-movement risk).
-   */
-  allowPrivateEgress?: boolean;
-  /**
-   * Allow egress on any TCP port instead of only 80/443. Widens the
-   * exfiltration / arbitrary-protocol surface.
-   */
-  allowAllPortsEgress?: boolean;
-}
 
 export async function ensureNamespace(
   namespace: string,
@@ -86,81 +73,13 @@ export async function ensureNamespace(
  *
  * Per-repo toggles (`opts`) can loosen the egress rules: `allowPrivateEgress`
  * drops the in-cluster CIDR block, and `allowAllPortsEgress` lifts the 80/443
- * port restriction. Both default off, preserving the locked-down baseline. The
- * policy is re-applied on every deploy (create, else replace) so flipping a
- * toggle takes effect on an existing namespace's next run rather than being
- * pinned to whatever it was first created with.
+ * port restriction. Both default off, preserving the locked-down baseline. A
+ * repo's custom policy YAML (advanced config, validated on save) replaces the
+ * built-in policy — toggles included — entirely. The policy is re-applied on
+ * every deploy (create, else replace) so flipping a toggle or editing the YAML
+ * takes effect on an existing namespace's next run rather than being pinned to
+ * whatever it was first created with.
  */
-/** Name of the per-namespace NetworkPolicy that isolates agent pods. */
-export const NETWORK_POLICY_NAME = "bandolier-agent-isolation";
-
-/**
- * Builds the agent-isolation NetworkPolicy body for a namespace, applying the
- * per-repo egress toggles to the default rules. Pure (no cluster access) so the
- * toggle logic is unit-testable. `blockedCidrs` is the configured in-cluster
- * block list (from AGENT_EGRESS_BLOCKED_CIDRS), dropped when private egress is
- * allowed.
- */
-export function buildNetworkPolicyBody(
-  namespace: string,
-  blockedCidrs: string[],
-  opts?: NetworkPolicyOptions,
-): object {
-  // `allowPrivateEgress` drops the in-cluster CIDR block; otherwise the
-  // configured private ranges stay unreachable.
-  const blocked = opts?.allowPrivateEgress ? [] : blockedCidrs;
-
-  // `allowAllPortsEgress` lifts the 80/443 restriction (omitting `ports`
-  // altogether means every port); otherwise only HTTP(S) is allowed out.
-  const internetPorts = opts?.allowAllPortsEgress
-    ? undefined
-    : [
-        { protocol: "TCP" as const, port: 443 },
-        { protocol: "TCP" as const, port: 80 },
-      ];
-
-  const ipBlock =
-    blocked.length > 0
-      ? { cidr: "0.0.0.0/0", except: blocked }
-      : { cidr: "0.0.0.0/0" };
-
-  return {
-    apiVersion: "networking.k8s.io/v1",
-    kind: "NetworkPolicy",
-    metadata: {
-      name: NETWORK_POLICY_NAME,
-      namespace,
-      labels: { "app.kubernetes.io/managed-by": "bandolier" },
-    },
-    spec: {
-      podSelector: { matchLabels: { app: "bandolier-agent" } },
-      policyTypes: ["Ingress", "Egress"],
-      ingress: [], // deny all inbound
-      egress: [
-        {
-          // DNS resolution via kube-dns.
-          to: [
-            {
-              namespaceSelector: {},
-              podSelector: { matchLabels: { "k8s-app": "kube-dns" } },
-            },
-          ],
-          ports: [
-            { protocol: "UDP", port: 53 },
-            { protocol: "TCP", port: 53 },
-          ],
-        },
-        {
-          // Public internet (and, when allowed, in-cluster ranges), restricted
-          // to HTTP(S) unless all ports are permitted.
-          to: [{ ipBlock }],
-          ...(internetPorts && { ports: internetPorts }),
-        },
-      ],
-    },
-  };
-}
-
 async function ensureNetworkPolicy(
   namespace: string,
   kubeconfig: string,
@@ -168,10 +87,11 @@ async function ensureNetworkPolicy(
 ): Promise<void> {
   if (env.AGENT_NETWORK_POLICY !== "true") return;
 
-  const blockedCidrs = env.AGENT_EGRESS_BLOCKED_CIDRS.split(",")
-    .map((c) => c.trim())
-    .filter(Boolean);
-  const body = buildNetworkPolicyBody(namespace, blockedCidrs, opts);
+  // A custom policy throws on unparseable YAML, failing the deploy closed —
+  // better no run than a run without the policy the admin configured.
+  const body = opts?.policyYaml
+    ? buildCustomNetworkPolicyBody(namespace, opts.policyYaml)
+    : buildNetworkPolicyBody(namespace, agentEgressBlockedCidrs(), opts);
 
   const api = getNetworkingV1Api(kubeconfig);
   try {
@@ -351,10 +271,10 @@ export interface JobSpec {
    */
   repoSystemPrompt?: string;
   /**
-   * Per-repo loosenings of the agent NetworkPolicy egress rules (admin-set in
-   * repo config). Both default off, preserving the locked-down baseline; each
-   * widens what this run's pod can reach. Applied to the namespace's policy
-   * before the Job is created. Unset = the default isolated egress.
+   * Per-repo agent NetworkPolicy configuration (admin-set in repo config):
+   * egress-loosening toggles, or a raw custom policy YAML that replaces the
+   * built-in policy entirely. Applied to the namespace's policy before the Job
+   * is created. Unset = the default isolated egress.
    */
   networkPolicy?: NetworkPolicyOptions;
 }

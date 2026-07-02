@@ -1,0 +1,1 @@
+ALTER TABLE "repo_webhook_config" ADD COLUMN "network_policy_yaml" text;

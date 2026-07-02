@@ -291,6 +291,12 @@ export const repoWebhookConfig = pgTable("repo_webhook_config", {
   allowAllPortsEgress: boolean("allow_all_ports_egress")
     .notNull()
     .default(false),
+  // Advanced: raw NetworkPolicy YAML that replaces the built-in agent policy —
+  // and with it both toggles above — entirely for this repo's namespaces.
+  // Validated structurally on save (see validateNetworkPolicyYaml); its
+  // metadata is overridden to the managed policy name/namespace at apply time.
+  // Null = use the built-in policy with the toggles.
+  networkPolicyYaml: text("network_policy_yaml"),
   configuredBy: text("configured_by").references(() => user.id, {
     onDelete: "set null",
   }),

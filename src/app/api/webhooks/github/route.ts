@@ -44,7 +44,10 @@ import {
 } from "~/server/agents/models";
 import { repoToNamespace } from "~/server/agents/namespace";
 import { resolveModelCredentials } from "~/server/agents/resolve-credentials";
-import { getRepoWebhookConfig } from "~/server/agents/webhook-config";
+import {
+  getRepoWebhookConfig,
+  type RepoNetworkPolicy,
+} from "~/server/agents/webhook-config";
 import { db } from "~/server/db";
 import { taskRun } from "~/server/db/schema";
 import {
@@ -357,9 +360,7 @@ async function handleIssueOpened(
   defaultModel: string | null,
   defaultEffort: string | null,
   repoSystemPrompt: string | null,
-  networkPolicy:
-    | { allowPrivateEgress: boolean; allowAllPortsEgress: boolean }
-    | undefined,
+  networkPolicy: RepoNetworkPolicy | undefined,
 ): Promise<void> {
   const { issue, repository, sender } = payload;
 
@@ -371,20 +372,6 @@ async function handleIssueOpened(
       console.log("[bandolier:webhook] issue skipped — prefix not present", {
         issue: issue.number,
         prefix,
-      });
-      return;
-    }
-  }
-
-  // Label gate: if GITHUB_TRIGGER_LABEL is set, only act on matching issues.
-  if (env.GITHUB_TRIGGER_LABEL) {
-    const hasLabel = issue.labels.some(
-      (l) => l.name === env.GITHUB_TRIGGER_LABEL,
-    );
-    if (!hasLabel) {
-      console.log("[bandolier:webhook] issue skipped — label not matched", {
-        issue: issue.number,
-        required: env.GITHUB_TRIGGER_LABEL,
       });
       return;
     }
@@ -625,9 +612,7 @@ async function handleIssueComment(
   defaultModel: string | null,
   defaultEffort: string | null,
   repoSystemPrompt: string | null,
-  networkPolicy:
-    | { allowPrivateEgress: boolean; allowAllPortsEgress: boolean }
-    | undefined,
+  networkPolicy: RepoNetworkPolicy | undefined,
 ): Promise<void> {
   const { issue, comment, repository } = payload;
   const isPullRequest = !!issue.pull_request;

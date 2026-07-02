@@ -12,6 +12,11 @@ import { validateArtifactStore } from "~/server/agents/artifacts";
 import { getUserGithubToken } from "~/server/agents/github-token";
 import { validateOpenaiKey } from "~/server/agents/openai";
 import { validateKubeconfig } from "~/server/agents/kubeconfig";
+import { repoToNamespace } from "~/server/agents/namespace";
+import {
+  renderDefaultNetworkPolicyYaml,
+  validateNetworkPolicyYaml,
+} from "~/server/agents/network-policy";
 import { isRepoAdmin } from "~/server/agents/webhook-config";
 import { EFFORT_LEVELS } from "~/lib/effort";
 import { type db } from "~/server/db";
@@ -86,10 +91,13 @@ export const webhooksRouter = createTRPCRouter({
           systemPrompt: repoWebhookConfig.systemPrompt,
           allowPrivateEgress: repoWebhookConfig.allowPrivateEgress,
           allowAllPortsEgress: repoWebhookConfig.allowAllPortsEgress,
+          networkPolicyYaml: repoWebhookConfig.networkPolicyYaml,
         })
         .from(repoWebhookConfig)
         .where(eq(repoWebhookConfig.repoFullName, input.repoFullName))
         .limit(1);
+      const allowPrivateEgress = row?.allowPrivateEgress ?? false;
+      const allowAllPortsEgress = row?.allowAllPortsEgress ?? false;
       return {
         // Whether a config row exists at all (any setting saved).
         configured: !!row,
@@ -100,8 +108,16 @@ export const webhooksRouter = createTRPCRouter({
         defaultWebhookEffort: row?.defaultWebhookEffort ?? null,
         systemPrompt: row?.systemPrompt ?? "",
         // Network-policy egress toggles (both off unless a row turns them on).
-        allowPrivateEgress: row?.allowPrivateEgress ?? false,
-        allowAllPortsEgress: row?.allowAllPortsEgress ?? false,
+        allowPrivateEgress,
+        allowAllPortsEgress,
+        // Advanced: the repo's custom NetworkPolicy YAML ("" = none), plus the
+        // policy the toggles would otherwise produce — the starting point the
+        // UI seeds the raw-YAML editor with.
+        networkPolicyYaml: row?.networkPolicyYaml ?? "",
+        defaultNetworkPolicyYaml: renderDefaultNetworkPolicyYaml(
+          repoToNamespace(input.repoFullName),
+          { allowPrivateEgress, allowAllPortsEgress },
+        ),
       };
     }),
 
@@ -134,6 +150,39 @@ export const webhooksRouter = createTRPCRouter({
         ctx.session.user.id,
         values,
       );
+      return { success: true };
+    }),
+
+  // Set (or clear, with a blank string) the repo's custom NetworkPolicy YAML —
+  // the advanced escape hatch that replaces the built-in agent policy (and the
+  // egress toggles) entirely. Admin-only and validated structurally before it's
+  // stored, so a broken policy is rejected at save time rather than failing
+  // every subsequent deploy. SECURITY: a custom policy can open any egress the
+  // cluster allows — the UI surfaces the same isolation warning as the toggles.
+  setNetworkPolicyYaml: protectedProcedure
+    .input(
+      z.object({
+        repoFullName: z.string().min(1),
+        // Capped like the system prompt so a pathological document can't bloat
+        // the config row; real policies are a few hundred bytes.
+        yaml: z.string().max(20000),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await requireRepoAdmin(ctx, input.repoFullName);
+      const yaml = input.yaml.trim() ? input.yaml : null;
+      if (yaml) {
+        const validation = validateNetworkPolicyYaml(yaml);
+        if (!validation.valid) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: validation.error,
+          });
+        }
+      }
+      await upsertRepoConfig(ctx.db, input.repoFullName, ctx.session.user.id, {
+        networkPolicyYaml: yaml,
+      });
       return { success: true };
     }),
 

@@ -148,7 +148,7 @@ When an issue is opened, Bandolier verifies the App's signature, finds the Bando
 
 The "Bando picked up this issue…" comment is posted exclusively via the App installation token, so it is always attributed to `bandolier[bot]`. On a repo where the App isn't installed there's no bot identity to comment as, so the comment is skipped rather than posted under a user or service token.
 
-Optional env knobs: `GITHUB_TRIGGER_LABEL` (only act on issues carrying a specific label) and, per repo, a trigger phrase that issue text must contain (set in the repo-config UI).
+Optionally, each repo can set a trigger phrase that issue text must contain (set in the repo-config UI).
 
 ### Resuming a run by commenting
 
@@ -251,7 +251,6 @@ configuration modal (Network policy egress). Both toggles are **off by default**
 | `GITHUB_APP_CLIENT_ID` / `GITHUB_APP_CLIENT_SECRET` | The App's OAuth credentials. Optional until login is moved to the App.                                                                                      |
 | `NEXT_PUBLIC_GITHUB_APP_SLUG`                       | The App's public slug, used to link the repo-config UI to its install page.                                                                                 |
 | `GITHUB_WEBHOOK_SECRET`                             | Secret for verifying webhook signatures. With the GitHub App, set this to the App's webhook secret (delivery is app-level — there are no per-repo secrets). |
-| `GITHUB_TRIGGER_LABEL`                              | If set, only act on issues that carry this label.                                                                                                           |
 
 ### Access gate (optional)
 

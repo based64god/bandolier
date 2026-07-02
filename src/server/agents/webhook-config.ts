@@ -28,16 +28,19 @@ export interface RepoWebhookConfig {
 }
 
 /**
- * Per-repo loosenings of the agent NetworkPolicy egress rules (admin-only).
- * Both default off, preserving the locked-down baseline; each widens what this
- * repo's agent pods can reach. See `getRepoNetworkPolicy` for the loader callers
- * use on the deploy/webhook paths.
+ * Per-repo agent NetworkPolicy configuration (admin-only): egress-loosening
+ * toggles (both default off, preserving the locked-down baseline) and,
+ * advanced, a raw custom policy YAML that replaces the built-in policy —
+ * toggles included — entirely. See `getRepoNetworkPolicy` for the loader
+ * callers use on the deploy/webhook paths.
  */
 export interface RepoNetworkPolicy {
   /** Allow egress to private / in-cluster (RFC-1918) ranges. */
   allowPrivateEgress: boolean;
   /** Allow egress on any TCP port instead of only 80/443. */
   allowAllPortsEgress: boolean;
+  /** Raw custom NetworkPolicy YAML (validated on save); null = built-in policy. */
+  policyYaml: string | null;
 }
 
 /**
@@ -112,6 +115,7 @@ export async function getRepoWebhookConfig(
       systemPrompt: repoWebhookConfig.systemPrompt,
       allowPrivateEgress: repoWebhookConfig.allowPrivateEgress,
       allowAllPortsEgress: repoWebhookConfig.allowAllPortsEgress,
+      networkPolicyYaml: repoWebhookConfig.networkPolicyYaml,
     })
     .from(repoWebhookConfig)
     .where(eq(repoWebhookConfig.repoFullName, repoFullName))
@@ -126,6 +130,7 @@ export async function getRepoWebhookConfig(
     networkPolicy: {
       allowPrivateEgress: row.allowPrivateEgress,
       allowAllPortsEgress: row.allowAllPortsEgress,
+      policyYaml: row.networkPolicyYaml ?? null,
     },
   };
 }
@@ -160,6 +165,7 @@ export async function getRepoNetworkPolicy(
     .select({
       allowPrivateEgress: repoWebhookConfig.allowPrivateEgress,
       allowAllPortsEgress: repoWebhookConfig.allowAllPortsEgress,
+      networkPolicyYaml: repoWebhookConfig.networkPolicyYaml,
     })
     .from(repoWebhookConfig)
     .where(eq(repoWebhookConfig.repoFullName, repoFullName))
@@ -168,6 +174,7 @@ export async function getRepoNetworkPolicy(
   return {
     allowPrivateEgress: row.allowPrivateEgress,
     allowAllPortsEgress: row.allowAllPortsEgress,
+    policyYaml: row.networkPolicyYaml ?? null,
   };
 }
 

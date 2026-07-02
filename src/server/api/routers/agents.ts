@@ -59,6 +59,7 @@ import {
   getRepoAgentImage,
   getRepoNetworkPolicy,
   getRepoSystemPrompt,
+  type RepoNetworkPolicy,
 } from "~/server/agents/webhook-config";
 import { type db } from "~/server/db";
 import { acpFrame, agentInput, taskRun } from "~/server/db/schema";
@@ -1431,11 +1432,10 @@ export const agentsRouter = createTRPCRouter({
           | { registry: string; dockerConfigJson: string }
           | undefined;
         let repoSystemPrompt: string | undefined;
-        // Per-repo network-policy egress toggles (both off by default, keeping
-        // the locked-down baseline). Best-effort like the other repo lookups.
-        let networkPolicy:
-          | { allowPrivateEgress: boolean; allowAllPortsEgress: boolean }
-          | undefined;
+        // Per-repo network-policy config (egress toggles / custom policy YAML,
+        // all unset by default, keeping the locked-down baseline). Best-effort
+        // like the other repo lookups.
+        let networkPolicy: RepoNetworkPolicy | undefined;
         if (input.repoFullName) {
           try {
             agentImage =

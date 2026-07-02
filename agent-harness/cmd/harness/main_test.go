@@ -733,3 +733,50 @@ func TestClaudeProvider(t *testing.T) {
 		}
 	}
 }
+
+func TestSetupSerenaAntigravity(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := antigravityMCPConfigPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	// Pre-existing config with an unrelated server must be preserved.
+	if err := os.WriteFile(path, []byte(`{"mcpServers":{"other":{"command":"other"}},"userSetting":true}`), 0o600); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+
+	setupSerenaAntigravity(&config{workDir: "/repo"})
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	var parsed struct {
+		MCPServers map[string]struct {
+			Command string   `json:"command"`
+			Args    []string `json:"args"`
+		} `json:"mcpServers"`
+		UserSetting bool `json:"userSetting"`
+	}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !parsed.UserSetting {
+		t.Error("unrelated top-level key was dropped")
+	}
+	if _, ok := parsed.MCPServers["other"]; !ok {
+		t.Error("unrelated MCP server was dropped")
+	}
+	serena, ok := parsed.MCPServers["serena"]
+	if !ok {
+		t.Fatal("serena MCP server not written")
+	}
+	if serena.Command != "serena" {
+		t.Errorf("serena command = %q, want %q", serena.Command, "serena")
+	}
+	want := []string{"start-mcp-server", "--context", "antigravity", "--project", "/repo"}
+	if strings.Join(serena.Args, " ") != strings.Join(want, " ") {
+		t.Errorf("serena args = %v, want %v", serena.Args, want)
+	}
+}

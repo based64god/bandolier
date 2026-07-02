@@ -1098,9 +1098,13 @@ export const agentsRouter = createTRPCRouter({
       return { success: true };
     }),
 
-  // Poll for agent→client frames after a cursor (the last seq seen). Returns the
-  // frames oldest-first plus the new cursor; the frontend client feeds them into
-  // its ACP connection and advances the cursor.
+  // Poll for the session's frames after a cursor (the last seq seen). Returns
+  // the frames oldest-first plus the new cursor; the frontend client feeds them
+  // into its ACP connection and advances the cursor. Both directions are
+  // returned: the user's own turns exist in the relay only as client→agent
+  // session/prompt frames, so a replay (page reload, or reopening a finished
+  // session) needs them to show both sides of the conversation. The client
+  // ignores frames it doesn't render (cancels, control frames).
   acpPull: protectedProcedure
     .input(
       z.object({
@@ -1111,20 +1115,41 @@ export const agentsRouter = createTRPCRouter({
       }),
     )
     .query(async ({ input, ctx }) => {
-      await assertOwnsInteractiveJob(
-        ctx.db,
-        ctx.session.user.id,
-        input.namespace,
-        input.jobName,
-        input.repoFullName,
-      );
+      const userId = ctx.session.user.id;
+      await assertRepoAccess(ctx.db, userId, input.repoFullName);
+      // Authorize against the durable run row, not the live pod, so a finished
+      // session's conversation stays readable after its pod is gone (and each
+      // poll skips a k8s round-trip). Visibility matches the persisted
+      // transcript in getLogs: the run's owner, or any collaborator when the
+      // run belongs to the repo this query was authorized for. Rows predating
+      // spawnedBy (or pruned rows) fall back to the live-pod ownership check.
+      const [run] = await ctx.db
+        .select({
+          spawnedBy: taskRun.spawnedBy,
+          repoFullName: taskRun.repoFullName,
+        })
+        .from(taskRun)
+        .where(eq(taskRun.jobName, input.jobName))
+        .limit(1);
+      const mayViewRun =
+        run &&
+        (run.spawnedBy === userId ||
+          (!!run.repoFullName && run.repoFullName === input.repoFullName));
+      if (!mayViewRun) {
+        await assertOwnsInteractiveJob(
+          ctx.db,
+          userId,
+          input.namespace,
+          input.jobName,
+          input.repoFullName,
+        );
+      }
       const rows = await ctx.db
         .select({ seq: acpFrame.seq, payload: acpFrame.payload })
         .from(acpFrame)
         .where(
           and(
             eq(acpFrame.jobName, input.jobName),
-            eq(acpFrame.direction, "a2c"),
             gt(acpFrame.seq, input.cursor),
           ),
         )

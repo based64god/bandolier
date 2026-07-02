@@ -15,27 +15,31 @@ const POLL_INTERVAL_MS = 1500;
 
 /**
  * Drives the frontend's side of an interactive ACP session over the HTTP relay.
- * It polls agents.acpPull for agent→client frames, folds them into a chat
+ * It polls agents.acpPull for the session's frames, folds them into a chat
  * timeline, captures the session id, and exposes sendPrompt/endSession which
  * enqueue client→agent frames via agents.acpSend. The harness proxy establishes
  * and seeds the session, so this attaches to a running session rather than
  * performing the handshake itself.
  *
- * Polls only while `enabled` (wire it to running && expanded). A collapsed
+ * Polls only while `enabled` (wire it to the row being expanded). A collapsed
  * session stops polling entirely — its waiting/notification state comes from the
  * separate agents.list query, and expanding replays the full backlog from the
- * cursor — so we don't hit the relay (and its per-poll k8s ownership check) for
- * conversations no one is looking at.
+ * cursor — so we don't hit the relay for conversations no one is looking at.
+ * When the session is no longer `running`, the backlog is drained once and
+ * polling stops on the first empty batch: the frames are durable, so a finished
+ * session replays its whole conversation instead of showing nothing.
  */
 export function useAcpSession({
   namespace,
   jobName,
   repoFullName,
+  running,
   enabled,
 }: {
   namespace: string;
   jobName: string;
   repoFullName?: string;
+  running: boolean;
   enabled: boolean;
 }) {
   const utils = api.useUtils();
@@ -45,7 +49,16 @@ export function useAcpSession({
 
   const itemsRef = useRef<TimelineItem[]>([]);
   const cursorRef = useRef(0);
-  const nextIdRef = useRef(1);
+  // JSON-RPC ids for the prompts this instance sends. Seeded with the epoch
+  // (lazily, in sendPrompt — render must stay pure) rather than 1 so ids never
+  // collide across page reloads: replayed session/prompt frames are deduped
+  // against `sentPromptIds` by id, and a reload that reused ids 1, 2, … would
+  // wrongly swallow an earlier visit's replayed turns.
+  const nextIdRef = useRef(0);
+  // Ids of prompts sent by this instance, whose bubbles were already rendered
+  // optimistically — applyFrames skips these when their frames come back
+  // around on the next pull.
+  const sentPromptIdsRef = useRef(new Set<number>());
 
   // Poll for agent→client frames while the session is live. A manual loop (vs.
   // a useQuery keyed by the cursor) keeps the advancing cursor from churning
@@ -53,6 +66,7 @@ export function useAcpSession({
   useEffect(() => {
     if (!enabled) return;
     let active = true;
+    let drained = false;
     const tick = async () => {
       try {
         const res = await utils.agents.acpPull.fetch(
@@ -70,13 +84,20 @@ export function useAcpSession({
           // cheap and scoped to the conversation on screen.
           { staleTime: 0 },
         );
-        if (!active || res.frames.length === 0) return;
+        if (!active) return;
+        if (res.frames.length === 0) {
+          // A finished session's backlog is fully drained and no new frames
+          // can arrive, so stop polling; the timeline stays as the replayed
+          // conversation.
+          if (!running) drained = true;
+          return;
+        }
         cursorRef.current = res.cursor;
         const {
           items: next,
           sessionId: sid,
           commands: cmds,
-        } = applyFrames(itemsRef.current, res.frames);
+        } = applyFrames(itemsRef.current, res.frames, sentPromptIdsRef.current);
         itemsRef.current = next;
         setItems(next);
         if (sid) setSessionId(sid);
@@ -86,12 +107,18 @@ export function useAcpSession({
       }
     };
     void tick();
-    const handle = setInterval(() => void tick(), POLL_INTERVAL_MS);
+    const handle = setInterval(() => {
+      if (drained) {
+        clearInterval(handle);
+        return;
+      }
+      void tick();
+    }, POLL_INTERVAL_MS);
     return () => {
       active = false;
       clearInterval(handle);
     };
-  }, [enabled, namespace, jobName, repoFullName, utils]);
+  }, [enabled, running, namespace, jobName, repoFullName, utils]);
 
   const send = api.agents.acpSend.useMutation();
 
@@ -99,16 +126,19 @@ export function useAcpSession({
     (text: string) => {
       const trimmed = text.trim();
       if (!trimmed || !sessionId) return;
-      const frame = promptFrame(sessionId, nextIdRef.current++, trimmed);
-      // Optimistically show the user's turn. The proxy only echoes the seed
-      // prompt, not follow-ups, so this is the sole source for follow-up bubbles
-      // (no duplication).
+      if (nextIdRef.current === 0) nextIdRef.current = Date.now();
+      const id = nextIdRef.current++;
+      const frame = promptFrame(sessionId, id, trimmed);
+      // Optimistically show the user's turn; recording the id lets applyFrames
+      // skip this prompt's frame when the pull loop sees it, so the bubble
+      // isn't duplicated.
+      sentPromptIdsRef.current.add(id);
       const next: TimelineItem[] = [
         ...itemsRef.current,
         {
           type: "message",
           role: "user",
-          id: `local-${nextIdRef.current}`,
+          id: `local-${id}`,
           text: trimmed,
         },
       ];

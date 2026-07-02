@@ -171,6 +171,38 @@ func TestACPProxyRelays(t *testing.T) {
 	_ = agentStdoutW.Close()
 }
 
+func TestFramePromptText(t *testing.T) {
+	cases := []struct {
+		name, frame, want string
+	}{
+		{
+			name:  "single text block",
+			frame: `{"jsonrpc":"2.0","id":1,"method":"session/prompt","params":{"sessionId":"s","prompt":[{"type":"text","text":"fix the bug"}]}}`,
+			want:  "fix the bug",
+		},
+		{
+			name:  "multiple blocks concatenated",
+			frame: `{"jsonrpc":"2.0","id":2,"method":"session/prompt","params":{"prompt":[{"type":"text","text":"a "},{"type":"text","text":"b"}]}}`,
+			want:  "a b",
+		},
+		{
+			name:  "no prompt",
+			frame: `{"jsonrpc":"2.0","method":"_bandolier/endSession"}`,
+			want:  "",
+		},
+		{
+			name:  "not json",
+			frame: "nope",
+			want:  "",
+		},
+	}
+	for _, tc := range cases {
+		if got := framePromptText(tc.frame); got != tc.want {
+			t.Errorf("%s: framePromptText = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
 func waitFor(t *testing.T, cond func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)

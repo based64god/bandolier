@@ -1,6 +1,6 @@
-// Pure helpers for turning the agent→client ACP frame stream into a chat
-// timeline the interactive UI renders. Kept free of React so it can be unit
-// tested in isolation.
+// Pure helpers for turning the ACP frame stream into a chat timeline the
+// interactive UI renders. Kept free of React so it can be unit tested in
+// isolation.
 
 export type TimelineItem =
   | {
@@ -44,23 +44,35 @@ interface ParsedUpdate {
 }
 
 interface ParsedFrame {
+  id?: number | string;
   method?: string;
-  params?: { sessionId?: string; update?: ParsedUpdate };
+  params?: {
+    sessionId?: string;
+    update?: ParsedUpdate;
+    prompt?: { text?: string }[];
+  };
 }
 
 /**
- * Folds a batch of agent→client frames into the timeline, returning the new
- * items and the session id if one was observed. Assistant message chunks that
- * share a messageId are coalesced into a single bubble; tool calls become their
- * own rows; user_message_chunk frames (the proxy's seed echo) become user
- * bubbles. An available_commands_update surfaces the session's slash commands
- * (for the input's typeahead) rather than a timeline item. Frames that aren't
- * session/update notifications (responses, etc.) are ignored for rendering —
- * only their sessionId is harvested.
+ * Folds a batch of relay frames (both directions, seq-ordered) into the
+ * timeline, returning the new items and the session id if one was observed.
+ * Assistant message chunks that share a messageId are coalesced into a single
+ * bubble; tool calls become their own rows; user_message_chunk frames (the
+ * proxy's seed echo) become user bubbles. The user's follow-up turns exist in
+ * the relay only as their client→agent session/prompt frames, so those render
+ * as user bubbles too — that's what makes a replay (page reload, or reopening
+ * a finished session) show both sides of the conversation. Prompts whose
+ * JSON-RPC id is in `sentPromptIds` are skipped: this client instance already
+ * rendered them optimistically when it sent them. An
+ * available_commands_update surfaces the session's slash commands (for the
+ * input's typeahead) rather than a timeline item. Other frames (responses,
+ * cancels, control frames) are ignored for rendering — only their sessionId is
+ * harvested.
  */
 export function applyFrames(
   prev: TimelineItem[],
   frames: RawAcpFrame[],
+  sentPromptIds?: ReadonlySet<number | string>,
 ): {
   items: TimelineItem[];
   sessionId?: string;
@@ -79,6 +91,16 @@ export function applyFrames(
       continue;
     }
     if (msg.params?.sessionId) sessionId = msg.params.sessionId;
+    if (msg.method === "session/prompt") {
+      if (msg.id !== undefined && sentPromptIds?.has(msg.id)) continue;
+      const text = (msg.params?.prompt ?? [])
+        .map((p) => p?.text ?? "")
+        .join("");
+      if (text) {
+        items.push({ type: "message", role: "user", id: `u-${f.seq}`, text });
+      }
+      continue;
+    }
     if (msg.method !== "session/update" || !msg.params?.update) continue;
 
     const u = msg.params.update;

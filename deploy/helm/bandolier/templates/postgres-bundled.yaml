@@ -1,4 +1,5 @@
-{{- if .Values.postgres.enabled }}
+{{- if eq .Values.postgres.mode "bundled" }}
+{{- $b := .Values.postgres.bundled }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -57,8 +58,8 @@ spec:
         fsGroup: 999
       containers:
         - name: postgres
-          image: "{{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}"
-          imagePullPolicy: {{ .Values.postgres.image.pullPolicy }}
+          image: "{{ $b.image.repository }}:{{ $b.image.tag }}"
+          imagePullPolicy: {{ $b.image.pullPolicy }}
           ports:
             - name: postgres
               containerPort: 5432
@@ -82,22 +83,22 @@ spec:
             initialDelaySeconds: 15
             periodSeconds: 15
           resources:
-            {{- toYaml .Values.postgres.resources | nindent 12 }}
+            {{- toYaml $b.resources | nindent 12 }}
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data
-  {{- if .Values.postgres.persistence.enabled }}
+  {{- if $b.persistence.enabled }}
   volumeClaimTemplates:
     - metadata:
         name: data
       spec:
         accessModes: ["ReadWriteOnce"]
-        {{- with .Values.postgres.persistence.storageClass }}
+        {{- with $b.persistence.storageClass }}
         storageClassName: {{ . | quote }}
         {{- end }}
         resources:
           requests:
-            storage: {{ .Values.postgres.persistence.size | quote }}
+            storage: {{ $b.persistence.size | quote }}
   {{- else }}
       volumes:
         - name: data

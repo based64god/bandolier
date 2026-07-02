@@ -1,0 +1,194 @@
+{{- if .Values.minio.enabled }}
+{{- $m := .Values.minio }}
+{{- $name := include "bandolier.minio.fullname" . }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "bandolier.labels" . | nindent 4 }}
+    app.kubernetes.io/component: minio
+type: Opaque
+stringData:
+  MINIO_ROOT_USER: {{ $m.auth.rootUser | quote }}
+  MINIO_ROOT_PASSWORD: {{ $m.auth.rootPassword | quote }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "bandolier.labels" . | nindent 4 }}
+    app.kubernetes.io/component: minio
+spec:
+  ports:
+    - name: s3
+      port: 9000
+      targetPort: s3
+    - name: console
+      port: 9001
+      targetPort: console
+  selector:
+    {{- include "bandolier.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: minio
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "bandolier.labels" . | nindent 4 }}
+    app.kubernetes.io/component: minio
+spec:
+  serviceName: {{ $name }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "bandolier.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: minio
+  template:
+    metadata:
+      labels:
+        {{- include "bandolier.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: minio
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: minio
+          image: "{{ $m.image.repository }}:{{ $m.image.tag }}"
+          imagePullPolicy: {{ $m.image.pullPolicy }}
+          args: ["server", "/data", "--console-address", ":9001"]
+          envFrom:
+            - secretRef:
+                name: {{ $name }}
+          ports:
+            - name: s3
+              containerPort: 9000
+            - name: console
+              containerPort: 9001
+          readinessProbe:
+            httpGet:
+              path: /minio/health/ready
+              port: s3
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /minio/health/live
+              port: s3
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          resources:
+            {{- toYaml $m.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+  {{- if $m.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- with $m.persistence.storageClass }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ $m.persistence.size | quote }}
+  {{- else }}
+      volumes:
+        - name: data
+          emptyDir: {}
+  {{- end }}
+---
+# One-shot Job that creates the artifact bucket once MinIO is up. A post-install/
+# post-upgrade hook so it runs after the StatefulSet exists; idempotent, so
+# re-running on upgrade is harmless.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $name }}-createbucket
+  labels:
+    {{- include "bandolier.labels" . | nindent 4 }}
+    app.kubernetes.io/component: minio
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 5
+  template:
+    metadata:
+      labels:
+        {{- include "bandolier.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: minio
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: createbucket
+          image: "{{ $m.mcImage.repository }}:{{ $m.mcImage.tag }}"
+          imagePullPolicy: {{ $m.mcImage.pullPolicy }}
+          envFrom:
+            - secretRef:
+                name: {{ $name }}
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              until mc alias set bandolier "http://{{ $name }}:9000" "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"; do
+                echo "waiting for minio..."; sleep 2;
+              done
+              mc mb --ignore-existing bandolier/{{ $m.bucket }}
+              echo "bucket {{ $m.bucket }} ready"
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          env:
+            # mc writes its config under $HOME/.mc; give it a writable one.
+            - name: MC_CONFIG_DIR
+              value: /tmp/.mc
+      volumes:
+        - name: tmp
+          emptyDir: {}
+{{- if $m.ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "bandolier.labels" . | nindent 4 }}
+    app.kubernetes.io/component: minio
+  {{- with $m.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with $m.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- if $m.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ $m.ingress.host | quote }}
+      secretName: {{ $m.ingress.tls.secretName }}
+  {{- end }}
+  rules:
+    - host: {{ $m.ingress.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $name }}
+                port:
+                  number: 9000
+{{- end }}
+{{- end }}

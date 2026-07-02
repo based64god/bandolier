@@ -75,26 +75,55 @@ Bundled-Postgres resource name.
 {{- end }}
 
 {{/*
-The effective DATABASE_URL. When Postgres is bundled, derive it from the
-StatefulSet's service and auth settings; otherwise use the provided value.
+True when Postgres is deployed by this chart (any mode but external).
+*/}}
+{{- define "bandolier.postgres.deployed" -}}
+{{- if or (eq .Values.postgres.mode "bundled") (eq .Values.postgres.mode "cnpg") }}true{{ end }}
+{{- end }}
+
+{{/*
+Host of the in-cluster Postgres for the active mode. CloudNativePG exposes the
+primary at "<cluster>-rw"; the bundled StatefulSet uses its headless service.
+*/}}
+{{- define "bandolier.postgres.host" -}}
+{{- if eq .Values.postgres.mode "cnpg" }}
+{{- printf "%s-rw" (include "bandolier.postgres.fullname" .) }}
+{{- else }}
+{{- include "bandolier.postgres.fullname" . }}
+{{- end }}
+{{- end }}
+
+{{/*
+The effective DATABASE_URL. For a chart-deployed database (bundled/cnpg) derive
+it from the active mode's host + auth; otherwise use the provided value.
 */}}
 {{- define "bandolier.databaseUrl" -}}
-{{- if .Values.postgres.enabled }}
-{{- $svc := include "bandolier.postgres.fullname" . }}
+{{- if include "bandolier.postgres.deployed" . }}
 {{- $a := .Values.postgres.auth }}
-{{- printf "postgresql://%s:%s@%s:5432/%s" $a.username $a.password $svc $a.database }}
+{{- printf "postgresql://%s:%s@%s:5432/%s" $a.username $a.password (include "bandolier.postgres.host" .) $a.database }}
 {{- else }}
 {{- .Values.secrets.databaseUrl }}
 {{- end }}
 {{- end }}
 
 {{/*
+Bundled-MinIO resource name.
+*/}}
+{{- define "bandolier.minio.fullname" -}}
+{{- printf "%s-minio" (include "bandolier.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{/*
 Validate configuration and fail the render early with an actionable message.
 */}}
 {{- define "bandolier.validate" -}}
-{{- if not .Values.postgres.enabled }}
+{{- $mode := .Values.postgres.mode }}
+{{- if not (has $mode (list "external" "bundled" "cnpg")) }}
+{{- fail (printf "postgres.mode must be one of external|bundled|cnpg, got %q." $mode) }}
+{{- end }}
+{{- if eq $mode "external" }}
 {{- if and .Values.secrets.create (not .Values.secrets.databaseUrl) }}
-{{- fail "secrets.databaseUrl is required when postgres.enabled=false. Either point it at an external database, or set postgres.enabled=true to bundle one." }}
+{{- fail "secrets.databaseUrl is required when postgres.mode=external. Either point it at an external database, or set postgres.mode=bundled|cnpg to deploy one." }}
 {{- end }}
 {{- end }}
 {{- if .Values.secrets.create }}

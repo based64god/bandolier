@@ -147,7 +147,9 @@ The web app runs anywhere Node does — Vercel, a VM, or Kubernetes. To deploy t
   (`ghcr.io/based64god/bandolier-migrate`) runs `drizzle-kit migrate`.
 - **Helm chart** (`deploy/helm/bandolier`) — Deployment, Service, Ingress,
   config/secret wiring, a pre-install/pre-upgrade migration Job, health probes
-  (`/api/health`), and an optional bundled Postgres for evaluation.
+  (`/api/health`), a choice of database (external, a bundled StatefulSet, or an
+  operator-managed CloudNativePG cluster), and optional in-cluster MinIO for run
+  artifacts.
 
 ```bash
 helm upgrade --install bandolier deploy/helm/bandolier \

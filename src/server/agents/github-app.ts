@@ -133,6 +133,20 @@ export async function getInstallationToken(
   return data.token;
 }
 
+// Repo → installation id. The dashboard's list/overview polls resolve a bot
+// token per pod every ~5s, and this lookup is the DB query behind each of
+// those resolutions — cache it briefly so a poll costs one query per distinct
+// repo per TTL instead of one per pod per poll. Nulls (App not installed) are
+// cached too, since repos without the App are the common case on shared
+// clusters. Webhook upserts/removes evict the entry, so installs and
+// uninstalls take effect immediately; the TTL is only a backstop for a missed
+// webhook.
+const INSTALLATION_ID_TTL_MS = 60_000;
+const installationIdCache = new Map<
+  string,
+  { id: string | null; expiresAt: number }
+>();
+
 /**
  * Looks up the installation id recorded for a repo, or null when the App isn't
  * installed there (so callers can fall back gracefully).
@@ -141,12 +155,20 @@ export async function getInstallationIdForRepo(
   database: typeof db,
   repoFullName: string,
 ): Promise<string | null> {
+  const cached = installationIdCache.get(repoFullName);
+  if (cached && cached.expiresAt > Date.now()) return cached.id;
+
   const [row] = await database
     .select({ installationId: githubInstallation.installationId })
     .from(githubInstallation)
     .where(eq(githubInstallation.repoFullName, repoFullName))
     .limit(1);
-  return row?.installationId ?? null;
+  const id = row?.installationId ?? null;
+  installationIdCache.set(repoFullName, {
+    id,
+    expiresAt: Date.now() + INSTALLATION_ID_TTL_MS,
+  });
+  return id;
 }
 
 /**
@@ -190,6 +212,7 @@ export async function upsertInstallation(
       target: githubInstallation.repoFullName,
       set: { installationId, accountLogin, updatedAt: new Date() },
     });
+  installationIdCache.delete(repoFullName);
 }
 
 /** Removes the installation mapping for a repo (uninstall / repo removed). */
@@ -197,10 +220,15 @@ export async function removeInstallation(
   database: typeof db,
   repoFullName: string,
 ): Promise<void> {
-  tokenCache.delete(repoFullName);
-  await database
+  const removed = await database
     .delete(githubInstallation)
-    .where(eq(githubInstallation.repoFullName, repoFullName));
+    .where(eq(githubInstallation.repoFullName, repoFullName))
+    .returning({ installationId: githubInstallation.installationId });
+  installationIdCache.delete(repoFullName);
+  // Drop the cached token for the removed installation so an uninstall can't
+  // be served a revoked (or soon-revoked) token from cache. An org-wide
+  // installation shared with other repos just re-mints on its next use.
+  for (const row of removed) tokenCache.delete(row.installationId);
 }
 
 /** Drops a single installation's cached token. Exposed for tests. */

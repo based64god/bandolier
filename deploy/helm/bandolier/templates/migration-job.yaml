@@ -1,4 +1,5 @@
 {{- if .Values.migrations.enabled }}
+{{- $deployed := include "bandolier.postgres.deployed" . }}
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -7,9 +8,18 @@ metadata:
     {{- include "bandolier.labels" . | nindent 4 }}
     app.kubernetes.io/component: migrate
   annotations:
-    # Apply the schema before the app rolls out. weight -5 runs it after any
-    # bundled-Postgres hooks (see statefulset), so the DB is up first.
+    # When the database is external it already exists, so migrate as a
+    # pre-install/pre-upgrade hook — schema is applied before the app rolls out.
+    # When the chart deploys the database (bundled/cnpg) it is created as a
+    # normal release resource, which does not exist yet at pre-install time; run
+    # the install-time migration as a post-install hook instead (upgrades still
+    # migrate pre-upgrade, since the DB is already up by then). The wait-for-db
+    # init container below covers the DB still coming up.
+    {{- if $deployed }}
+    "helm.sh/hook": post-install,pre-upgrade
+    {{- else }}
     "helm.sh/hook": pre-install,pre-upgrade
+    {{- end }}
     "helm.sh/hook-weight": "-5"
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
@@ -28,17 +38,24 @@ spec:
       serviceAccountName: {{ include "bandolier.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
-      {{- if .Values.postgres.enabled }}
-      # Bundled Postgres may still be coming up when the hook fires; wait for it.
+      {{- if $deployed }}
+      # A chart-deployed database may still be coming up when the hook fires
+      # (cnpg provisions asynchronously); wait for the primary to accept
+      # connections. Uses the postgres client image for pg_isready.
       initContainers:
         - name: wait-for-postgres
-          image: "{{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}"
-          imagePullPolicy: {{ .Values.postgres.image.pullPolicy }}
+          {{- if eq .Values.postgres.mode "bundled" }}
+          image: "{{ .Values.postgres.bundled.image.repository }}:{{ .Values.postgres.bundled.image.tag }}"
+          imagePullPolicy: {{ .Values.postgres.bundled.image.pullPolicy }}
+          {{- else }}
+          image: "postgres:16-alpine"
+          imagePullPolicy: IfNotPresent
+          {{- end }}
           command:
             - sh
             - -c
             - |
-              until pg_isready -h {{ include "bandolier.postgres.fullname" . }} -p 5432 -U {{ .Values.postgres.auth.username }}; do
+              until pg_isready -h {{ include "bandolier.postgres.host" . }} -p 5432 -U {{ .Values.postgres.auth.username }}; do
                 echo "waiting for postgres..."; sleep 2;
               done
           securityContext:

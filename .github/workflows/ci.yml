@@ -188,10 +188,20 @@ jobs:
             --set ingress.tls.enabled=true \
             | kubeconform -strict -summary -kubernetes-version 1.29.0 -
 
-          echo "── bundled Postgres ──"
+          echo "── bundled Postgres + bundled MinIO ──"
           helm template ci "$CHART" "${common[@]}" \
-            --set postgres.enabled=true \
+            --set postgres.mode=bundled \
+            --set minio.enabled=true \
+            --set minio.ingress.enabled=true --set minio.ingress.className=nginx \
             | kubeconform -strict -summary -kubernetes-version 1.29.0 -
+
+          # CloudNativePG's Cluster is a CRD not in kubeconform's default schema
+          # set, so allow its schema to be skipped (its siblings still validate).
+          echo "── CloudNativePG ──"
+          helm template ci "$CHART" "${common[@]}" \
+            --set postgres.mode=cnpg \
+            | kubeconform -strict -summary -ignore-missing-schemas \
+                -kubernetes-version 1.29.0 -
 
   db-migrate:
     name: Apply migrations (drizzle)

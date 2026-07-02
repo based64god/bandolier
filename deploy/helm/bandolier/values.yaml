@@ -125,9 +125,9 @@ secrets:
   # -- GitHub OAuth app client secret. Required.
   githubClientSecret: ""
 
-  # -- Postgres connection string. REQUIRED when postgres.enabled=false. When
-  # postgres.enabled=true this is derived from the bundled DB and may be left
-  # empty. Example: postgresql://user:pass@host:5432/bandolier
+  # -- Postgres connection string. REQUIRED when postgres.mode=external. For
+  # postgres.mode=bundled|cnpg this is derived from the deployed DB and may be
+  # left empty. Example: postgresql://user:pass@host:5432/bandolier
   databaseUrl: ""
 
   # -- Optional GitHub App credentials (bot-voice comments + webhook delivery).
@@ -166,33 +166,115 @@ migrations:
       cpu: 500m
       memory: 512Mi
 
-# ── Bundled Postgres (optional, for quick starts) ─────────────────────────────
-# A single-replica StatefulSet + PVC. Convenient for evaluation; for production
-# prefer a managed database (set postgres.enabled=false and provide
-# secrets.databaseUrl). When enabled, the app's DATABASE_URL is derived from the
-# settings below regardless of secrets.databaseUrl.
+# ── Postgres ──────────────────────────────────────────────────────────────────
+# How the app gets its database. One of:
+#   external — use a database you provide via secrets.databaseUrl (default;
+#              recommended for production). Nothing is deployed.
+#   bundled  — a single-replica StatefulSet + PVC. Simple; fine for evaluation.
+#   cnpg     — a CloudNativePG `Cluster` (operator-managed: HA, failover, backups,
+#              rolling upgrades). Requires the CloudNativePG operator already
+#              installed in the cluster (https://cloudnative-pg.io).
+# For bundled/cnpg the app's DATABASE_URL is derived from the settings below and
+# secrets.databaseUrl is ignored.
 postgres:
-  # -- Deploy an in-cluster Postgres. False = use an external DB via databaseUrl.
-  enabled: false
-  image:
-    repository: postgres
-    tag: "16-alpine"
-    pullPolicy: IfNotPresent
-  # -- Database name / user / password for the bundled instance.
+  # -- Database mode: "external" | "bundled" | "cnpg".
+  mode: external
+  # -- Database name / user / password for a bundled or cnpg instance. (Unused
+  # in external mode.)
   auth:
     database: bandolier
     username: bandolier
     password: "change-me-in-production"
-  # -- Persistent volume for Postgres data.
+
+  # Settings for mode: bundled (plain StatefulSet).
+  bundled:
+    image:
+      repository: postgres
+      tag: "16-alpine"
+      pullPolicy: IfNotPresent
+    # -- Persistent volume for Postgres data.
+    persistence:
+      enabled: true
+      size: 8Gi
+      # -- StorageClass; empty uses the cluster default.
+      storageClass: ""
+    resources:
+      requests:
+        cpu: 250m
+        memory: 256Mi
+      limits:
+        cpu: "1"
+        memory: 1Gi
+
+  # Settings for mode: cnpg (CloudNativePG Cluster CR).
+  cnpg:
+    # -- Number of Postgres instances (1 primary + N-1 replicas). >=2 for HA.
+    instances: 1
+    # -- Major Postgres version → the operator's default image for it.
+    postgresVersion: 16
+    # -- Override the container image entirely (empty uses the operator default
+    # for postgresVersion).
+    imageName: ""
+    storage:
+      size: 8Gi
+      # -- StorageClass; empty uses the cluster default.
+      storageClass: ""
+    resources:
+      requests:
+        cpu: 250m
+        memory: 256Mi
+      limits:
+        cpu: "1"
+        memory: 1Gi
+
+# ── Bundled MinIO (optional, in-cluster S3 for run artifacts) ──────────────────
+# Bandolier stores run transcripts in S3, configured PER REPOSITORY in the app UI
+# (there is no server-wide bucket). Enabling this deploys an in-cluster,
+# S3-compatible MinIO and pre-creates a bucket, so an operator has an endpoint +
+# credentials to paste into a repo's "Run artifact storage" settings. It is NOT
+# wired into the app's environment — it's a convenience so you don't have to run
+# MinIO yourself. Point a repo at it with:
+#   Endpoint:  http://<release>-minio.<namespace>.svc:9000  (or the ingress host)
+#   Bucket:    <minio.bucket>
+#   Keys:      <minio.auth.rootUser> / <minio.auth.rootPassword>
+minio:
+  # -- Deploy an in-cluster MinIO + create a bucket.
+  enabled: false
+  image:
+    repository: quay.io/minio/minio
+    tag: "RELEASE.2024-10-13T13-34-11Z"
+    pullPolicy: IfNotPresent
+  # -- mc image used by the one-shot Job that creates the bucket.
+  mcImage:
+    repository: quay.io/minio/mc
+    tag: "RELEASE.2024-10-08T09-37-26Z"
+    pullPolicy: IfNotPresent
+  # -- Root credentials for the MinIO instance (these are the S3 access/secret
+  # keys a repo uses). Change them.
+  auth:
+    rootUser: bandolier
+    rootPassword: "change-me-in-production"
+  # -- Bucket pre-created for run artifacts.
+  bucket: bandolier-artifacts
+  # -- Persistent volume for object storage.
   persistence:
     enabled: true
-    size: 8Gi
+    size: 20Gi
     # -- StorageClass; empty uses the cluster default.
     storageClass: ""
   resources:
     requests:
-      cpu: 250m
+      cpu: 100m
       memory: 256Mi
     limits:
       cpu: "1"
       memory: 1Gi
+  # -- Optional Ingress so repos (and agent pods) can reach MinIO off-cluster.
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    host: minio.example.com
+    tls:
+      enabled: false
+      secretName: bandolier-minio-tls

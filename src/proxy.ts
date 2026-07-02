@@ -9,6 +9,7 @@ import { GATE_COOKIE, gateToken, timingSafeEqual } from "~/lib/gate";
 //    no session/password to present)
 //  - the public REST API (authenticates via API key or session of its own)
 //  - the version endpoint (just a build id; clients poll it to detect deploys)
+//  - the health endpoint (liveness/readiness for k8s probes; no secrets)
 //  - the gate page + its submit endpoint
 //  - the app icon / OG image (only reveal the logo + tagline; lets unfurls work)
 //  - the PWA manifest, service worker, and install icons — the browser must be
@@ -23,6 +24,7 @@ function isExempt(pathname: string): boolean {
     pathname === "/api/agent-input" ||
     pathname === "/api/acp" ||
     pathname === "/api/version" ||
+    pathname === "/api/health" ||
     pathname === "/setup.sh" ||
     pathname === "/gate" ||
     pathname === "/api/gate" ||

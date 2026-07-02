@@ -1,0 +1,126 @@
+name: web app image
+
+# Build the Bandolier web-app container (the Next.js + tRPC server in `src/`) and
+# publish it to GitHub Container Registry (ghcr.io). This is the image you run to
+# self-host Bandolier itself — distinct from the agent-side harness/self-host
+# images. The migrator image (drizzle-kit + the SQL under drizzle/) is built from
+# the same Dockerfile's `migrator` target and published alongside it so the Helm
+# chart's migration Job can apply the schema before the app rolls out.
+#
+# Pull requests build both images as a CI check but do not push; pushes to the
+# default branch and version tags publish.
+on:
+  push:
+    branches: [main]
+    tags: ["v*.*.*"]
+    paths:
+      # The app image bakes the whole repo, so any app source change can affect
+      # it. Ignore paths that never do to avoid needless rebuilds.
+      - "src/**"
+      - "public/**"
+      - "drizzle/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "next.config.js"
+      - "drizzle.config.ts"
+      - "tsconfig.json"
+      - "Dockerfile"
+      - ".github/workflows/web-app-image.yml"
+  pull_request:
+    paths:
+      - "src/**"
+      - "public/**"
+      - "drizzle/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "next.config.js"
+      - "drizzle.config.ts"
+      - "tsconfig.json"
+      - "Dockerfile"
+      - ".github/workflows/web-app-image.yml"
+
+env:
+  APP_IMAGE: ghcr.io/${{ github.repository_owner }}/bandolier
+  MIGRATE_IMAGE: ghcr.io/${{ github.repository_owner }}/bandolier-migrate
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Only authenticate when we intend to push (not on PRs from forks).
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Both images share one tag scheme so the app and its migrator stay in
+      # lockstep (the Helm chart defaults the migrator tag to the app tag).
+      - name: Derive app image tags
+        id: app-meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.APP_IMAGE }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=long
+
+      - name: Derive migrate image tags
+        id: migrate-meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.MIGRATE_IMAGE }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=long
+
+      # SOURCE_COMMIT gives every replica of a deploy the same build id (see
+      # next.config.js), so /api/version is stable across pods of one release.
+      - name: Build and push web app (runner stage)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          target: runner
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.app-meta.outputs.tags }}
+          labels: ${{ steps.app-meta.outputs.labels }}
+          build-args: |
+            SOURCE_COMMIT=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push migrator (migrator stage)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          target: migrator
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.migrate-meta.outputs.tags }}
+          labels: ${{ steps.migrate-meta.outputs.labels }}
+          # Shares the deps/builder layers cached by the app build above.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

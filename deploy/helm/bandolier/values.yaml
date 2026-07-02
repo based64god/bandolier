@@ -1,0 +1,198 @@
+# Default values for the Bandolier web-app chart.
+# Every value here is overridable with `--set` or a custom values file.
+# See deploy/README.md for a walkthrough.
+
+# -- Number of web-app replicas. The app is stateless (all state lives in
+# Postgres), so this scales horizontally.
+replicaCount: 1
+
+image:
+  # -- Web-app image repository. Published by the web-app-image workflow.
+  repository: ghcr.io/based64god/bandolier
+  # -- Image tag. Pin to a released version (e.g. "v0.1.0") in production;
+  # "latest" tracks main.
+  tag: latest
+  # -- Image pull policy. "Always" re-pulls "latest" on every restart.
+  pullPolicy: IfNotPresent
+
+# -- Image pull secrets for a private registry hosting the web-app image.
+imagePullSecrets: []
+# - name: ghcr-pull
+
+# -- Override the chart name used in resource names.
+nameOverride: ""
+# -- Override the full release-qualified resource name.
+fullnameOverride: ""
+
+serviceAccount:
+  # -- Create a ServiceAccount for the web app.
+  create: true
+  # -- Extra annotations for the ServiceAccount (e.g. IRSA role ARN on EKS).
+  annotations: {}
+  # -- Name to use; generated from the fullname when empty.
+  name: ""
+
+# -- Extra pod annotations (merged onto the web-app pod template).
+podAnnotations: {}
+# -- Pod-level securityContext for the web-app pods.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+# -- Container-level securityContext for the web-app container.
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+service:
+  # -- Kubernetes Service type for the web app.
+  type: ClusterIP
+  # -- Service port that fronts the app's container port (3000).
+  port: 80
+
+ingress:
+  # -- Create an Ingress for the web app. Requires an ingress controller.
+  enabled: false
+  # -- ingressClassName (e.g. "nginx", "traefik").
+  className: ""
+  # -- Extra ingress annotations (TLS issuer, body size, etc.).
+  annotations: {}
+  # -- Host the app is served on. MUST match config.betterAuthUrl's host.
+  host: bandolier.example.com
+  # -- Path prefix. Bandolier expects to own the whole host.
+  path: /
+  pathType: Prefix
+  tls:
+    # -- Terminate TLS at the ingress for `host`.
+    enabled: false
+    # -- Secret holding the TLS cert/key (e.g. created by cert-manager).
+    secretName: bandolier-tls
+
+# -- Resource requests/limits for the web-app container.
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+
+# -- Liveness/readiness probes hit /api/health (readiness also checks Postgres).
+# See src/app/api/health/route.ts.
+probes:
+  enabled: true
+
+# -- Node scheduling controls for the web-app pods.
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# ── Application configuration ─────────────────────────────────────────────────
+# Non-secret values become a ConfigMap; secrets become a Secret. Both are wired
+# into the app's environment. Mirrors src/env.js — see .env.example for the full
+# reference. Leave optional values empty to disable the feature they gate.
+config:
+  # -- Public base URL of the app. MUST be the externally reachable URL
+  # (scheme + host), and match the ingress host. Used for OAuth callbacks.
+  betterAuthUrl: "https://bandolier.example.com"
+  # -- Label selector identifying Bandolier-managed agent pods (K8S_LABEL_SELECTOR).
+  k8sLabelSelector: "app=bandolier-agent"
+  # -- Apply a NetworkPolicy isolating agent pods (needs a policy-enforcing CNI).
+  agentNetworkPolicy: "true"
+  # -- CIDRs agent pods cannot reach (AGENT_EGRESS_BLOCKED_CIDRS).
+  agentEgressBlockedCidrs: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+  # -- The Bandolier GitHub App's public slug (links the repo-config UI to its
+  # install page). Optional.
+  githubAppSlug: ""
+
+# Secret values. Provide them here (discouraged for real secrets — they'd sit in
+# release history), or set secrets.create=false and point secrets.existingSecret
+# at a Secret you manage out-of-band (sealed-secrets, external-secrets, etc.).
+secrets:
+  # -- Create a Secret from the values below. Set false to use existingSecret.
+  create: true
+  # -- Name of a pre-existing Secret to use instead of creating one. It must
+  # provide the same keys the chart's Secret would (see templates/secret.yaml).
+  existingSecret: ""
+
+  # -- Secret for signing sessions and tokens (openssl rand -base64 32). Required.
+  betterAuthSecret: ""
+  # -- GitHub OAuth app client id. Required.
+  githubClientId: ""
+  # -- GitHub OAuth app client secret. Required.
+  githubClientSecret: ""
+
+  # -- Postgres connection string. REQUIRED when postgres.enabled=false. When
+  # postgres.enabled=true this is derived from the bundled DB and may be left
+  # empty. Example: postgresql://user:pass@host:5432/bandolier
+  databaseUrl: ""
+
+  # -- Optional GitHub App credentials (bot-voice comments + webhook delivery).
+  githubWebhookSecret: ""
+  githubAppId: ""
+  # PEM private key. In a values file, use a YAML block scalar (|-) to preserve
+  # newlines; the app also accepts \n-escaped single-line PEMs.
+  githubAppPrivateKey: ""
+  githubAppClientId: ""
+  githubAppClientSecret: ""
+
+  # -- Optional shared password gate in front of the whole app (APP_PASSWORD).
+  appPassword: ""
+
+# ── Database migrations ───────────────────────────────────────────────────────
+# Runs `drizzle-kit migrate` (the migrator stage of the app image) as a Helm
+# pre-install/pre-upgrade hook, so the schema is applied before the app rolls
+# out. Uses the same DATABASE_URL as the app.
+migrations:
+  # -- Run the migration Job on install/upgrade.
+  enabled: true
+  # -- The migrator image (Dockerfile's `migrator` stage: drizzle-kit + the SQL
+  # under drizzle/). Separate from the lean app image, which can't migrate.
+  image:
+    repository: ghcr.io/based64god/bandolier-migrate
+    # -- Tag; empty inherits image.tag so migrator and app stay in lockstep.
+    tag: ""
+    pullPolicy: IfNotPresent
+  # -- Backoff limit for the migration Job.
+  backoffLimit: 3
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# ── Bundled Postgres (optional, for quick starts) ─────────────────────────────
+# A single-replica StatefulSet + PVC. Convenient for evaluation; for production
+# prefer a managed database (set postgres.enabled=false and provide
+# secrets.databaseUrl). When enabled, the app's DATABASE_URL is derived from the
+# settings below regardless of secrets.databaseUrl.
+postgres:
+  # -- Deploy an in-cluster Postgres. False = use an external DB via databaseUrl.
+  enabled: false
+  image:
+    repository: postgres
+    tag: "16-alpine"
+    pullPolicy: IfNotPresent
+  # -- Database name / user / password for the bundled instance.
+  auth:
+    database: bandolier
+    username: bandolier
+    password: "change-me-in-production"
+  # -- Persistent volume for Postgres data.
+  persistence:
+    enabled: true
+    size: 8Gi
+    # -- StorageClass; empty uses the cluster default.
+    storageClass: ""
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi

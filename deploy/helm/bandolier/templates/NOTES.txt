@@ -1,0 +1,35 @@
+Bandolier has been deployed as release "{{ .Release.Name }}" in namespace "{{ .Release.Namespace }}".
+
+{{- if .Values.migrations.enabled }}
+
+Database migrations ran as a pre-install/pre-upgrade hook Job. Check it with:
+  kubectl -n {{ .Release.Namespace }} logs job/{{ include "bandolier.fullname" . }}-migrate
+{{- else }}
+
+⚠  migrations.enabled=false — apply the schema yourself before first use.
+{{- end }}
+
+Reach the app:
+{{- if .Values.ingress.enabled }}
+  {{ if .Values.ingress.tls.enabled }}https{{ else }}http{{ end }}://{{ .Values.ingress.host }}
+{{- else }}
+  No ingress is enabled. Port-forward to reach it locally:
+    kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "bandolier.fullname" . }} 3000:{{ .Values.service.port }}
+  then open http://localhost:3000
+{{- end }}
+
+Make sure config.betterAuthUrl ({{ .Values.config.betterAuthUrl }}) matches the
+URL above and your GitHub OAuth app's callback ({{ .Values.config.betterAuthUrl }}/api/auth/callback/github).
+
+{{- if .Values.postgres.enabled }}
+
+You are running the BUNDLED Postgres (postgres.enabled=true). This is meant for
+evaluation. For production, use a managed database: set postgres.enabled=false
+and secrets.databaseUrl.
+{{- if not .Values.postgres.persistence.enabled }}
+⚠  postgres.persistence.enabled=false — data is stored in an emptyDir and will be
+   LOST if the Postgres pod is rescheduled.
+{{- end }}
+{{- end }}
+
+Health endpoint (used by k8s probes): /api/health

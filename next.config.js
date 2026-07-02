@@ -17,6 +17,11 @@ const buildId =
 
 /** @type {import("next").NextConfig} */
 const config = {
+  // Emit a self-contained server bundle under `.next/standalone` so the
+  // production container image can run the app with just Node and a trimmed
+  // node_modules — no full `pnpm install` at runtime. See the web-app
+  // Dockerfile (`Dockerfile`) and the Helm chart under `deploy/`.
+  output: "standalone",
   env: {
     NEXT_PUBLIC_BUILD_ID: buildId,
   },

@@ -89,4 +89,28 @@ describe("toTaskResource", () => {
     expect(resource).not.toHaveProperty("jobName");
     expect(resource).not.toHaveProperty("repoFullName");
   });
+
+  it("reports null tokens when the run has no usage", () => {
+    expect(toTaskResource(internal).tokens).toBeNull();
+    expect(toTaskResource({ ...internal, tokens: null }).tokens).toBeNull();
+  });
+
+  it("exposes the token breakdown plus a computed total", () => {
+    const resource = toTaskResource({
+      ...internal,
+      tokens: {
+        inputTokens: 100,
+        outputTokens: 50,
+        cacheReadInputTokens: 10,
+        cacheCreationInputTokens: 5,
+      },
+    });
+    expect(resource.tokens).toEqual({
+      inputTokens: 100,
+      outputTokens: 50,
+      cacheReadInputTokens: 10,
+      cacheCreationInputTokens: 5,
+      totalTokens: 165,
+    });
+  });
 });

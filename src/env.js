@@ -31,7 +31,6 @@ export const env = createEnv({
       .string()
       .default("10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"),
     GITHUB_WEBHOOK_SECRET: z.string().optional(),
-    GITHUB_TRIGGER_LABEL: z.string().optional(),
     // ── GitHub App (bot identity) ─────────────────────────────────────────────
     // Credentials for the Bandolier GitHub App, which owns every action that
     // speaks *as the bot* rather than as a user — issue/PR comments and other UX
@@ -84,7 +83,6 @@ export const env = createEnv({
     AGENT_NETWORK_POLICY: process.env.AGENT_NETWORK_POLICY,
     AGENT_EGRESS_BLOCKED_CIDRS: process.env.AGENT_EGRESS_BLOCKED_CIDRS,
     GITHUB_WEBHOOK_SECRET: process.env.GITHUB_WEBHOOK_SECRET,
-    GITHUB_TRIGGER_LABEL: process.env.GITHUB_TRIGGER_LABEL,
     GITHUB_APP_ID: process.env.GITHUB_APP_ID,
     GITHUB_APP_PRIVATE_KEY: process.env.GITHUB_APP_PRIVATE_KEY,
     GITHUB_APP_CLIENT_ID: process.env.GITHUB_APP_CLIENT_ID,

@@ -127,6 +127,13 @@
       "when": 1782951420393,
       "tag": "0017_woozy_roulette",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1782954234616,
+      "tag": "0018_fluffy_vanisher",
+      "breakpoints": true
     }
   ]
 }

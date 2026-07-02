@@ -401,6 +401,45 @@ export const githubInstallation = pgTable("github_installation", {
     .notNull(),
 });
 
+// A webhook-triggered agent run that is held for approval because it would run
+// with repo-level credentials (a shared kubeconfig or shared model API key) but
+// the GitHub user who opened the issue lacks the maintainer-or-higher privilege
+// required to spend them. The bot leaves a comment on the issue; a maintainer+
+// approves by reacting to (or replying to) that comment, at which point the
+// stored payload is replayed and the agent is dispatched. Rows are one-shot: a
+// dispatched (or declined) run is marked resolved so it can't fire twice.
+export const pendingAgentRun = pgTable(
+  "pending_agent_run",
+  {
+    id: text("id").primaryKey(),
+    repoFullName: text("repo_full_name").notNull(),
+    issueNumber: integer("issue_number").notNull(),
+    // The GitHub login of the (under-privileged) user who opened the issue, for
+    // display in the bot comment and logging.
+    requestedByLogin: text("requested_by_login").notNull(),
+    // The id of the bot comment that asks a maintainer to approve. A reaction on
+    // this comment (or a reply mentioning approval) dispatches the run.
+    approvalCommentId: text("approval_comment_id"),
+    // The full createAgentJob payload (JSON) to replay on approval. Holds the
+    // resolved repo-level credentials, so this row is as sensitive as the config
+    // it was derived from and is deleted once resolved.
+    payload: text("payload").notNull(),
+    // Set once the run has been dispatched or declined, so approval is one-shot.
+    resolvedAt: timestamp("resolved_at"),
+    // How it resolved: "dispatched" (a maintainer approved) or "declined".
+    resolution: text("resolution"),
+    // The GitHub login of the maintainer who approved, for the audit trail.
+    resolvedByLogin: text("resolved_by_login"),
+    createdAt: timestamp("created_at")
+      .$defaultFn(() => /* @__PURE__ */ new Date())
+      .notNull(),
+  },
+  (t) => [
+    index("pending_agent_run_repo_issue_idx").on(t.repoFullName, t.issueNumber),
+    index("pending_agent_run_comment_idx").on(t.approvalCommentId),
+  ],
+);
+
 export const userRelations = relations(user, ({ many }) => ({
   account: many(account),
   session: many(session),

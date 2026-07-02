@@ -140,7 +140,7 @@ docker push <your-registry>/bandolier-agent-harness:latest
 
 To have agents launch automatically when issues are opened, install the Bandolier GitHub App:
 
-1. Create a GitHub App (Settings → Developer settings → GitHub Apps). Give it a webhook URL of `https://<your-host>/api/webhooks/github`, a webhook secret, and these repository permissions: **Issues** (read & write), **Pull requests** (read & write), **Contents** (read), and **Metadata** (read). Subscribe to the **Issues** and **Issue comment** events (the latter powers resuming a run by commenting on its issue or PR). Generate a private key. (Pulling private custom harness images from GHCR uses the triggering user's OAuth `read:packages` scope, not an App permission — see [The agent harness image](#the-agent-harness-image).)
+1. Create a GitHub App (Settings → Developer settings → GitHub Apps). Give it a webhook URL of `https://<your-host>/api/webhooks/github`, a webhook secret, and these repository permissions: **Issues** (read & write), **Pull requests** (read & write), **Contents** (read), and **Metadata** (read). Subscribe to the **Issues** and **Issue comment** events (the latter powers resuming a run by commenting on its issue or PR, and drives the maintainer-approval flow for runs on shared repo credentials — see [Repository credentials and the maintainer gate](#repository-credentials-and-the-maintainer-gate)). Generate a private key. (Pulling private custom harness images from GHCR uses the triggering user's OAuth `read:packages` scope, not an App permission — see [The agent harness image](#the-agent-harness-image).)
 2. Set `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY` (PEM, `\n`-escaped), and `GITHUB_WEBHOOK_SECRET` (the App's webhook secret) in the app's environment. Optionally set `NEXT_PUBLIC_GITHUB_APP_SLUG` so the repo-config UI links to the App's install page.
 3. Install the App on the repos you want Bandolier to act on. The App delivers events automatically — there's no per-repo webhook to add.
 
@@ -163,6 +163,19 @@ Comments from bots are ignored (including Bando's own acknowledgements), a comme
 A repo admin can attach a **system prompt** to a repository in its settings (the repo-config UI). It's a blanket instruction — coding conventions, a review checklist, "always add tests", anything repo-wide — that Bandolier appends to the system prompt of **every** agent run for that repo: dashboard tasks, issue PRs, and webhook-triggered runs, across every model provider and both one-shot and interactive sessions.
 
 It's layered _on top of_ Bandolier's own framing (the working agreement that lets the harness commit and open a PR), never replacing it, so you don't need to repeat the same guidance in each task. Leave it blank for none.
+
+---
+
+## Repository credentials and the maintainer gate
+
+A repo admin can configure **shared repo-level credentials** (a kubeconfig and/or model-provider API keys) so everyone working on the repo runs on the same pooled infrastructure instead of each pasting their own. Because those credentials are shared — a run with them spends the repo's cluster and the repo's API keys — executing on them is restricted to GitHub users with **maintainer** access or higher on the repo. A run only counts as using shared credentials when it actually resolves to the repo's kubeconfig or model key (see the prefer-repo-credentials toggle); a user with their own credentials configured is never gated.
+
+- **From the dashboard / REST API:** if your run would use the repo's shared credentials and you're not a maintainer, the deploy is rejected with a message telling you to ask a maintainer or configure your own credentials.
+- **From a webhook (issue opened):** if the issue opener isn't a maintainer, the run is **held for approval** instead of dispatched. The bot comments on the issue asking a maintainer to approve. A maintainer-or-higher can then approve by either:
+  - reacting 👍 (or 🚀) to the bot's approval comment, or
+  - replying `/bando approve` (decline with `/bando decline`).
+
+  On approval the held run is dispatched exactly as it was originally built, attributed to the issue opener. Approvals are one-shot and verified server-side — a non-maintainer's command or reaction is ignored. (GitHub doesn't deliver a webhook for reactions, so Bandolier re-checks the approval comment's reactions whenever a new comment lands on the issue; the `/bando approve` reply works immediately.)
 
 ---
 
@@ -322,6 +335,7 @@ Both suites run in CI on every push and pull request (see
 ## Security notes
 
 - **Per-user credentials.** Agents only ever run with the deploying (or issue-opening) user's own GitHub, model-provider, and cluster credentials. There is no server-side provider identity to fall back on.
+- **Shared repo credentials require maintainer access.** When a repo configures shared credentials (a kubeconfig or model key) and a run would actually use them, only GitHub users with maintainer access or higher may execute. Dashboard/REST deploys by under-privileged users are rejected; webhook-triggered ones are held for a maintainer's approval. See [Repository credentials and the maintainer gate](#repository-credentials-and-the-maintainer-gate).
 - **Per-job secrets.** A run's credentials live in a Kubernetes Secret owned by its Job, so they're deleted when the Job is (manually or via its TTL). Finished Jobs are retained for one week.
 - **Stored credentials are not encrypted at rest.** User AWS/Anthropic keys and kubeconfigs are stored in Postgres in plaintext; API key tokens are stored only as SHA-256 hashes. The GitHub App private key and webhook secret live in the app's environment, not the database. Protect the database accordingly and serve the app over HTTPS.
 - **Network isolation** for agent pods is on by default but requires a policy-enforcing CNI to take effect.

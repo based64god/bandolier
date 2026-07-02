@@ -240,6 +240,12 @@ func (p *acpProxy) c2aPump(ctx context.Context) {
 				// A follow-up turn is starting; mirror the resume marker so the
 				// dashboard's awaiting detection flips back to "working".
 				log.Printf("[harness] %s", resumeMarker)
+				// Mirror the user's message into the transcript (as the legacy
+				// input loop does), so the persisted transcript carries both
+				// sides of the conversation — the agent never echoes user turns.
+				if t := framePromptText(f); t != "" {
+					logUserInput(t)
+				}
 			}
 			if _, err := p.stdin.Write(append([]byte(f), '\n')); err != nil {
 				log.Printf("[harness] warn: agent stdin write: %v", err)
@@ -384,6 +390,24 @@ func frameMethod(raw string) string {
 	}
 	_ = json.Unmarshal([]byte(raw), &m)
 	return m.Method
+}
+
+// framePromptText concatenates the text blocks of a session/prompt frame, so
+// the user's turn can be rendered into the transcript.
+func framePromptText(raw string) string {
+	var m struct {
+		Params struct {
+			Prompt []struct {
+				Text string `json:"text"`
+			} `json:"prompt"`
+		} `json:"params"`
+	}
+	_ = json.Unmarshal([]byte(raw), &m)
+	var b strings.Builder
+	for _, p := range m.Params.Prompt {
+		b.WriteString(p.Text)
+	}
+	return b.String()
 }
 
 func newSessionID(raw []byte) string {

@@ -214,6 +214,71 @@ describe("applyFrames", () => {
     expect(commands).toBeUndefined();
   });
 
+  it("renders a replayed session/prompt frame as a user bubble", () => {
+    const { items, sessionId } = applyFrames(
+      [],
+      [
+        { seq: 4, payload: promptFrame("sess-1", 7, "follow-up question") },
+        update(5, "sess-1", {
+          sessionUpdate: "agent_message_chunk",
+          messageId: "m1",
+          content: { text: "answer" },
+        }),
+      ],
+    );
+    expect(items).toEqual<TimelineItem[]>([
+      { type: "message", role: "user", id: "u-4", text: "follow-up question" },
+      {
+        type: "message",
+        role: "assistant",
+        id: "a-5",
+        messageId: "m1",
+        text: "answer",
+      },
+    ]);
+    expect(sessionId).toBe("sess-1");
+  });
+
+  it("concatenates a prompt's text blocks into one user bubble", () => {
+    const payload = JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "session/prompt",
+      params: {
+        sessionId: "s",
+        prompt: [
+          { type: "text", text: "part one " },
+          { type: "text", text: "part two" },
+        ],
+      },
+    });
+    const { items } = applyFrames([], [{ seq: 1, payload }]);
+    expect(items).toEqual([
+      { type: "message", role: "user", id: "u-1", text: "part one part two" },
+    ]);
+  });
+
+  it("skips session/prompt frames whose id was sent by this client", () => {
+    // The sender already rendered its own prompt optimistically; replaying its
+    // frame must not duplicate the bubble, while other prompts still render.
+    const { items } = applyFrames(
+      [],
+      [
+        { seq: 1, payload: promptFrame("s", 41, "mine, already shown") },
+        { seq: 2, payload: promptFrame("s", 42, "from before the reload") },
+      ],
+      new Set([41]),
+    );
+    expect(items).toEqual([
+      {
+        type: "message",
+        role: "user",
+        id: "u-2",
+        text: "from before the reload",
+      },
+    ]);
+  });
+
   it("ignores non-update frames (responses) but still harvests their nothing", () => {
     const { items, sessionId } = applyFrames(
       [],

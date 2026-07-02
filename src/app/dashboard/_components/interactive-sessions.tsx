@@ -79,12 +79,14 @@ export function InteractiveRow({
   // Poll only while the conversation is open: a collapsed session's waiting
   // state still surfaces via the agents.list query, and expanding replays the
   // backlog from the cursor, so there's no reason to stream a chat no one is
-  // looking at.
+  // looking at. A finished session still replays when expanded — the frames
+  // are durable — the hook just stops polling once the backlog is drained.
   const session = useAcpSession({
     namespace,
     jobName: agent.jobName,
     repoFullName,
-    enabled: running && !collapsed,
+    running,
+    enabled: !collapsed,
   });
 
   // An agent that starts waiting for input pops back open even if the user had
@@ -291,7 +293,7 @@ export function InteractiveRow({
             className="p-0"
           >
             <SessionHeader podName={agent.name} tokens={agent.tokens} />
-            <Conversation items={session.items} />
+            <Conversation items={session.items} running={running} />
             <SessionComposer
               running={running}
               awaiting={awaiting}
@@ -335,7 +337,13 @@ function SessionHeader({
  * messages plus structured tool-call rows. Auto-sticks to the bottom as new
  * items stream in.
  */
-function Conversation({ items }: { items: TimelineItem[] }) {
+function Conversation({
+  items,
+  running,
+}: {
+  items: TimelineItem[];
+  running: boolean;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   // Whether the view is pinned to the bottom. Mirrored into state so the
   // "scroll to bottom" button can show/hide as the user scrolls away.
@@ -370,7 +378,7 @@ function Conversation({ items }: { items: TimelineItem[] }) {
       >
         {items.length === 0 ? (
           <span className="font-mono text-[11px] text-white/30">
-            Waiting for output…
+            {running ? "Waiting for output…" : "No transcript."}
           </span>
         ) : (
           items.map((item) =>

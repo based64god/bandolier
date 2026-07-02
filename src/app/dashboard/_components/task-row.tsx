@@ -149,7 +149,17 @@ export function TaskRow({
         <div
           className={`flex flex-wrap items-center justify-end gap-1 lg:flex-nowrap lg:whitespace-nowrap ${ACTION_ROW_MIN_H}`}
         >
-          {confirmKill ? (
+          {!agent.ownedByViewer ? (
+            // A collaborator's task: viewable (the row opens its logs) but not
+            // controllable — terminate stays with the owner, and the server
+            // enforces the same.
+            <span
+              title={`Owned by ${agent.createdBy ?? "another user"}`}
+              className="text-xs text-white/25"
+            >
+              view only
+            </span>
+          ) : confirmKill ? (
             <>
               <button
                 onClick={() =>

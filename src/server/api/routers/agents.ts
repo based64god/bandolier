@@ -38,6 +38,7 @@ import {
   type GitIdentity,
 } from "~/server/agents/github-token";
 import { resolveKubeconfig } from "~/server/agents/kubeconfig";
+import { repoToNamespace } from "~/server/agents/namespace";
 import {
   listModelsForUser,
   pickLatestGeminiFlash,
@@ -213,6 +214,27 @@ function ownedSelector(userId: string, extra?: string): string {
   return extra ? `${base},${extra}` : base;
 }
 
+/**
+ * Label selector for a repo-scoped, read-only view. Tasks in a repo are visible
+ * to every GitHub collaborator on that repo (the caller must already have
+ * passed assertRepoAccess), not just their spawner — so when the query targets
+ * the repo's own namespace, the spawned-by scoping is dropped. Any other
+ * namespace/repo combination falls back to owner-scoping: the repo-access check
+ * authorizes exactly one namespace (the repo's), and nothing else. Mutations
+ * (terminate, rename, interactive input) never use this — they stay owner-only.
+ */
+function repoViewSelector(
+  userId: string,
+  namespace: string,
+  repoFullName?: string,
+  extra?: string,
+): string {
+  if (repoFullName && namespace === repoToNamespace(repoFullName)) {
+    return extra ? `${LABEL_SELECTOR},${extra}` : LABEL_SELECTOR;
+  }
+  return ownedSelector(userId, extra);
+}
+
 // Short-TTL cache of confirmed (user → repo) access, so polled procedures (list,
 // getLogs run every ~5s) don't hit the GitHub API on every call. Only positive
 // results are cached: a member's checks are served from memory, while a
@@ -378,6 +400,9 @@ function mergeOutput(
  * Maps a pod into the task shape returned by `list`/`get` (reads logs once).
  * `persistedOutputs` is the batch-loaded fallback keyed by job name (see
  * loadPersistedOutputs); it's consulted only when the logs don't supply a URL.
+ * `viewerId` is the requesting user — repo views include collaborators' tasks,
+ * and the UI needs to know which rows are the viewer's own (only those get
+ * terminate/input controls; the server enforces the same on its mutations).
  */
 async function podToTask(
   pod: V1Pod,
@@ -387,10 +412,13 @@ async function podToTask(
   userGithubToken: string | null,
   nowMs: number,
   persistedOutputs: Map<string, OutputUrls>,
+  viewerId: string,
 ) {
   const annotations = pod.metadata?.annotations ?? {};
   const name = pod.metadata?.name ?? "unknown";
   const status = pod.status?.phase ?? "Unknown";
+  const ownedByViewer =
+    pod.metadata?.labels?.[SPAWNED_BY_LABEL] === spawnedByLabelValue(viewerId);
 
   // The Job's TTL deletes it JOB_TTL_SECONDS after the harness container
   // finishes, so expiry = finishedAt + TTL. Null while running.
@@ -451,6 +479,9 @@ async function podToTask(
     // Lineage of a resumed run: the job it continues, for the UI to surface.
     parentJobName: annotations["bandolier.io/parent-job"] ?? null,
     parentDisplayName: annotations["bandolier.io/parent-name"] ?? null,
+    // Whether this task belongs to the requesting user. Repo views also list
+    // collaborators' tasks (read-only); the UI keys its controls off this.
+    ownedByViewer,
     status,
     currently,
     expiresAt,
@@ -645,9 +676,15 @@ export const agentsRouter = createTRPCRouter({
       const githubToken = await getUserGithubToken(ctx.db, userId);
       const nowMs = Date.now();
       try {
+        // Repo views list every collaborator's tasks in the repo's namespace
+        // (read-only for non-owners); repo-less queries stay owner-scoped.
         const res = await getCoreV1Api(kubeconfig).listNamespacedPod({
           namespace: input.namespace,
-          labelSelector: ownedSelector(userId),
+          labelSelector: repoViewSelector(
+            userId,
+            input.namespace,
+            input.repoFullName,
+          ),
         });
         // One batched query recovers persisted output for every terminal pod
         // whose logs are gone — rather than a lookup per pod.
@@ -662,6 +699,7 @@ export const agentsRouter = createTRPCRouter({
               githubToken,
               nowMs,
               persistedOutputs,
+              userId,
             ),
           ),
         );
@@ -692,10 +730,13 @@ export const agentsRouter = createTRPCRouter({
         input.repoFullName,
       );
       try {
+        // Like `list`, visible to any collaborator when repo-scoped.
         const res = await getCoreV1Api(kubeconfig).listNamespacedPod({
           namespace: input.namespace,
-          labelSelector: ownedSelector(
+          labelSelector: repoViewSelector(
             userId,
+            input.namespace,
+            input.repoFullName,
             `bandolier.io/job=${input.jobName}`,
           ),
         });
@@ -716,6 +757,7 @@ export const agentsRouter = createTRPCRouter({
           githubToken,
           Date.now(),
           persistedOutputs,
+          userId,
         );
       } catch (err) {
         if (err instanceof TRPCError) throw err;
@@ -817,16 +859,22 @@ export const agentsRouter = createTRPCRouter({
         input.repoFullName,
       );
       try {
-        // Only read logs for a pod the caller owns: a non-owner's pod simply
-        // won't appear among their pods, so we never read across tenants.
-        const owned = await getCoreV1Api(kubeconfig).listNamespacedPod({
+        // Only read logs for a pod the caller may view: their own, or — for a
+        // query bound to the repo's own namespace — any collaborator's task in
+        // that repo. A pod outside that set simply won't appear here, so we
+        // never read across tenants.
+        const visible = await getCoreV1Api(kubeconfig).listNamespacedPod({
           namespace: input.namespace,
-          labelSelector: ownedSelector(userId),
+          labelSelector: repoViewSelector(
+            userId,
+            input.namespace,
+            input.repoFullName,
+          ),
         });
-        const owns = owned.items.some(
+        const mayView = visible.items.some(
           (p) => p.metadata?.name === input.podName,
         );
-        if (owns) {
+        if (mayView) {
           return await getCoreV1Api(kubeconfig).readNamespacedPodLog({
             name: input.podName,
             namespace: input.namespace,
@@ -839,21 +887,27 @@ export const agentsRouter = createTRPCRouter({
       } catch {
         // Listing/log read failed transiently — try the transcript fallback.
       }
-      // Persisted-transcript fallback, scoped to the owner so a guessable
-      // jobName can't surface another user's transcript.
+      // Persisted-transcript fallback. Readable by the run's owner, or by any
+      // collaborator when the run belongs to the repo this query was authorized
+      // for (assertRepoAccess above) — the run row's own repo is what's
+      // checked, so naming an accessible repo can't unlock another repo's run
+      // off a guessable jobName.
       const jobName = input.jobName;
       if (jobName) {
         const [run] = await ctx.db
           .select({
             transcriptKey: taskRun.transcriptKey,
             repoFullName: taskRun.repoFullName,
+            spawnedBy: taskRun.spawnedBy,
           })
           .from(taskRun)
-          .where(
-            and(eq(taskRun.jobName, jobName), eq(taskRun.spawnedBy, userId)),
-          )
+          .where(eq(taskRun.jobName, jobName))
           .limit(1);
-        if (run?.transcriptKey) {
+        const mayViewRun =
+          run &&
+          (run.spawnedBy === userId ||
+            (!!run.repoFullName && run.repoFullName === input.repoFullName));
+        if (mayViewRun && run.transcriptKey) {
           // Resolve the same store the ingest path wrote to: the run's repo
           // bucket (the only store — no server-wide fallback exists).
           const store = await resolveArtifactStore(ctx.db, run.repoFullName);

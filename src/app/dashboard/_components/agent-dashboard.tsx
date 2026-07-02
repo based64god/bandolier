@@ -12,7 +12,7 @@ import { authClient } from "~/server/better-auth/client";
 import { api } from "~/trpc/react";
 import { isAgentOutputResolved, nextAwaitingTarget } from "./agent-ui";
 import { DeployModal } from "./deploy-modal";
-import { useHideResolved } from "./hide-resolved";
+import { useHideResolved, useOnlyMine } from "./view-prefs";
 import { InteractiveRow } from "./interactive-sessions";
 import { LogModal } from "./log-modal";
 import {
@@ -155,10 +155,11 @@ export function AgentDashboard({
     },
   );
 
-  // The "hide resolved" filter persists in a cookie so it survives refreshes,
-  // applies across repos, and is not carried into shared links (a shared URL
-  // shows the recipient their own preference, not the sender's filtered view).
+  // View filters persist in cookies so they survive refreshes, apply across
+  // repos, and are not carried into shared links (a shared URL shows the
+  // recipient their own preference, not the sender's filtered view).
   const [hideResolved, setHideResolved] = useHideResolved();
+  const [onlyMine, setOnlyMine] = useOnlyMine();
 
   function toggleHideResolved() {
     setHideResolved(!hideResolved);
@@ -167,26 +168,36 @@ export function AgentDashboard({
   // One contiguous list. Tasks awaiting input float to the top regardless of
   // age (they need the user now); the rest follow newest-first. Interactive
   // tasks render as expandable cards (unchanged behaviour); the rest as rows.
-  // The "hide resolved" filter optionally drops tasks whose output has reached a
-  // terminal state on GitHub — a merged/closed PR or a closed/completed issue.
+  // "Hide resolved" drops tasks whose output has reached a terminal state on
+  // GitHub — a merged/closed PR or a closed/completed issue. "Only my tasks"
+  // drops collaborators' tasks (repo views list the whole repo's).
   const sortedAgents = [...agents].sort((a, b) => {
     const awaitDiff = Number(b.awaitingInput) - Number(a.awaitingInput);
     if (awaitDiff !== 0) return awaitDiff;
     return (b.createdAt ?? "").localeCompare(a.createdAt ?? "");
   });
-  const visibleAgents = hideResolved
-    ? sortedAgents.filter((a) => !isAgentOutputResolved(a))
-    : sortedAgents;
+  const visibleAgents = sortedAgents.filter(
+    (a) =>
+      (!hideResolved || !isAgentOutputResolved(a)) &&
+      (!onlyMine || a.ownedByViewer),
+  );
 
-  // Interactive agents still drive the awaiting-input alerts.
-  const interactiveAgents = agents.filter((a) => a.interactive);
+  // The viewer's own tasks. Repo views also list collaborators' tasks
+  // (read-only) — those must not drive this user's alerts or input focus.
+  const ownAgents = agents.filter((a) => a.ownedByViewer);
+
+  // Interactive agents still drive the awaiting-input alerts (own only — a
+  // collaborator's session waits for *their* input, not the viewer's).
+  const interactiveAgents = ownAgents.filter((a) => a.interactive);
 
   // Tab-to-cycle: the names of the sessions currently awaiting input, in the
   // order they appear in the table (awaiting tasks already float to the top).
   // Pressing Tab while focus is anywhere in the task table jumps to the next
   // one — expanding it and dropping the cursor into its message box.
   const awaitingNames = visibleAgents
-    .filter((a) => a.awaitingInput)
+    // Only the viewer's own sessions take input; collaborators' rows are
+    // read-only and can't be focus targets.
+    .filter((a) => a.awaitingInput && a.ownedByViewer)
     .map((a) => a.name);
   // The session Tab last targeted, plus a monotonic token. The token (re)bumps
   // even when the same session is re-targeted so the row's focus effect always
@@ -218,7 +229,7 @@ export function AgentDashboard({
   // Re-arm the audio unlock on each visit where notifications are already on
   // (the toggle gesture only primes the session it's clicked in).
   useChimeUnlock(notify);
-  useCompletionAlerts(agents, notify);
+  useCompletionAlerts(ownAgents, notify);
   useAwaitingInputAlerts(interactiveAgents, notify);
 
   async function toggleNotify() {
@@ -578,25 +589,39 @@ export function AgentDashboard({
                       {visibleAgents.length}
                     </span>
                   </h2>
-                  <label className="flex cursor-pointer items-center gap-2 text-xs text-white/50 select-none hover:text-white/70">
-                    <input
-                      type="checkbox"
-                      checked={hideResolved}
-                      onChange={toggleHideResolved}
-                      className="h-3.5 w-3.5 rounded border-white/20 bg-white/5 accent-purple-500"
-                    />
-                    Hide resolved
-                  </label>
+                  <div className="flex items-center gap-4">
+                    <label className="flex cursor-pointer items-center gap-2 text-xs text-white/50 select-none hover:text-white/70">
+                      <input
+                        type="checkbox"
+                        checked={onlyMine}
+                        onChange={() => setOnlyMine(!onlyMine)}
+                        className="h-3.5 w-3.5 rounded border-white/20 bg-white/5 accent-purple-500"
+                      />
+                      Only my tasks
+                    </label>
+                    <label className="flex cursor-pointer items-center gap-2 text-xs text-white/50 select-none hover:text-white/70">
+                      <input
+                        type="checkbox"
+                        checked={hideResolved}
+                        onChange={toggleHideResolved}
+                        className="h-3.5 w-3.5 rounded border-white/20 bg-white/5 accent-purple-500"
+                      />
+                      Hide resolved
+                    </label>
+                  </div>
                 </div>
 
                 {visibleAgents.length === 0 ? (
                   <div className="rounded-xl border border-white/10 bg-white/5 py-12 text-center text-sm text-white/40">
-                    All tasks are resolved.{" "}
+                    No tasks match the current filters.{" "}
                     <button
-                      onClick={toggleHideResolved}
+                      onClick={() => {
+                        setHideResolved(false);
+                        setOnlyMine(false);
+                      }}
                       className="text-white/70 underline hover:text-white"
                     >
-                      Show them
+                      Show all tasks
                     </button>
                   </div>
                 ) : (
@@ -691,9 +716,12 @@ export function AgentDashboard({
                       </thead>
                       <tbody className="divide-y divide-white/5">
                         {visibleAgents.map((agent) =>
-                          agent.interactive ? (
+                          agent.interactive && agent.ownedByViewer ? (
                             // Interactive sessions are rows too, expanding in
-                            // place to reveal their live logs + input.
+                            // place to reveal their live logs + input. Only the
+                            // owner gets the expanding input row — a
+                            // collaborator's session renders as a read-only
+                            // task row (logs viewable, no input).
                             <InteractiveRow
                               key={agent.name}
                               agent={agent}

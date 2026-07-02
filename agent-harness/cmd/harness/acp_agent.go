@@ -41,6 +41,10 @@ type acpAgent struct {
 	codexBegun bool          // codex runs one process per turn; resume after the first
 	curMsgID   string        // message id for the in-flight turn's chunks
 	cancelTurn context.CancelFunc
+	// tokens is the session-wide running total: a long-lived interactive process
+	// drives many turns, so each turn's result usage is summed and the cumulative
+	// figure re-emitted as the token marker (the server greps the latest).
+	tokens tokenUsage
 
 	turnMu sync.Mutex // serialize prompt turns
 }
@@ -261,6 +265,17 @@ func (d *claudeDriver) handle(raw []byte) {
 			}
 		}
 	case "result":
+		// Accumulate this turn's usage into the session total and re-emit the
+		// running total as the token marker. The agent's stderr is teed into the
+		// proxy's transcript, so the marker rides the pod log like the one-shot
+		// path's.
+		if !ev.Usage.empty() {
+			a.mu.Lock()
+			a.tokens.add(ev.Usage)
+			total := a.tokens
+			a.mu.Unlock()
+			logTokenUsage(total)
+		}
 		reason := acp.StopEndTurn
 		if ev.IsError {
 			reason = acp.StopRefusal

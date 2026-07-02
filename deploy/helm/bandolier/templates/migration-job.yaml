@@ -1,0 +1,69 @@
+{{- if .Values.migrations.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "bandolier.fullname" . }}-migrate
+  labels:
+    {{- include "bandolier.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migrate
+  annotations:
+    # Apply the schema before the app rolls out. weight -5 runs it after any
+    # bundled-Postgres hooks (see statefulset), so the DB is up first.
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.migrations.backoffLimit }}
+  template:
+    metadata:
+      labels:
+        {{- include "bandolier.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: migrate
+    spec:
+      restartPolicy: Never
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "bandolier.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- if .Values.postgres.enabled }}
+      # Bundled Postgres may still be coming up when the hook fires; wait for it.
+      initContainers:
+        - name: wait-for-postgres
+          image: "{{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}"
+          imagePullPolicy: {{ .Values.postgres.image.pullPolicy }}
+          command:
+            - sh
+            - -c
+            - |
+              until pg_isready -h {{ include "bandolier.postgres.fullname" . }} -p 5432 -U {{ .Values.postgres.auth.username }}; do
+                echo "waiting for postgres..."; sleep 2;
+              done
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+      {{- end }}
+      containers:
+        - name: migrate
+          image: "{{ .Values.migrations.image.repository }}:{{ .Values.migrations.image.tag | default .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.migrations.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          # The migrator image's default CMD runs `drizzle-kit migrate` against
+          # DATABASE_URL; no command override needed.
+          envFrom:
+            - secretRef:
+                name: {{ include "bandolier.secretName" . }}
+          env:
+            - name: SKIP_ENV_VALIDATION
+              value: "1"
+          resources:
+            {{- toYaml .Values.migrations.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+{{- end }}

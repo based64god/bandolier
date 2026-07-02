@@ -105,9 +105,61 @@ interface PodInspection {
   tokens: TokenUsage | null;
 }
 
-// Terminal pods' logs are immutable, so their inspection is cached. Running pods
-// are always re-read so "currently" stays live.
-const terminalInspectionCache = new Map<string, PodInspection>();
+// Pod inspections are cached. Terminal pods' logs are immutable, so those
+// entries never expire. Running pods get a TTL just under the dashboard's 5s
+// poll — every poll still re-reads the logs so "currently" stays live, but
+// concurrent viewers of the same pods (repo collaborators, multiple tabs,
+// overview + list) coalesce onto one log read per pod instead of one each.
+// The in-flight promise is what's cached, so simultaneous calls share a
+// single read rather than racing past an empty cache.
+const RUNNING_INSPECTION_TTL_MS = 3_000;
+const inspectionCache = new Map<
+  string,
+  { inspection: Promise<PodInspection>; freshUntil: number }
+>();
+
+/** The uncached log read behind inspectPod. Rejects on any read failure. */
+async function readPodInspection(
+  podName: string,
+  namespace: string,
+  terminal: boolean,
+  kubeconfig: string,
+): Promise<PodInspection> {
+  const logs = await getCoreV1Api(kubeconfig).readNamespacedPodLog({
+    name: podName,
+    namespace,
+    tailLines: 200,
+  });
+
+  const lines = logs.split("\n").map((l) => l.trim());
+
+  // Forward pass: the last AWAIT/RESUME marker decides the awaiting state.
+  let lastAwait = -1;
+  let lastResume = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i]!.includes(AWAIT_MARKER)) lastAwait = i;
+    if (lines[i]!.includes(RESUME_MARKER)) lastResume = i;
+  }
+
+  // Backward pass: the last assistant line is what Claude is doing now. Skip
+  // both harness diagnostics and the user's own messages — neither is Claude.
+  let currently: string | null = null;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i]!;
+    if (line && !line.includes("[harness]") && !line.includes(USER_MARKER)) {
+      currently = line;
+      break;
+    }
+  }
+
+  return {
+    currently,
+    pullRequestUrl: PR_MARKER.exec(logs)?.[1] ?? null,
+    createdIssueUrl: ISSUE_MARKER.exec(logs)?.[1] ?? null,
+    awaitingInput: !terminal && lastAwait >= 0 && lastAwait > lastResume,
+    tokens: parseTokenUsageFromLogs(logs),
+  };
+}
 
 /**
  * Reads a pod's recent logs once to derive both its live "currently" status (the
@@ -120,48 +172,25 @@ async function inspectPod(
   kubeconfig: string,
 ): Promise<PodInspection> {
   const terminal = phase === "Succeeded" || phase === "Failed";
-  const cached = terminalInspectionCache.get(podName);
-  if (terminal && cached) return cached;
+  // Phase class is part of the key so a pod that just finished gets one fresh
+  // terminal read instead of being served its cached running-phase inspection.
+  const runningKey = `${namespace}/${podName}/running`;
+  const key = terminal ? `${namespace}/${podName}/terminal` : runningKey;
+  const cached = inspectionCache.get(key);
+  if (cached && cached.freshUntil > Date.now()) return cached.inspection;
 
-  try {
-    const logs = await getCoreV1Api(kubeconfig).readNamespacedPodLog({
-      name: podName,
-      namespace,
-      tailLines: 200,
-    });
-
-    const lines = logs.split("\n").map((l) => l.trim());
-
-    // Forward pass: the last AWAIT/RESUME marker decides the awaiting state.
-    let lastAwait = -1;
-    let lastResume = -1;
-    for (let i = 0; i < lines.length; i++) {
-      if (lines[i]!.includes(AWAIT_MARKER)) lastAwait = i;
-      if (lines[i]!.includes(RESUME_MARKER)) lastResume = i;
+  const inspection: Promise<PodInspection> = readPodInspection(
+    podName,
+    namespace,
+    terminal,
+    kubeconfig,
+  ).catch((): PodInspection => {
+    // transient; evict so the next poll retries the read instead of being
+    // served this empty fallback for the rest of the TTL. (A .catch callback
+    // runs on a microtask, so `inspection` is always assigned by now.)
+    if (inspectionCache.get(key)?.inspection === inspection) {
+      inspectionCache.delete(key);
     }
-
-    // Backward pass: the last assistant line is what Claude is doing now. Skip
-    // both harness diagnostics and the user's own messages — neither is Claude.
-    let currently: string | null = null;
-    for (let i = lines.length - 1; i >= 0; i--) {
-      const line = lines[i]!;
-      if (line && !line.includes("[harness]") && !line.includes(USER_MARKER)) {
-        currently = line;
-        break;
-      }
-    }
-
-    const result: PodInspection = {
-      currently,
-      pullRequestUrl: PR_MARKER.exec(logs)?.[1] ?? null,
-      createdIssueUrl: ISSUE_MARKER.exec(logs)?.[1] ?? null,
-      awaitingInput: !terminal && lastAwait >= 0 && lastAwait > lastResume,
-      tokens: parseTokenUsageFromLogs(logs),
-    };
-    if (terminal) terminalInspectionCache.set(podName, result);
-    return result;
-  } catch {
-    // transient; retry next poll
     return {
       currently: null,
       pullRequestUrl: null,
@@ -169,7 +198,15 @@ async function inspectPod(
       awaitingInput: false,
       tokens: null,
     };
-  }
+  });
+
+  inspectionCache.set(key, {
+    inspection,
+    freshUntil: terminal ? Infinity : Date.now() + RUNNING_INSPECTION_TTL_MS,
+  });
+  // A terminal pod no longer needs its running-phase entry.
+  if (terminal) inspectionCache.delete(runningKey);
+  return inspection;
 }
 
 /**

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyFrames,
   END_SESSION_FRAME,
+  groupTimeline,
   promptFrame,
   type RawAcpFrame,
   type TimelineItem,
@@ -293,6 +294,61 @@ describe("applyFrames", () => {
     );
     expect(items).toEqual([]);
     expect(sessionId).toBeUndefined();
+  });
+});
+
+describe("groupTimeline", () => {
+  const msg = (id: string, text: string): TimelineItem => ({
+    type: "message",
+    role: "assistant",
+    id,
+    text,
+  });
+  const tool = (id: string): TimelineItem => ({
+    type: "tool",
+    id,
+    kind: "read",
+    title: `Read ${id}`,
+    status: "pending",
+  });
+
+  const toolCounts = (groups: ReturnType<typeof groupTimeline>) =>
+    groups.map((g) => (g.type === "tools" ? g.items.length : "msg"));
+
+  it("collapses a run of consecutive tool calls into one group", () => {
+    const groups = groupTimeline([
+      msg("a1", "reading"),
+      tool("t1"),
+      tool("t2"),
+      tool("t3"),
+      msg("a2", "done"),
+    ]);
+    expect(groups).toHaveLength(3);
+    expect(groups[0]).toMatchObject({ type: "message", id: "a1" });
+    expect(groups[1]).toMatchObject({ type: "tools", id: "t1" });
+    expect(groups[2]).toMatchObject({ type: "message", id: "a2" });
+    expect(toolCounts(groups)).toEqual(["msg", 3, "msg"]);
+  });
+
+  it("keeps a lone tool call as its own group", () => {
+    const groups = groupTimeline([msg("a1", "one"), tool("t1")]);
+    expect(groups).toHaveLength(2);
+    expect(groups[1]).toMatchObject({ type: "tools", id: "t1" });
+    expect(toolCounts(groups)).toEqual(["msg", 1]);
+  });
+
+  it("starts a fresh group after a message interrupts the tool run", () => {
+    const groups = groupTimeline([
+      tool("t1"),
+      tool("t2"),
+      msg("a1", "between"),
+      tool("t3"),
+    ]);
+    expect(toolCounts(groups)).toEqual([2, "msg", 1]);
+  });
+
+  it("returns nothing for an empty timeline", () => {
+    expect(groupTimeline([])).toEqual([]);
   });
 });
 

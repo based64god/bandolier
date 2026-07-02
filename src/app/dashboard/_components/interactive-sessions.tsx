@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import type { TimelineItem } from "~/lib/acp/timeline";
+import { groupTimeline, type TimelineItem } from "~/lib/acp/timeline";
 import { api } from "~/trpc/react";
 import type { RouterOutputs } from "~/trpc/react";
 import { expiresAtLocal, taskNameTooltip } from "./agent-ui";
@@ -381,11 +381,11 @@ function Conversation({
             {running ? "Waiting for output…" : "No transcript."}
           </span>
         ) : (
-          items.map((item) =>
-            item.type === "tool" ? (
-              <ToolRow key={item.id} item={item} />
+          groupTimeline(items).map((group) =>
+            group.type === "tools" ? (
+              <ToolGroup key={group.id} items={group.items} />
             ) : (
-              <MessageRow key={item.id} item={item} />
+              <MessageRow key={group.id} item={group.item} />
             ),
           )
         )}
@@ -437,6 +437,38 @@ const TOOL_KIND_GLYPH: Record<string, string> = {
   think: "✦",
   other: "▢",
 };
+
+// A run of consecutive tool calls, collapsed behind a summary so the mechanical
+// activity between assistant turns doesn't bury the conversation — the
+// interactive mirror of the log modal's HarnessSegment. A single tool call still
+// renders as one summarized row rather than a redundant fold.
+function ToolGroup({
+  items,
+}: {
+  items: Extract<TimelineItem, { type: "tool" }>[];
+}) {
+  return (
+    <details className="group">
+      <summary className="flex cursor-pointer list-none items-center gap-1.5 font-mono text-[11px] text-white/40 hover:text-white/60 [&::-webkit-details-marker]:hidden">
+        <svg
+          viewBox="0 0 12 12"
+          fill="currentColor"
+          className="h-2.5 w-2.5 shrink-0 transition-transform group-open:rotate-90"
+        >
+          <path d="M4 2l5 4-5 4V2z" />
+        </svg>
+        <span>
+          {items.length} tool {items.length === 1 ? "call" : "calls"}
+        </span>
+      </summary>
+      <div className="mt-1 ml-4 space-y-1 border-l border-white/10 pl-3">
+        {items.map((item) => (
+          <ToolRow key={item.id} item={item} />
+        ))}
+      </div>
+    </details>
+  );
+}
 
 function ToolRow({ item }: { item: Extract<TimelineItem, { type: "tool" }> }) {
   const glyph = TOOL_KIND_GLYPH[item.kind] ?? TOOL_KIND_GLYPH.other;

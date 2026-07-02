@@ -159,6 +159,38 @@ export function applyFrames(
   return { items, sessionId, commands };
 }
 
+/**
+ * A run of timeline items ready to render: message bubbles pass through as-is,
+ * while consecutive tool calls are gathered into a single `tools` group so the
+ * UI can collapse them behind a summary — the interactive mirror of how the
+ * non-interactive log collapses runs of [harness] diagnostic lines.
+ */
+export type TimelineGroup =
+  | { type: "message"; id: string; item: Extract<TimelineItem, { type: "message" }> }
+  | { type: "tools"; id: string; items: Extract<TimelineItem, { type: "tool" }>[] };
+
+/**
+ * Collapses runs of consecutive tool calls in the timeline into `tools` groups,
+ * leaving messages as standalone groups. Keeps the folding pure and unit-testable,
+ * mirroring parseSegments for the non-interactive log.
+ */
+export function groupTimeline(items: TimelineItem[]): TimelineGroup[] {
+  const groups: TimelineGroup[] = [];
+  for (const item of items) {
+    if (item.type === "tool") {
+      const last = groups[groups.length - 1];
+      if (last?.type === "tools") {
+        last.items.push(item);
+      } else {
+        groups.push({ type: "tools", id: item.id, items: [item] });
+      }
+    } else {
+      groups.push({ type: "message", id: item.id, item });
+    }
+  }
+  return groups;
+}
+
 /** Builds a session/prompt JSON-RPC frame for the frontend client to enqueue. */
 export function promptFrame(
   sessionId: string,

@@ -694,3 +694,42 @@ func TestDiffBase(t *testing.T) {
 		t.Errorf("diffBase() on resume = %q, want origin/issue-7-fix-abc123", got)
 	}
 }
+
+func TestWithRepoPrompt(t *testing.T) {
+	// Empty everywhere → empty.
+	if got := (config{}).withRepoPrompt(""); got != "" {
+		t.Errorf("all-empty withRepoPrompt() = %q, want empty", got)
+	}
+
+	// Only the framing survives when there's no repo/serena layer.
+	if got := (config{}).withRepoPrompt("frame"); got != "frame" {
+		t.Errorf("framing-only withRepoPrompt() = %q, want %q", got, "frame")
+	}
+
+	// Layers are appended in order: framing, repo prompt, then serena override.
+	c := config{repoSystemPrompt: "repo", serenaPrompt: "serena"}
+	want := "frame\n\nrepo\n\nserena"
+	if got := c.withRepoPrompt("frame"); got != want {
+		t.Errorf("layered withRepoPrompt() = %q, want %q", got, want)
+	}
+
+	// A missing middle layer is skipped without leaving a blank gap.
+	c = config{serenaPrompt: "serena"}
+	want = "frame\n\nserena"
+	if got := c.withRepoPrompt("frame"); got != want {
+		t.Errorf("serena-only withRepoPrompt() = %q, want %q", got, want)
+	}
+}
+
+func TestClaudeProvider(t *testing.T) {
+	for _, p := range []providerKind{providerAnthropic, providerBedrock} {
+		if !(config{provider: p}).claudeProvider() {
+			t.Errorf("claudeProvider() = false for provider %d, want true", p)
+		}
+	}
+	for _, p := range []providerKind{providerNone, providerOpenAI, providerGemini} {
+		if (config{provider: p}).claudeProvider() {
+			t.Errorf("claudeProvider() = true for provider %d, want false", p)
+		}
+	}
+}

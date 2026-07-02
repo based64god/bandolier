@@ -1,8 +1,9 @@
 import { SignInButton } from "~/app/_components/auth-buttons";
 import { BandolierIcon } from "~/app/_components/bandolier-icon";
 import { AgentDashboard } from "~/app/dashboard/_components/agent-dashboard";
+import { repoToNamespace } from "~/server/agents/namespace";
 import { getSession } from "~/server/better-auth/server";
-import { HydrateClient } from "~/trpc/server";
+import { api, HydrateClient } from "~/trpc/server";
 
 /**
  * Shared dashboard entry used by both the home route and the per-repo route.
@@ -34,6 +35,26 @@ export async function DashboardEntry({
         </div>
       </main>
     );
+  }
+
+  // Start the dashboard's initial queries on the server so the HTML streams
+  // down with data instead of the client waterfalling them after hydration.
+  // Inputs must mirror the useQuery calls in AgentDashboard/OverviewPanel
+  // exactly, or the hydrated cache entries miss and the client refetches.
+  void api.repos.list.prefetch();
+  void api.account.kubeconfigStatus.prefetch({
+    repoFullName: repoSlug ?? undefined,
+  });
+  if (repoSlug) {
+    void api.agents.list.prefetch({
+      namespace: repoToNamespace(repoSlug),
+      repoFullName: repoSlug,
+    });
+  } else {
+    // Home route renders the cross-repo overview instead of a repo's task
+    // list. Without a kubeconfig the client never runs this query; the
+    // prefetch just fails fast server-side and is dropped.
+    void api.agents.overview.prefetch();
   }
 
   return (

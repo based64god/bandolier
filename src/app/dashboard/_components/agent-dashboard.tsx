@@ -207,21 +207,26 @@ export function AgentDashboard({
     token: number;
   } | null>(null);
 
-  function cycleAwaiting(): boolean {
-    const next = nextAwaitingTarget(awaitingNames, focusTarget?.name ?? null);
+  function cycleAwaiting(direction: 1 | -1): boolean {
+    const next = nextAwaitingTarget(
+      awaitingNames,
+      focusTarget?.name ?? null,
+      direction,
+    );
     if (!next) return false;
     setFocusTarget((prev) => ({ name: next, token: (prev?.token ?? 0) + 1 }));
     return true;
   }
 
   function handleTableKeyDown(e: React.KeyboardEvent) {
-    // Plain Tab only — leave Shift+Tab and the modifier combos to the browser's
-    // normal focus traversal. When no session is waiting, fall through to
-    // default tabbing too (nothing to cycle).
-    if (e.key !== "Tab" || e.shiftKey || e.altKey || e.ctrlKey || e.metaKey) {
+    // Tab / Shift+Tab cycle forward / backward through the awaiting sessions;
+    // the other modifier combos are left to the browser's normal focus
+    // traversal. When no session is waiting, fall through to default tabbing
+    // too (nothing to cycle).
+    if (e.key !== "Tab" || e.altKey || e.ctrlKey || e.metaKey) {
       return;
     }
-    if (cycleAwaiting()) e.preventDefault();
+    if (cycleAwaiting(e.shiftKey ? -1 : 1)) e.preventDefault();
   }
 
   // Chime + system notification when an agent finishes or starts awaiting input.

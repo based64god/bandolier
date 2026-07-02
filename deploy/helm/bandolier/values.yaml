@@ -1,0 +1,280 @@
+# Default values for the Bandolier web-app chart.
+# Every value here is overridable with `--set` or a custom values file.
+# See deploy/README.md for a walkthrough.
+
+# -- Number of web-app replicas. The app is stateless (all state lives in
+# Postgres), so this scales horizontally.
+replicaCount: 1
+
+image:
+  # -- Web-app image repository. Published by the web-app-image workflow.
+  repository: ghcr.io/based64god/bandolier
+  # -- Image tag. Pin to a released version (e.g. "v0.1.0") in production;
+  # "latest" tracks main.
+  tag: latest
+  # -- Image pull policy. "Always" re-pulls "latest" on every restart.
+  pullPolicy: IfNotPresent
+
+# -- Image pull secrets for a private registry hosting the web-app image.
+imagePullSecrets: []
+# - name: ghcr-pull
+
+# -- Override the chart name used in resource names.
+nameOverride: ""
+# -- Override the full release-qualified resource name.
+fullnameOverride: ""
+
+serviceAccount:
+  # -- Create a ServiceAccount for the web app.
+  create: true
+  # -- Extra annotations for the ServiceAccount (e.g. IRSA role ARN on EKS).
+  annotations: {}
+  # -- Name to use; generated from the fullname when empty.
+  name: ""
+
+# -- Extra pod annotations (merged onto the web-app pod template).
+podAnnotations: {}
+# -- Pod-level securityContext for the web-app pods.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+# -- Container-level securityContext for the web-app container.
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+service:
+  # -- Kubernetes Service type for the web app.
+  type: ClusterIP
+  # -- Service port that fronts the app's container port (3000).
+  port: 80
+
+ingress:
+  # -- Create an Ingress for the web app. Requires an ingress controller.
+  enabled: false
+  # -- ingressClassName (e.g. "nginx", "traefik").
+  className: ""
+  # -- Extra ingress annotations (TLS issuer, body size, etc.).
+  annotations: {}
+  # -- Host the app is served on. MUST match config.betterAuthUrl's host.
+  host: bandolier.example.com
+  # -- Path prefix. Bandolier expects to own the whole host.
+  path: /
+  pathType: Prefix
+  tls:
+    # -- Terminate TLS at the ingress for `host`.
+    enabled: false
+    # -- Secret holding the TLS cert/key (e.g. created by cert-manager).
+    secretName: bandolier-tls
+
+# -- Resource requests/limits for the web-app container.
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+
+# -- Liveness/readiness probes hit /api/health (readiness also checks Postgres).
+# See src/app/api/health/route.ts.
+probes:
+  enabled: true
+
+# -- Node scheduling controls for the web-app pods.
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# ── Application configuration ─────────────────────────────────────────────────
+# Non-secret values become a ConfigMap; secrets become a Secret. Both are wired
+# into the app's environment. Mirrors src/env.js — see .env.example for the full
+# reference. Leave optional values empty to disable the feature they gate.
+config:
+  # -- Public base URL of the app. MUST be the externally reachable URL
+  # (scheme + host), and match the ingress host. Used for OAuth callbacks.
+  betterAuthUrl: "https://bandolier.example.com"
+  # -- Label selector identifying Bandolier-managed agent pods (K8S_LABEL_SELECTOR).
+  k8sLabelSelector: "app=bandolier-agent"
+  # -- Apply a NetworkPolicy isolating agent pods (needs a policy-enforcing CNI).
+  agentNetworkPolicy: "true"
+  # -- CIDRs agent pods cannot reach (AGENT_EGRESS_BLOCKED_CIDRS).
+  agentEgressBlockedCidrs: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+  # -- The Bandolier GitHub App's public slug (links the repo-config UI to its
+  # install page). Optional.
+  githubAppSlug: ""
+
+# Secret values. Provide them here (discouraged for real secrets — they'd sit in
+# release history), or set secrets.create=false and point secrets.existingSecret
+# at a Secret you manage out-of-band (sealed-secrets, external-secrets, etc.).
+secrets:
+  # -- Create a Secret from the values below. Set false to use existingSecret.
+  create: true
+  # -- Name of a pre-existing Secret to use instead of creating one. It must
+  # provide the same keys the chart's Secret would (see templates/secret.yaml).
+  existingSecret: ""
+
+  # -- Secret for signing sessions and tokens (openssl rand -base64 32). Required.
+  betterAuthSecret: ""
+  # -- GitHub OAuth app client id. Required.
+  githubClientId: ""
+  # -- GitHub OAuth app client secret. Required.
+  githubClientSecret: ""
+
+  # -- Postgres connection string. REQUIRED when postgres.mode=external. For
+  # postgres.mode=bundled|cnpg this is derived from the deployed DB and may be
+  # left empty. Example: postgresql://user:pass@host:5432/bandolier
+  databaseUrl: ""
+
+  # -- Optional GitHub App credentials (bot-voice comments + webhook delivery).
+  githubWebhookSecret: ""
+  githubAppId: ""
+  # PEM private key. In a values file, use a YAML block scalar (|-) to preserve
+  # newlines; the app also accepts \n-escaped single-line PEMs.
+  githubAppPrivateKey: ""
+  githubAppClientId: ""
+  githubAppClientSecret: ""
+
+  # -- Optional shared password gate in front of the whole app (APP_PASSWORD).
+  appPassword: ""
+
+# ── Database migrations ───────────────────────────────────────────────────────
+# Runs `drizzle-kit migrate` (the migrator stage of the app image) as a Helm
+# pre-install/pre-upgrade hook, so the schema is applied before the app rolls
+# out. Uses the same DATABASE_URL as the app.
+migrations:
+  # -- Run the migration Job on install/upgrade.
+  enabled: true
+  # -- The migrator image (Dockerfile's `migrator` stage: drizzle-kit + the SQL
+  # under drizzle/). Separate from the lean app image, which can't migrate.
+  image:
+    repository: ghcr.io/based64god/bandolier-migrate
+    # -- Tag; empty inherits image.tag so migrator and app stay in lockstep.
+    tag: ""
+    pullPolicy: IfNotPresent
+  # -- Backoff limit for the migration Job.
+  backoffLimit: 3
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# ── Postgres ──────────────────────────────────────────────────────────────────
+# How the app gets its database. One of:
+#   external — use a database you provide via secrets.databaseUrl (default;
+#              recommended for production). Nothing is deployed.
+#   bundled  — a single-replica StatefulSet + PVC. Simple; fine for evaluation.
+#   cnpg     — a CloudNativePG `Cluster` (operator-managed: HA, failover, backups,
+#              rolling upgrades). Requires the CloudNativePG operator already
+#              installed in the cluster (https://cloudnative-pg.io).
+# For bundled/cnpg the app's DATABASE_URL is derived from the settings below and
+# secrets.databaseUrl is ignored.
+postgres:
+  # -- Database mode: "external" | "bundled" | "cnpg".
+  mode: external
+  # -- Database name / user / password for a bundled or cnpg instance. (Unused
+  # in external mode.)
+  auth:
+    database: bandolier
+    username: bandolier
+    password: "change-me-in-production"
+
+  # Settings for mode: bundled (plain StatefulSet).
+  bundled:
+    image:
+      repository: postgres
+      tag: "16-alpine"
+      pullPolicy: IfNotPresent
+    # -- Persistent volume for Postgres data.
+    persistence:
+      enabled: true
+      size: 8Gi
+      # -- StorageClass; empty uses the cluster default.
+      storageClass: ""
+    resources:
+      requests:
+        cpu: 250m
+        memory: 256Mi
+      limits:
+        cpu: "1"
+        memory: 1Gi
+
+  # Settings for mode: cnpg (CloudNativePG Cluster CR).
+  cnpg:
+    # -- Number of Postgres instances (1 primary + N-1 replicas). >=2 for HA.
+    instances: 1
+    # -- Major Postgres version → the operator's default image for it.
+    postgresVersion: 16
+    # -- Override the container image entirely (empty uses the operator default
+    # for postgresVersion).
+    imageName: ""
+    storage:
+      size: 8Gi
+      # -- StorageClass; empty uses the cluster default.
+      storageClass: ""
+    resources:
+      requests:
+        cpu: 250m
+        memory: 256Mi
+      limits:
+        cpu: "1"
+        memory: 1Gi
+
+# ── Bundled MinIO (optional, in-cluster S3 for run artifacts) ──────────────────
+# Bandolier stores run transcripts in S3, configured PER REPOSITORY in the app UI
+# (there is no server-wide bucket). Enabling this deploys an in-cluster,
+# S3-compatible MinIO and pre-creates a bucket, so an operator has an endpoint +
+# credentials to paste into a repo's "Run artifact storage" settings. It is NOT
+# wired into the app's environment — it's a convenience so you don't have to run
+# MinIO yourself. Point a repo at it with:
+#   Endpoint:  http://<release>-minio.<namespace>.svc:9000  (or the ingress host)
+#   Bucket:    <minio.bucket>
+#   Keys:      <minio.auth.rootUser> / <minio.auth.rootPassword>
+minio:
+  # -- Deploy an in-cluster MinIO + create a bucket.
+  enabled: false
+  image:
+    repository: quay.io/minio/minio
+    tag: "RELEASE.2024-10-13T13-34-11Z"
+    pullPolicy: IfNotPresent
+  # -- mc image used by the one-shot Job that creates the bucket.
+  mcImage:
+    repository: quay.io/minio/mc
+    tag: "RELEASE.2024-10-08T09-37-26Z"
+    pullPolicy: IfNotPresent
+  # -- Root credentials for the MinIO instance (these are the S3 access/secret
+  # keys a repo uses). Change them.
+  auth:
+    rootUser: bandolier
+    rootPassword: "change-me-in-production"
+  # -- Bucket pre-created for run artifacts.
+  bucket: bandolier-artifacts
+  # -- Persistent volume for object storage.
+  persistence:
+    enabled: true
+    size: 20Gi
+    # -- StorageClass; empty uses the cluster default.
+    storageClass: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  # -- Optional Ingress so repos (and agent pods) can reach MinIO off-cluster.
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    host: minio.example.com
+    tls:
+      enabled: false
+      secretName: bandolier-minio-tls

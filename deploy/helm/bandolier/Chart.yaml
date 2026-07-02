@@ -1,0 +1,23 @@
+apiVersion: v2
+name: bandolier
+description: >-
+  Self-host the Bandolier web app (the Next.js + tRPC dashboard that launches
+  Claude Code agents as Kubernetes Jobs) on Kubernetes. Deploys the app, wires
+  its configuration, runs database migrations on install/upgrade, and can
+  optionally bundle a Postgres database for quick starts.
+type: application
+# Chart version — bump on chart changes (independent of the app image tag).
+version: 0.1.0
+# The default app image tag this chart targets. Overridable via image.tag.
+appVersion: "latest"
+kubeVersion: ">=1.24.0-0"
+home: https://github.com/based64god/bandolier
+sources:
+  - https://github.com/based64god/bandolier
+keywords:
+  - bandolier
+  - claude-code
+  - agents
+  - self-hosted
+maintainers:
+  - name: Bandolier maintainers

@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "bandolier.fullname" . }}
+  labels:
+    {{- include "bandolier.labels" . | nindent 4 }}
+data:
+  # Non-secret app configuration (mirrors the non-secret half of src/env.js).
+  BETTER_AUTH_URL: {{ .Values.config.betterAuthUrl | quote }}
+  K8S_LABEL_SELECTOR: {{ .Values.config.k8sLabelSelector | quote }}
+  AGENT_NETWORK_POLICY: {{ .Values.config.agentNetworkPolicy | quote }}
+  AGENT_EGRESS_BLOCKED_CIDRS: {{ .Values.config.agentEgressBlockedCidrs | quote }}
+  {{- with .Values.config.githubAppSlug }}
+  NEXT_PUBLIC_GITHUB_APP_SLUG: {{ . | quote }}
+  {{- end }}

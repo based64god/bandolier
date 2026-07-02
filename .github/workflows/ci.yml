@@ -129,6 +129,80 @@ jobs:
       - name: Test
         run: go test -race -count=1 ./...
 
+  chart:
+    name: Helm chart (lint · kubeconform)
+    runs-on: ubuntu-latest
+    env:
+      CHART: deploy/helm/bandolier
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.16.3
+
+      - name: Install kubeconform
+        run: |
+          curl -fsSL \
+            https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz \
+            | tar -xz kubeconform
+          sudo mv kubeconform /usr/local/bin/
+
+      # Lint with valid values so required-value validation passes and template
+      # errors surface. The values themselves are inert placeholders.
+      - name: Lint chart
+        run: |
+          helm lint "$CHART" \
+            --set secrets.betterAuthSecret=ci \
+            --set secrets.githubClientId=ci \
+            --set secrets.githubClientSecret=ci \
+            --set secrets.databaseUrl='postgresql://ci:ci@db:5432/ci'
+
+      # Confirm the validation guard actually fails a misconfigured render
+      # (missing required secrets) rather than silently producing bad manifests.
+      - name: Assert validation rejects missing required values
+        run: |
+          if helm template ci "$CHART" >/dev/null 2>&1; then
+            echo "Expected 'helm template' to fail without required secrets, but it succeeded." >&2
+            exit 1
+          fi
+          echo "Validation correctly rejected the empty configuration."
+
+      # Render both modes — external DB and bundled Postgres — and validate every
+      # emitted resource against the upstream Kubernetes JSON schemas.
+      - name: Render and validate manifests
+        run: |
+          set -euo pipefail
+          common=(
+            --set secrets.betterAuthSecret=ci
+            --set secrets.githubClientId=ci
+            --set secrets.githubClientSecret=ci
+          )
+
+          echo "── external DB + ingress + TLS ──"
+          helm template ci "$CHART" "${common[@]}" \
+            --set secrets.databaseUrl='postgresql://ci:ci@db:5432/ci' \
+            --set ingress.enabled=true --set ingress.className=nginx \
+            --set ingress.tls.enabled=true \
+            | kubeconform -strict -summary -kubernetes-version 1.29.0 -
+
+          echo "── bundled Postgres + bundled MinIO ──"
+          helm template ci "$CHART" "${common[@]}" \
+            --set postgres.mode=bundled \
+            --set minio.enabled=true \
+            --set minio.ingress.enabled=true --set minio.ingress.className=nginx \
+            | kubeconform -strict -summary -kubernetes-version 1.29.0 -
+
+          # CloudNativePG's Cluster is a CRD not in kubeconform's default schema
+          # set, so allow its schema to be skipped (its siblings still validate).
+          echo "── CloudNativePG ──"
+          helm template ci "$CHART" "${common[@]}" \
+            --set postgres.mode=cnpg \
+            | kubeconform -strict -summary -ignore-missing-schemas \
+                -kubernetes-version 1.29.0 -
+
   db-migrate:
     name: Apply migrations (drizzle)
     environment: production

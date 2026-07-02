@@ -1,0 +1,86 @@
+{{- if .Values.migrations.enabled }}
+{{- $deployed := include "bandolier.postgres.deployed" . }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "bandolier.fullname" . }}-migrate
+  labels:
+    {{- include "bandolier.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migrate
+  annotations:
+    # When the database is external it already exists, so migrate as a
+    # pre-install/pre-upgrade hook — schema is applied before the app rolls out.
+    # When the chart deploys the database (bundled/cnpg) it is created as a
+    # normal release resource, which does not exist yet at pre-install time; run
+    # the install-time migration as a post-install hook instead (upgrades still
+    # migrate pre-upgrade, since the DB is already up by then). The wait-for-db
+    # init container below covers the DB still coming up.
+    {{- if $deployed }}
+    "helm.sh/hook": post-install,pre-upgrade
+    {{- else }}
+    "helm.sh/hook": pre-install,pre-upgrade
+    {{- end }}
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.migrations.backoffLimit }}
+  template:
+    metadata:
+      labels:
+        {{- include "bandolier.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: migrate
+    spec:
+      restartPolicy: Never
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "bandolier.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- if $deployed }}
+      # A chart-deployed database may still be coming up when the hook fires
+      # (cnpg provisions asynchronously); wait for the primary to accept
+      # connections. Uses the postgres client image for pg_isready.
+      initContainers:
+        - name: wait-for-postgres
+          {{- if eq .Values.postgres.mode "bundled" }}
+          image: "{{ .Values.postgres.bundled.image.repository }}:{{ .Values.postgres.bundled.image.tag }}"
+          imagePullPolicy: {{ .Values.postgres.bundled.image.pullPolicy }}
+          {{- else }}
+          image: "postgres:16-alpine"
+          imagePullPolicy: IfNotPresent
+          {{- end }}
+          command:
+            - sh
+            - -c
+            - |
+              until pg_isready -h {{ include "bandolier.postgres.host" . }} -p 5432 -U {{ .Values.postgres.auth.username }}; do
+                echo "waiting for postgres..."; sleep 2;
+              done
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+      {{- end }}
+      containers:
+        - name: migrate
+          image: "{{ .Values.migrations.image.repository }}:{{ .Values.migrations.image.tag | default .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.migrations.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          # The migrator image's default CMD runs `drizzle-kit migrate` against
+          # DATABASE_URL; no command override needed.
+          envFrom:
+            - secretRef:
+                name: {{ include "bandolier.secretName" . }}
+          env:
+            - name: SKIP_ENV_VALIDATION
+              value: "1"
+          resources:
+            {{- toYaml .Values.migrations.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+{{- end }}

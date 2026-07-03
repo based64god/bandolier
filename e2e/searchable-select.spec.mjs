@@ -85,6 +85,59 @@ await search.type("a");
 await search.press("Enter");
 check("typing 'a' + Enter picks first match 'alpha'", (await value()) === "alpha");
 
+// ── Recent group (second harness instance) ───────────────────────────────────
+// recentValues is ["gamma", "alpha", "zeta-unknown"], so the open panel is:
+//   Recent: gamma(0), alpha(1)   All: alpha(2), beta(3), gamma(4), delta(5), epsilon(6)
+const recentValue = () => page.getByTestId("recent-value").innerText();
+const recentTrigger = page.getByRole("button").nth(1);
+const recentSearch = page.getByPlaceholder("Search recents…");
+
+await recentTrigger.focus();
+await recentTrigger.press("ArrowDown");
+await recentSearch.waitFor({ state: "visible", timeout: 5000 });
+const panel = page.locator("body > div").filter({ has: recentSearch });
+check(
+  "Recent and All headings render",
+  (await panel.getByText("Recent", { exact: true }).isVisible()) &&
+    (await panel.getByText("All", { exact: true }).isVisible()),
+);
+check(
+  "recent value without a matching option is ignored",
+  (await panel.getByText("zeta").count()) === 0,
+);
+// No selection yet → highlight starts on the first recent row.
+await recentSearch.press("Enter");
+check("Enter on open picks first recent 'gamma'", (await recentValue()) === "gamma");
+
+// Reopen: gamma is in the recent group, so the highlight starts there and
+// ArrowDown walks to the next recent row.
+await recentTrigger.press("Enter");
+await recentSearch.waitFor({ state: "visible", timeout: 5000 });
+await recentSearch.press("ArrowDown");
+await recentSearch.press("Enter");
+check("ArrowDown from recent 'gamma' picks recent 'alpha'", (await recentValue()) === "alpha");
+
+// Reopen: highlight starts on recent alpha(1); two ArrowDowns cross the section
+// boundary into the full list (alpha(2) → beta(3)).
+await recentTrigger.press("Enter");
+await recentSearch.waitFor({ state: "visible", timeout: 5000 });
+await recentSearch.press("ArrowDown");
+await recentSearch.press("ArrowDown");
+await recentSearch.press("Enter");
+check("nav runs continuously across sections, picks 'beta'", (await recentValue()) === "beta");
+
+// Searching collapses to a single flat list — no Recent heading, and the first
+// match is from the full list order (alpha).
+await recentTrigger.press("Enter");
+await recentSearch.waitFor({ state: "visible", timeout: 5000 });
+await recentSearch.type("a");
+check(
+  "searching hides the Recent group",
+  (await panel.getByText("Recent", { exact: true }).count()) === 0,
+);
+await recentSearch.press("Enter");
+check("search + Enter picks first match 'alpha'", (await recentValue()) === "alpha");
+
 await browser.close();
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);

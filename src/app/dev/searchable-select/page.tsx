@@ -12,6 +12,7 @@ import { SearchableSelect } from "~/app/dashboard/_components/searchable-select"
  */
 export default function SearchableSelectHarness() {
   const [value, setValue] = useState<string | null>("beta");
+  const [recentValue, setRecentValue] = useState<string | null>(null);
 
   // Dev/test only — never expose this route in a deployed app.
   if (process.env.NODE_ENV === "production") {
@@ -41,6 +42,24 @@ export default function SearchableSelectHarness() {
       </div>
       <p data-testid="value" className="mt-4 font-mono text-sm">
         {value ?? "null"}
+      </p>
+
+      {/* Second instance exercising the recent group: two known values in
+          recency (non-alphabetical) order plus one that matches no option and
+          must be ignored. Distinct placeholders keep spec selectors unambiguous. */}
+      <h2 className="mt-8 mb-4 text-lg">With recent values</h2>
+      <div className="max-w-md">
+        <SearchableSelect
+          options={options}
+          value={recentValue}
+          onChange={setRecentValue}
+          placeholder="Select an option"
+          searchPlaceholder="Search recents…"
+          recentValues={["gamma", "alpha", "zeta-unknown"]}
+        />
+      </div>
+      <p data-testid="recent-value" className="mt-4 font-mono text-sm">
+        {recentValue ?? "null"}
       </p>
     </div>
   );

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -24,6 +24,7 @@ import {
   useNotifyPref,
 } from "./notifications";
 import { OverviewPanel } from "./overview-panel";
+import { recordRecentRepo, useRecentRepos } from "./recent-repos";
 import { RepoConfigModal } from "./repo-config-modal";
 import { SearchableSelect, type SelectOption } from "./searchable-select";
 import { SettingsModal } from "./settings-modal";
@@ -66,6 +67,7 @@ function RepoSelector({
   const sorted = [...repos].sort((a, b) =>
     a.fullName.toLowerCase().localeCompare(b.fullName.toLowerCase()),
   );
+  const recentRepos = useRecentRepos();
 
   const options: SelectOption[] = sorted.map((r) => {
     const [owner, name] = r.fullName.split("/");
@@ -98,6 +100,7 @@ function RepoSelector({
       onChange={(v) => v && onChange(v)}
       placeholder="Select repository"
       loading={loading}
+      recentValues={recentRepos}
       searchPlaceholder="Search repositories…"
       emptyText="No repositories found. Sign out and back in to grant repo access."
     />
@@ -130,6 +133,13 @@ export function AgentDashboard({
   const selectedRepo = repoSlug
     ? (repos.find((r) => r.fullName === repoSlug) ?? null)
     : null;
+
+  // Record a visit once the URL's repo resolves against the fetched repo list
+  // (so direct links count, but bogus slugs never enter the recent list).
+  const selectedFullName = selectedRepo?.fullName;
+  useEffect(() => {
+    if (selectedFullName) recordRecentRepo(selectedFullName);
+  }, [selectedFullName]);
   // Pass the selected repo so a repo's own (preferred) kubeconfig counts as
   // configured — the "Configure kubeconfig" prompt shouldn't render when the
   // repo already resolves a cluster, even if the user hasn't set one.

@@ -67,6 +67,7 @@ export function InteractiveRow({
   focusSignal?: number | null;
 }) {
   const [ending, setEnding] = useState(false);
+  const [confirmKill, setConfirmKill] = useState(false);
   const running = agent.status === "Running" || agent.status === "Pending";
   // Default closed for sessions that are already done when first mounted —
   // there's nothing to interact with, so keep them out of the way. Live
@@ -272,49 +273,97 @@ export function InteractiveRow({
           <div
             className={`flex flex-wrap items-center justify-end gap-2 lg:flex-nowrap ${ACTION_ROW_MIN_H}`}
           >
-            {running && (
-              <button
-                onClick={() => {
-                  setEnding(true);
-                  session.endSession();
-                }}
-                disabled={ending}
-                className="flex items-center justify-center rounded-md border border-white/10 p-1 text-xs whitespace-nowrap text-white/60 hover:bg-white/10 disabled:opacity-40 lg:px-3 lg:py-1.5"
-                title="Close the session and open a PR if there are commits"
-                aria-label="End session"
-              >
-                {/* Full label from `lg` up; a compact "stop" glyph on mobile so
-                    the control keeps the terminate glyph's footprint and the two
-                    stay on one line within the slim Actions column. */}
-                <span className="hidden lg:inline">
-                  {ending ? "Ending…" : "End session"}
-                </span>
-                <svg
-                  viewBox="0 0 16 16"
-                  fill="currentColor"
-                  aria-hidden="true"
-                  className="h-5 w-5 lg:hidden"
+            {confirmKill ? (
+              // Two-step confirm for the destructive terminate, mirroring the
+              // non-interactive TaskRow: the red × arms this state, then a
+              // Confirm/Cancel pair (compact glyphs on mobile, full labels from
+              // `lg` up) replaces the End-session + terminate controls so the
+              // pair keeps their footprint and stays on one line.
+              <>
+                <button
+                  onClick={() =>
+                    terminate.mutate({
+                      podName: agent.name,
+                      namespace,
+                      repoFullName,
+                    })
+                  }
+                  disabled={terminate.isPending}
+                  aria-label="Confirm"
+                  className="flex items-center justify-center rounded bg-red-600/40 p-1 text-xs text-red-200 hover:bg-red-600/60 disabled:opacity-50 lg:px-2 lg:py-1"
                 >
-                  <rect x="4" y="4" width="8" height="8" rx="1.5" />
-                </svg>
-              </button>
+                  <span className="hidden lg:inline">
+                    {terminate.isPending ? "…" : "Confirm"}
+                  </span>
+                  <svg
+                    viewBox="0 0 16 16"
+                    fill="currentColor"
+                    aria-hidden="true"
+                    className="h-5 w-5 lg:hidden"
+                  >
+                    <path d="M6.5 10.086 3.707 7.293a1 1 0 0 0-1.414 1.414l3.5 3.5a1 1 0 0 0 1.414 0l7-7a1 1 0 0 0-1.414-1.414L6.5 10.086Z" />
+                  </svg>
+                </button>
+                <button
+                  onClick={() => setConfirmKill(false)}
+                  aria-label="Cancel"
+                  className="flex items-center justify-center rounded bg-white/10 p-1 text-xs hover:bg-white/20 lg:px-2 lg:py-1"
+                >
+                  <span className="hidden lg:inline">Cancel</span>
+                  <svg
+                    viewBox="0 0 16 16"
+                    fill="currentColor"
+                    aria-hidden="true"
+                    className="h-5 w-5 lg:hidden"
+                  >
+                    <path d="M6.53 3.47a.75.75 0 0 1 0 1.06L4.81 6.25H10a3.75 3.75 0 0 1 0 7.5H8a.75.75 0 0 1 0-1.5h2a2.25 2.25 0 0 0 0-4.5H4.81l1.72 1.72a.75.75 0 1 1-1.06 1.06l-3-3a.75.75 0 0 1 0-1.06l3-3a.75.75 0 0 1 1.06 0Z" />
+                  </svg>
+                </button>
+              </>
+            ) : (
+              <>
+                {running && (
+                  <button
+                    onClick={() => {
+                      setEnding(true);
+                      session.endSession();
+                    }}
+                    disabled={ending}
+                    className="flex items-center justify-center rounded-md border border-white/10 p-1 text-xs whitespace-nowrap text-white/60 hover:bg-white/10 disabled:opacity-40 lg:px-3 lg:py-1.5"
+                    title="Close the session and open a PR if there are commits"
+                    aria-label="End session"
+                  >
+                    {/* Full label from `lg` up; a compact "stop" glyph on mobile
+                        so the control keeps the terminate glyph's footprint and
+                        the two stay on one line within the slim Actions column. */}
+                    <span className="hidden lg:inline">
+                      {ending ? "Ending…" : "End session"}
+                    </span>
+                    <svg
+                      viewBox="0 0 16 16"
+                      fill="currentColor"
+                      aria-hidden="true"
+                      className="h-5 w-5 lg:hidden"
+                    >
+                      <rect x="4" y="4" width="8" height="8" rx="1.5" />
+                    </svg>
+                  </button>
+                )}
+                <button
+                  onClick={() => setConfirmKill(true)}
+                  aria-label="Terminate agent"
+                  className="rounded p-1 text-red-500 hover:bg-red-500/10 hover:text-red-300 disabled:opacity-40"
+                >
+                  <svg
+                    viewBox="0 0 16 16"
+                    fill="currentColor"
+                    className="h-5 w-5"
+                  >
+                    <path d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.75.75 0 1 1 1.06 1.06L9.06 8l3.22 3.22a.75.75 0 1 1-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 0 1-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06Z" />
+                  </svg>
+                </button>
+              </>
             )}
-            <button
-              onClick={() =>
-                terminate.mutate({
-                  podName: agent.name,
-                  namespace,
-                  repoFullName,
-                })
-              }
-              disabled={terminate.isPending}
-              aria-label="Terminate agent"
-              className="rounded p-1 text-red-500 hover:bg-red-500/10 hover:text-red-300 disabled:opacity-40"
-            >
-              <svg viewBox="0 0 16 16" fill="currentColor" className="h-5 w-5">
-                <path d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.75.75 0 1 1 1.06 1.06L9.06 8l3.22 3.22a.75.75 0 1 1-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 0 1-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06Z" />
-              </svg>
-            </button>
           </div>
         </td>
       </tr>

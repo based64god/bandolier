@@ -20,6 +20,12 @@ import {
   buildIssueUserMessage,
   makeIssueBranch,
 } from "~/lib/issue-prompt";
+import {
+  DEFAULT_CPU_LIMIT,
+  DEFAULT_MEMORY_LIMIT,
+  validateCpuQuantity,
+  validateMemoryQuantity,
+} from "~/lib/compute";
 import { EFFORT_LEVELS, providerSupportsEffort } from "~/lib/effort";
 import { parseTokenUsageFromLogs, type TokenUsage } from "~/lib/tokens";
 import {
@@ -38,6 +44,7 @@ import {
   githubGitIdentity,
   type GitIdentity,
 } from "~/server/agents/github-token";
+import { mergeCompute, resolveCompute } from "~/server/agents/compute";
 import { resolveKubeconfig } from "~/server/agents/kubeconfig";
 import { repoToNamespace } from "~/server/agents/namespace";
 import {
@@ -632,9 +639,25 @@ export const agentsRouter = createTRPCRouter({
     }),
 
   // Deploy-form defaults sourced from the server so the UI stays in sync.
-  deployDefaults: protectedProcedure.query(() => ({
-    maxTurns: DEFAULT_MAX_TURNS,
-  })),
+  // The compute default is resolved per repo/user (see resolveCompute) so the
+  // form can show what a task will run with unless overridden.
+  deployDefaults: protectedProcedure
+    .input(z.object({ repoFullName: z.string().optional() }).optional())
+    .query(async ({ ctx, input }) => {
+      await assertRepoAccess(ctx.db, ctx.session.user.id, input?.repoFullName);
+      const compute = await resolveCompute(
+        ctx.db,
+        ctx.session.user.id,
+        input?.repoFullName,
+      );
+      return {
+        maxTurns: DEFAULT_MAX_TURNS,
+        compute: {
+          cpu: compute.cpu ?? DEFAULT_CPU_LIMIT,
+          memory: compute.memory ?? DEFAULT_MEMORY_LIMIT,
+        },
+      };
+    }),
 
   // Cross-repo overview for the home screen: every agent the acting user spawned,
   // regardless of repository (including repo-less tasks, and webhook tasks
@@ -1231,6 +1254,11 @@ export const agentsRouter = createTRPCRouter({
           // OpenAI/Gemini). Optional — unset uses the CLI default.
           effort: z.enum(EFFORT_LEVELS).optional(),
           maxTurns: z.number().int().min(1).max(200).optional(),
+          // Per-task compute (CPU / memory limit) override, as Kubernetes
+          // quantities. Unset falls back to the repo/user default, then the
+          // built-in limit. Validated in the handler for a readable error.
+          cpu: z.string().optional(),
+          memory: z.string().optional(),
           // When set, the agent works on this GitHub issue (and the task field
           // becomes additional context).
           issueNumber: z.number().int().positive().optional(),
@@ -1274,6 +1302,24 @@ export const agentsRouter = createTRPCRouter({
 
       const userId = ctx.session.user.id;
 
+      // Validate a per-task compute override up front, so a malformed quantity
+      // is a clear 400 rather than a failed job creation.
+      const computeOverride: { cpu?: string; memory?: string } = {};
+      if (input.cpu?.trim()) {
+        const v = validateCpuQuantity(input.cpu);
+        if (!v.valid) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: v.error });
+        }
+        computeOverride.cpu = v.normalized;
+      }
+      if (input.memory?.trim()) {
+        const v = validateMemoryQuantity(input.memory);
+        if (!v.valid) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: v.error });
+        }
+        computeOverride.memory = v.normalized;
+      }
+
       // A repo's shared cluster and credentials are only for users who can reach
       // that repo. Verify access before resolving anything repo-scoped, so a
       // non-member can't deploy under another team's kubeconfig/cloud creds.
@@ -1285,6 +1331,13 @@ export const agentsRouter = createTRPCRouter({
         ctx.db,
         userId,
         input.repoFullName,
+      );
+
+      // Resolve the run's compute the same way: the per-task override beats
+      // the repo/user defaults (ordered by the prefer-credentials flag).
+      const compute = mergeCompute(
+        await resolveCompute(ctx.db, userId, input.repoFullName),
+        computeOverride,
       );
 
       // Resolve model credentials, then pick the set that matches the provider of
@@ -1584,6 +1637,7 @@ export const agentsRouter = createTRPCRouter({
               ? input.effort
               : undefined,
           maxTurns: input.maxTurns,
+          compute,
           prWriterModel,
           interactive: input.interactive,
           outputType: input.outputType,

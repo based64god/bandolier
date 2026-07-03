@@ -66,6 +66,10 @@ export function DeployModal({
   // Empty string means "use the CLI default" reasoning effort.
   const [effort, setEffort] = useState("");
   const [maxTurns, setMaxTurns] = useState("");
+  // Per-task compute (CPU / memory limit) overrides; "" uses the resolved
+  // repo/user default shown as the placeholder.
+  const [cpu, setCpu] = useState("");
+  const [memory, setMemory] = useState("");
   // "" means no issue selected.
   const [issueNumber, setIssueNumber] = useState("");
   // Interactive agents stay alive and wait for the user's input between turns.
@@ -85,8 +89,11 @@ export function DeployModal({
   const { data: providerInfo } = api.agents.providerInfo.useQuery({
     repoFullName,
   });
-  const { data: deployDefaults } = api.agents.deployDefaults.useQuery();
+  const { data: deployDefaults } = api.agents.deployDefaults.useQuery({
+    repoFullName,
+  });
   const defaultMaxTurns = deployDefaults?.maxTurns;
+  const defaultCompute = deployDefaults?.compute;
   const { data: issues = [], isLoading: issuesLoading } =
     api.repos.issues.useQuery(
       { repoFullName: repoFullName! },
@@ -189,6 +196,8 @@ export function DeployModal({
           ? (effectiveEffort as EffortLevel)
           : undefined,
       maxTurns: maxTurns ? parseInt(maxTurns, 10) : undefined,
+      cpu: cpu.trim() || undefined,
+      memory: memory.trim() || undefined,
       issueNumber: hasIssue ? parseInt(issueNumber, 10) : undefined,
       interactive: interactive || undefined,
       outputType: issueOutput ? "issue" : undefined,
@@ -518,29 +527,56 @@ export function DeployModal({
             </div>
           </div>
 
-          {/* Max turns */}
-          <div className="space-y-1.5">
-            <label className="block text-xs font-medium text-white/60">
-              Max turns{" "}
-              {defaultMaxTurns !== undefined && (
-                <span className="font-normal text-white/30">
-                  (default: {defaultMaxTurns})
-                </span>
-              )}
-            </label>
-            <input
-              type="number"
-              min={1}
-              max={200}
-              value={maxTurns}
-              onChange={(e) => setMaxTurns(e.target.value)}
-              disabled={interactive}
-              placeholder={
-                defaultMaxTurns !== undefined ? String(defaultMaxTurns) : ""
-              }
-              className="w-32 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/30 focus:outline-none disabled:opacity-40"
-            />
+          {/* Max turns + compute (CPU / memory limit) overrides */}
+          <div className="grid grid-cols-3 gap-3">
+            <div className="space-y-1.5">
+              <label className="block text-xs font-medium text-white/60">
+                Max turns
+              </label>
+              <input
+                type="number"
+                min={1}
+                max={200}
+                value={maxTurns}
+                onChange={(e) => setMaxTurns(e.target.value)}
+                disabled={interactive}
+                placeholder={
+                  defaultMaxTurns !== undefined ? String(defaultMaxTurns) : ""
+                }
+                className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/30 focus:outline-none disabled:opacity-40"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="block text-xs font-medium text-white/60">
+                CPU
+              </label>
+              <input
+                type="text"
+                value={cpu}
+                onChange={(e) => setCpu(e.target.value)}
+                placeholder={defaultCompute?.cpu ?? ""}
+                className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/30 focus:outline-none"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="block text-xs font-medium text-white/60">
+                Memory
+              </label>
+              <input
+                type="text"
+                value={memory}
+                onChange={(e) => setMemory(e.target.value)}
+                placeholder={defaultCompute?.memory ?? ""}
+                className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/30 focus:outline-none"
+              />
+            </div>
           </div>
+          <p className="-mt-2 text-xs text-white/40">
+            Placeholders are the defaults (max turns from the server; CPU /
+            memory from your or the repo&rsquo;s configured compute). Quantities
+            like <code className="text-white/50">4</code> and{" "}
+            <code className="text-white/50">8Gi</code>.
+          </p>
 
           {/* Interactive */}
           <label className="flex cursor-pointer items-start gap-2.5">

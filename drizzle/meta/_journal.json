@@ -141,6 +141,13 @@
       "when": 1783061108206,
       "tag": "0019_large_shockwave",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1783103652120,
+      "tag": "0020_useful_tarantula",
+      "breakpoints": true
     }
   ]
 }

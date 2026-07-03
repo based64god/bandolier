@@ -8,6 +8,8 @@ import {
   validateAnthropicOauthToken,
 } from "~/server/agents/anthropic";
 import { cleanSessionToken, validateAwsCredentials } from "~/server/agents/aws";
+import { getUserCompute } from "~/server/agents/compute";
+import { validateCpuQuantity, validateMemoryQuantity } from "~/lib/compute";
 import {
   getUserKubeconfig,
   resolveKubeconfig,
@@ -28,6 +30,7 @@ import { getRepoCredentials } from "~/server/agents/webhook-config";
 import {
   userAnthropicCredentials,
   userAwsCredentials,
+  userCompute,
   userGeminiCredentials,
   userKubeconfig,
   userOpenaiCredentials,
@@ -479,6 +482,63 @@ export const accountRouter = createTRPCRouter({
     await ctx.db
       .delete(userKubeconfig)
       .where(eq(userKubeconfig.userId, ctx.session.user.id));
+    return { success: true };
+  }),
+
+  // ── Compute (agent CPU / memory limits) ───────────────────────────────────
+
+  // The user's stored default compute for their agents (null fields = the
+  // built-in limit). Non-secret; rendered as-is in settings.
+  computeStatus: protectedProcedure.query(async ({ ctx }) => {
+    const compute = await getUserCompute(ctx.db, ctx.session.user.id);
+    return { cpu: compute?.cpu ?? null, memory: compute?.memory ?? null };
+  }),
+
+  // Set the user's default compute. Blank fields clear their default (fall
+  // back to a repo default, then the built-in limit); both blank removes the
+  // row entirely. Quantities are validated so a typo fails here, not as an
+  // unschedulable or instantly-OOM-killed pod later.
+  setCompute: protectedProcedure
+    .input(z.object({ cpu: z.string(), memory: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      let cpu: string | null = null;
+      if (input.cpu.trim()) {
+        const v = validateCpuQuantity(input.cpu);
+        if (!v.valid) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: v.error });
+        }
+        cpu = v.normalized;
+      }
+      let memory: string | null = null;
+      if (input.memory.trim()) {
+        const v = validateMemoryQuantity(input.memory);
+        if (!v.valid) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: v.error });
+        }
+        memory = v.normalized;
+      }
+
+      if (cpu === null && memory === null) {
+        await ctx.db
+          .delete(userCompute)
+          .where(eq(userCompute.userId, ctx.session.user.id));
+        return { success: true };
+      }
+
+      await ctx.db
+        .insert(userCompute)
+        .values({ userId: ctx.session.user.id, cpu, memory })
+        .onConflictDoUpdate({
+          target: userCompute.userId,
+          set: { cpu, memory, updatedAt: new Date() },
+        });
+      return { success: true };
+    }),
+
+  deleteCompute: protectedProcedure.mutation(async ({ ctx }) => {
+    await ctx.db
+      .delete(userCompute)
+      .where(eq(userCompute.userId, ctx.session.user.id));
     return { success: true };
   }),
 });

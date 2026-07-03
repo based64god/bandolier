@@ -53,7 +53,7 @@ export function HarnessSegment({ lines }: { lines: string[] }) {
           <path d="M4 2l5 4-5 4V2z" />
         </svg>
         <span className="font-mono text-xs">
-          {lines.length} diagnostic {lines.length === 1 ? "line" : "lines"}
+          {lines.length} tool {lines.length === 1 ? "call" : "calls"}
         </span>
       </summary>
       <div className="mt-0.5 ml-4 border-l border-white/10 pl-3">

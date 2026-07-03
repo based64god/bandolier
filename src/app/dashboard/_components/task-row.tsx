@@ -143,13 +143,14 @@ export function TaskRow({
         {/* The actions cell reserves the height of the tallest control
             (`ACTION_ROW_MIN_H`) so a row never grows or shrinks vertically as
             its action toggles between the compact terminate (×) glyph and the
-            taller confirm/cancel buttons — only an expanding interactive row
-            should change a row's height. The group wraps on narrow viewports
-            (`flex-wrap`) so the confirm/cancel pair stacks within the slim
-            mobile Actions column rather than overflowing leftward onto the
-            adjacent Task description; it stays on one line from `lg` up. */}
+            confirm/cancel pair — only an expanding interactive row should change
+            a row's height. The pair never wraps (`flex-nowrap`, even on mobile):
+            a wrapped second line would grow the row on the narrow mobile Actions
+            column. To fit that column on one line, Confirm/Cancel collapse to
+            compact glyphs below `lg` (see below), showing their full labels from
+            `lg` up. */}
         <div
-          className={`flex flex-wrap items-center justify-end gap-1 lg:flex-nowrap lg:whitespace-nowrap ${ACTION_ROW_MIN_H}`}
+          className={`flex flex-nowrap items-center justify-end gap-1 whitespace-nowrap ${ACTION_ROW_MIN_H}`}
         >
           {!agent.ownedByViewer ? (
             // A collaborator's task: viewable (the row opens its logs) but not
@@ -163,6 +164,10 @@ export function TaskRow({
             </span>
           ) : confirmKill ? (
             <>
+              {/* Full labels from `lg` up; compact glyphs on mobile so the pair
+                  keeps the terminate glyph's footprint and stays on one line
+                  within the slim Actions column (mirrors InteractiveRow's
+                  "End session"). A wrapped second line would grow the row. */}
               <button
                 onClick={() =>
                   terminate.mutate({
@@ -172,15 +177,35 @@ export function TaskRow({
                   })
                 }
                 disabled={terminate.isPending}
-                className="rounded bg-red-600/40 px-2 py-1 text-xs text-red-200 hover:bg-red-600/60 disabled:opacity-50"
+                aria-label="Confirm"
+                className="flex items-center justify-center rounded bg-red-600/40 p-1 text-xs text-red-200 hover:bg-red-600/60 disabled:opacity-50 lg:px-2 lg:py-1"
               >
-                {terminate.isPending ? "…" : "Confirm"}
+                <span className="hidden lg:inline">
+                  {terminate.isPending ? "…" : "Confirm"}
+                </span>
+                <svg
+                  viewBox="0 0 16 16"
+                  fill="currentColor"
+                  aria-hidden="true"
+                  className="h-5 w-5 lg:hidden"
+                >
+                  <path d="M6.5 10.086 3.707 7.293a1 1 0 0 0-1.414 1.414l3.5 3.5a1 1 0 0 0 1.414 0l7-7a1 1 0 0 0-1.414-1.414L6.5 10.086Z" />
+                </svg>
               </button>
               <button
                 onClick={() => setConfirmKill(false)}
-                className="rounded bg-white/10 px-2 py-1 text-xs hover:bg-white/20"
+                aria-label="Cancel"
+                className="flex items-center justify-center rounded bg-white/10 p-1 text-xs hover:bg-white/20 lg:px-2 lg:py-1"
               >
-                Cancel
+                <span className="hidden lg:inline">Cancel</span>
+                <svg
+                  viewBox="0 0 16 16"
+                  fill="currentColor"
+                  aria-hidden="true"
+                  className="h-5 w-5 lg:hidden"
+                >
+                  <path d="M6.53 3.47a.75.75 0 0 1 0 1.06L4.81 6.25H10a3.75 3.75 0 0 1 0 7.5H8a.75.75 0 0 1 0-1.5h2a2.25 2.25 0 0 0 0-4.5H4.81l1.72 1.72a.75.75 0 1 1-1.06 1.06l-3-3a.75.75 0 0 1 0-1.06l3-3a.75.75 0 0 1 1.06 0Z" />
+                </svg>
               </button>
             </>
           ) : (

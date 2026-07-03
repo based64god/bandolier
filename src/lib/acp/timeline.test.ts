@@ -2,12 +2,17 @@ import { describe, expect, it } from "vitest";
 
 import {
   applyFrames,
+  batchAwaitsInput,
   END_SESSION_FRAME,
   groupTimeline,
   promptFrame,
   type RawAcpFrame,
   type TimelineItem,
 } from "./timeline";
+
+function promptResult(id: number, stopReason: string): string {
+  return JSON.stringify({ jsonrpc: "2.0", id, result: { stopReason } });
+}
 
 function update(seq: number, sessionId: string, update: unknown): RawAcpFrame {
   return {
@@ -511,5 +516,49 @@ describe("frame builders", () => {
   it("end-session frame carries the bandolier control method", () => {
     const parsed = JSON.parse(END_SESSION_FRAME) as { method: string };
     expect(parsed.method).toBe("_bandolier/endSession");
+  });
+});
+
+describe("batchAwaitsInput", () => {
+  it("detects a completed prompt turn (end_turn)", () => {
+    expect(batchAwaitsInput([promptResult(2, "end_turn")])).toBe(true);
+  });
+
+  it("treats any non-cancelled stop reason as awaiting input", () => {
+    expect(batchAwaitsInput([promptResult(2, "max_tokens")])).toBe(true);
+    expect(batchAwaitsInput([promptResult(2, "refusal")])).toBe(true);
+  });
+
+  it("ignores a cancelled turn (nothing to alert on)", () => {
+    expect(batchAwaitsInput([promptResult(2, "cancelled")])).toBe(false);
+  });
+
+  it("ignores session/update notifications and other frames", () => {
+    const chunk = JSON.stringify({
+      jsonrpc: "2.0",
+      method: "session/update",
+      params: {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: { text: "hi" },
+        },
+      },
+    });
+    const sessionNew = JSON.stringify({ id: 1, result: { sessionId: "s1" } });
+    expect(batchAwaitsInput([chunk, sessionNew])).toBe(false);
+  });
+
+  it("finds the turn-end frame among a mixed batch", () => {
+    const chunk = JSON.stringify({
+      jsonrpc: "2.0",
+      method: "session/update",
+      params: { update: { sessionUpdate: "tool_call" } },
+    });
+    expect(batchAwaitsInput([chunk, promptResult(3, "end_turn")])).toBe(true);
+  });
+
+  it("tolerates malformed frames", () => {
+    expect(batchAwaitsInput(["not json", "{bad", ""])).toBe(false);
   });
 });

@@ -221,3 +221,29 @@ export const END_SESSION_FRAME = JSON.stringify({
   jsonrpc: "2.0",
   method: "_bandolier/endSession",
 });
+
+/**
+ * True when a batch of agent→client frames contains a completed prompt turn —
+ * a JSON-RPC response carrying `result.stopReason`. That's the protocol-level
+ * "the agent finished its turn and now awaits the user", the same transition
+ * the log-scanning await detection keys off. A `cancelled` stop is excluded:
+ * the user just cancelled, so there's nothing to alert them about. Used
+ * server-side to fire a background "waiting for input" push as turns end.
+ */
+export function batchAwaitsInput(frames: string[]): boolean {
+  for (const raw of frames) {
+    let msg: unknown;
+    try {
+      msg = JSON.parse(raw);
+    } catch {
+      continue;
+    }
+    if (!msg || typeof msg !== "object") continue;
+    const result = (msg as { result?: { stopReason?: unknown } }).result;
+    const stopReason = result?.stopReason;
+    if (typeof stopReason === "string" && stopReason !== "cancelled") {
+      return true;
+    }
+  }
+  return false;
+}

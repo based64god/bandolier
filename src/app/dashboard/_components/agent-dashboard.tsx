@@ -19,6 +19,7 @@ import {
   primeAudio,
   requestNotificationPermission,
   useAwaitingInputAlerts,
+  useBackgroundPush,
   useChimeUnlock,
   useCompletionAlerts,
   useNotifyPref,
@@ -246,6 +247,9 @@ export function AgentDashboard({
   useChimeUnlock(notify);
   useCompletionAlerts(ownAgents, notify);
   useAwaitingInputAlerts(interactiveAgents, notify);
+  // Keep the background push subscription in lockstep with the preference so
+  // completions notify even with the app closed.
+  useBackgroundPush(notify);
 
   async function toggleNotify() {
     if (!notify) {

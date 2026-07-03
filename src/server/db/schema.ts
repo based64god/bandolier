@@ -482,6 +482,29 @@ export const pendingAgentRun = pgTable(
   ],
 );
 
+// A browser's Web Push subscription, so the server can alert a user that their
+// agent finished even when the app is closed. One row per push endpoint (the
+// natural key — a user with several browsers/devices has several rows). Rows are
+// created when a user enables notifications and pruned when a push service
+// reports the endpoint is gone (404/410) or the user disables notifications.
+export const pushSubscription = pgTable(
+  "push_subscription",
+  {
+    // The push service endpoint URL — unique per subscription, so it's the key.
+    endpoint: text("endpoint").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    // The subscription's encryption keys, needed to sign each push payload.
+    p256dh: text("p256dh").notNull(),
+    auth: text("auth").notNull(),
+    createdAt: timestamp("created_at")
+      .$defaultFn(() => /* @__PURE__ */ new Date())
+      .notNull(),
+  },
+  (t) => [index("push_subscription_user_idx").on(t.userId)],
+);
+
 export const userRelations = relations(user, ({ many }) => ({
   account: many(account),
   session: many(session),

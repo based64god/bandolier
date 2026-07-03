@@ -67,6 +67,34 @@ describe("runUsesRepoCredentials", () => {
     expect(await runUsesRepoCredentials(db, "u1", "o/r", resolved)).toBe(true);
   });
 
+  // Each single-credential repo-sourced set must trip the gate on its own —
+  // hasModelCredential must not depend on anthropicApiKey (or aws) being set.
+  const singleCredentialSets: [string, Partial<ModelCredentials>][] = [
+    ["anthropicOauthToken", { anthropicOauthToken: "sub-token" }],
+    ["openaiApiKey", { openaiApiKey: "sk-openai" }],
+    ["codexAuthJson", { codexAuthJson: "{}" }],
+    ["geminiApiKey", { geminiApiKey: "gm-key" }],
+  ];
+  it.each(singleCredentialSets)(
+    "is true when the repo-sourced set's only credential is %s",
+    async (_name, fields) => {
+      getRepoCredentials.mockResolvedValue(repo({}));
+      const resolved = creds({ ...fields, source: "repo" });
+      expect(await runUsesRepoCredentials(db, "u1", "o/r", resolved)).toBe(
+        true,
+      );
+    },
+  );
+
+  it("is false when a repo-sourced set carries no credential at all", async () => {
+    // source === "repo" alone must not trip the maintainer gate: with every
+    // credential field null nothing repo-owned is being spent, and with no
+    // repo kubeconfig the check falls through to false.
+    getRepoCredentials.mockResolvedValue(repo({ anthropicApiKey: "repo-key" }));
+    const resolved = creds({ source: "repo" });
+    expect(await runUsesRepoCredentials(db, "u1", "o/r", resolved)).toBe(false);
+  });
+
   it("is false when the resolved model credentials come from the user", async () => {
     getRepoCredentials.mockResolvedValue(repo({ anthropicApiKey: "repo-key" }));
     const resolved = creds({ anthropicApiKey: "user-key", source: "user" });

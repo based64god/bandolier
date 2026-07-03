@@ -1,9 +1,12 @@
+import { load as loadYaml } from "js-yaml";
 import { describe, expect, it } from "vitest";
 
 import {
+  agentEgressBlockedCidrs,
   buildCustomNetworkPolicyBody,
   buildNetworkPolicyBody,
   NETWORK_POLICY_NAME,
+  renderDefaultNetworkPolicyYaml,
   validateNetworkPolicyYaml,
 } from "~/server/agents/network-policy";
 
@@ -197,6 +200,77 @@ spec:
     expect(result.valid).toBe(false);
     if (!result.valid) expect(result.error).toContain("bandolier-agent");
   });
+
+  it("accepts a numeric port range (port + endPort)", () => {
+    const yaml = VALID_YAML.replace(
+      "port: 443",
+      "port: 8000\n          endPort: 9000",
+    );
+    expect(validateNetworkPolicyYaml(yaml)).toEqual({ valid: true });
+  });
+
+  it("rejects an endPort below the starting port", () => {
+    const yaml = VALID_YAML.replace(
+      "port: 443",
+      "port: 9000\n          endPort: 80",
+    );
+    const result = validateNetworkPolicyYaml(yaml);
+    expect(result.valid).toBe(false);
+    if (!result.valid) expect(result.error).toContain("endPort");
+  });
+
+  it("accepts a named container port", () => {
+    // Quoted so js-yaml keeps it a string.
+    const yaml = VALID_YAML.replace("port: 443", 'port: "metrics"');
+    expect(validateNetworkPolicyYaml(yaml)).toEqual({ valid: true });
+  });
+
+  it("rejects endPort combined with a named port (ranges need numbers)", () => {
+    const yaml = VALID_YAML.replace(
+      "port: 443",
+      'port: "web"\n          endPort: 443',
+    );
+    const result = validateNetworkPolicyYaml(yaml);
+    expect(result.valid).toBe(false);
+    if (!result.valid) expect(result.error).toContain("endPort");
+  });
+
+  it("accepts a podSelector using matchExpressions", () => {
+    const yaml = VALID_YAML.replace(
+      "podSelector: {}",
+      "podSelector:\n    matchExpressions:\n      - key: app\n        operator: In\n        values: [bandolier-agent]",
+    );
+    expect(validateNetworkPolicyYaml(yaml)).toEqual({ valid: true });
+  });
+
+  it("rejects an unknown matchExpressions operator", () => {
+    const yaml = VALID_YAML.replace(
+      "podSelector: {}",
+      "podSelector:\n    matchExpressions:\n      - key: app\n        operator: Equals\n        values: [bandolier-agent]",
+    );
+    expect(validateNetworkPolicyYaml(yaml).valid).toBe(false);
+  });
+
+  it("accepts an IPv6 CIDR in ipBlock.except", () => {
+    const yaml = VALID_YAML.replace(
+      "except: [10.0.0.0/8]",
+      "except: [fd00::/8]",
+    );
+    expect(validateNetworkPolicyYaml(yaml)).toEqual({ valid: true });
+  });
+
+  it("rejects an out-of-range IPv4 prefix and a bare IP without one", () => {
+    expect(
+      validateNetworkPolicyYaml(
+        VALID_YAML.replace("except: [10.0.0.0/8]", "except: [10.0.0.0/33]"),
+      ).valid,
+    ).toBe(false);
+    expect(
+      validateNetworkPolicyYaml(
+        VALID_YAML.replace("except: [10.0.0.0/8]", "except: [10.0.0.0]"),
+      ).valid,
+    ).toBe(false);
+  });
 });
 
 describe("buildCustomNetworkPolicyBody", () => {
@@ -212,8 +286,49 @@ describe("buildCustomNetworkPolicyBody", () => {
     expect(body.spec.egress).toHaveLength(1);
   });
 
+  it("keeps pre-existing metadata labels alongside the managed-by label", () => {
+    const yaml = VALID_YAML.replace(
+      "  name: my-policy",
+      "  name: my-policy\n  labels:\n    team: platform",
+    );
+    const body = buildCustomNetworkPolicyBody("ns", yaml) as {
+      metadata: { labels: Record<string, string> };
+    };
+    expect(body.metadata.labels).toEqual({
+      team: "platform",
+      "app.kubernetes.io/managed-by": "bandolier",
+    });
+  });
+
   it("throws on unparseable YAML (deploy fails closed)", () => {
     expect(() => buildCustomNetworkPolicyBody("ns", "foo: [")).toThrow();
     expect(() => buildCustomNetworkPolicyBody("ns", "just a string")).toThrow();
+  });
+});
+
+describe("agentEgressBlockedCidrs", () => {
+  it("parses the configured block list (the RFC-1918 default)", () => {
+    // The test env doesn't set AGENT_EGRESS_BLOCKED_CIDRS, so this exercises
+    // the env default: the three RFC-1918 private ranges.
+    expect(agentEgressBlockedCidrs()).toEqual(BLOCKED);
+  });
+});
+
+describe("renderDefaultNetworkPolicyYaml", () => {
+  it("renders exactly the body buildNetworkPolicyBody produces", () => {
+    const yaml = renderDefaultNetworkPolicyYaml("ns", {
+      allowAllPortsEgress: true,
+    });
+    expect(loadYaml(yaml)).toEqual(
+      buildNetworkPolicyBody("ns", agentEgressBlockedCidrs(), {
+        allowAllPortsEgress: true,
+      }),
+    );
+  });
+
+  it("passes its own validation, so the UI's starting point is saveable", () => {
+    expect(
+      validateNetworkPolicyYaml(renderDefaultNetworkPolicyYaml("ns")),
+    ).toEqual({ valid: true });
   });
 });

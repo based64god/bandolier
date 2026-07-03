@@ -295,6 +295,149 @@ describe("applyFrames", () => {
     expect(items).toEqual([]);
     expect(sessionId).toBeUndefined();
   });
+
+  it("drops agent message chunks with empty or missing content", () => {
+    const { items } = applyFrames(
+      [],
+      [
+        update(1, "s", { sessionUpdate: "agent_message_chunk", content: {} }),
+        update(2, "s", { sessionUpdate: "agent_message_chunk" }),
+      ],
+    );
+    expect(items).toEqual([]);
+  });
+
+  it("does not coalesce assistant chunks that lack a messageId", () => {
+    // Without a messageId there is nothing to coalesce on: each chunk gets its
+    // own bubble and its own seq-derived key.
+    const { items } = applyFrames(
+      [],
+      [
+        update(1, "s", {
+          sessionUpdate: "agent_message_chunk",
+          content: { text: "a" },
+        }),
+        update(2, "s", {
+          sessionUpdate: "agent_message_chunk",
+          content: { text: "b" },
+        }),
+      ],
+    );
+    expect(items).toHaveLength(2);
+    expect(items[0]).toMatchObject({
+      type: "message",
+      role: "assistant",
+      id: "a-1",
+      text: "a",
+    });
+    expect(items[1]).toMatchObject({ id: "a-2", text: "b" });
+    for (const item of items) {
+      expect(item.type === "message" && item.messageId).toBeUndefined();
+    }
+  });
+
+  it("drops user message chunks with empty text", () => {
+    const { items } = applyFrames(
+      [],
+      [
+        update(1, "s", {
+          sessionUpdate: "user_message_chunk",
+          content: { text: "" },
+        }),
+      ],
+    );
+    expect(items).toEqual([]);
+  });
+
+  it("fills tool_call fallbacks: kind 'other', empty title, pending status", () => {
+    const { items } = applyFrames(
+      [],
+      [update(1, "s", { sessionUpdate: "tool_call" })],
+    );
+    expect(items).toEqual([
+      { type: "tool", id: "t-1", kind: "other", title: "", status: "pending" },
+    ]);
+  });
+
+  it("yields an empty commands list when the update omits availableCommands", () => {
+    // [] (agent advertises nothing) is distinct from undefined (no update seen).
+    const { commands } = applyFrames(
+      [],
+      [update(1, "s", { sessionUpdate: "available_commands_update" })],
+    );
+    expect(commands).toEqual([]);
+  });
+
+  it("renders no bubble for a session/prompt without a prompt array but keeps its session id", () => {
+    const { items, sessionId } = applyFrames(
+      [],
+      [
+        {
+          seq: 1,
+          payload: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "session/prompt",
+            params: { sessionId: "s" },
+          }),
+        },
+      ],
+    );
+    expect(items).toEqual([]);
+    expect(sessionId).toBe("s");
+  });
+
+  it("renders no bubble for a prompt whose text blocks are all empty", () => {
+    const payload = JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "session/prompt",
+      params: { sessionId: "s", prompt: [{ type: "text", text: "" }] },
+    });
+    const { items } = applyFrames([], [{ seq: 1, payload }]);
+    expect(items).toEqual([]);
+  });
+
+  it("renders an id-less session/prompt even when sentPromptIds is provided", () => {
+    // Only prompts whose JSON-RPC id matches a sent one are skipped; a frame
+    // with no id at all can't have been sent by this client.
+    const payload = JSON.stringify({
+      jsonrpc: "2.0",
+      method: "session/prompt",
+      params: { sessionId: "s", prompt: [{ type: "text", text: "hi" }] },
+    });
+    const { items } = applyFrames([], [{ seq: 3, payload }], new Set([1]));
+    expect(items).toEqual([
+      { type: "message", role: "user", id: "u-3", text: "hi" },
+    ]);
+  });
+
+  it("ignores unknown session update types but still harvests the session id", () => {
+    const { items, sessionId } = applyFrames(
+      [],
+      [update(1, "sess-1", { sessionUpdate: "plan", entries: [] })],
+    );
+    expect(items).toEqual([]);
+    expect(sessionId).toBe("sess-1");
+  });
+
+  it("skips a session/update frame with no update payload but keeps its session id", () => {
+    const { items, sessionId } = applyFrames(
+      [],
+      [
+        {
+          seq: 1,
+          payload: JSON.stringify({
+            jsonrpc: "2.0",
+            method: "session/update",
+            params: { sessionId: "s" },
+          }),
+        },
+      ],
+    );
+    expect(items).toEqual([]);
+    expect(sessionId).toBe("s");
+  });
 });
 
 describe("groupTimeline", () => {

@@ -60,6 +60,47 @@ jobs:
           path: coverage/
           if-no-files-found: ignore
 
+  coverage-badge:
+    name: Publish coverage badge
+    # The README's coverage badge reads a shields.io endpoint JSON from the
+    # `badges` branch (via img.shields.io/endpoint), so refresh it whenever the
+    # default branch changes. A single-commit orphan branch is force-pushed
+    # each time — no history accumulates. This is a separate job so that
+    # `contents: write` is never granted to the jobs that execute
+    # dependency/lifecycle code.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: web
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download coverage report
+        uses: actions/download-artifact@v4
+        with:
+          name: web-coverage
+          path: coverage
+
+      - name: Publish badge JSON to the badges branch
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/badges
+          node scripts/coverage-badge.mjs > /tmp/badges/coverage.json
+          cat /tmp/badges/coverage.json
+          cd /tmp/badges
+          git init -q -b badges
+          git add coverage.json
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -qm "Update coverage badge"
+          git push -f \
+            "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            badges
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
   e2e:
     name: Browser smoke tests (playwright)
     runs-on: ubuntu-latest

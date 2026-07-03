@@ -1,15 +1,28 @@
 import crypto from "crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { db as Database } from "~/server/db";
 import {
   buildAppJwt,
   buildDockerConfigJson,
   clearTokenCache,
+  getInstallationIdForRepo,
   getInstallationToken,
   getRegistryPullSecret,
+  getRepoBotToken,
   imageRegistryHost,
   isGithubAppConfigured,
+  removeInstallation,
+  upsertInstallation,
 } from "~/server/agents/github-app";
+
+/** A database stub whose select→from→where→limit chain resolves the rows. */
+function dbSelect(rows: { installationId: string }[]) {
+  const select = vi.fn(() => ({
+    from: () => ({ where: () => ({ limit: () => Promise.resolve(rows) }) }),
+  }));
+  return { db: { select } as unknown as typeof Database, select };
+}
 
 // Decodes a base64url segment back to a UTF-8 string.
 function decodeSegment(seg: string): string {
@@ -128,6 +141,25 @@ describe("getInstallationToken", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("assumes the documented 1h TTL when the response omits expires_at", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 201,
+      statusText: "Created",
+      json: () => Promise.resolve({ token: "ghs_nottl" }), // no expires_at
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await getInstallationToken("77", NOW);
+    // 50 minutes in: still outside the 5-minute margin of the assumed 1h.
+    expect(await getInstallationToken("77", NOW + 50 * 60_000)).toBe(
+      "ghs_nottl",
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    // 56 minutes in: inside the margin → re-mint.
+    await getInstallationToken("77", NOW + 56 * 60_000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("throws when GitHub rejects the token exchange", async () => {
     vi.stubGlobal(
       "fetch",
@@ -141,6 +173,144 @@ describe("getInstallationToken", () => {
     await expect(getInstallationToken("42", NOW)).rejects.toThrow(
       /token exchange failed: 401/,
     );
+  });
+});
+
+// The module-level installation-id cache has no exported reset, so every test
+// below uses a distinct repoFullName to stay isolated from its neighbors.
+describe("getInstallationIdForRepo", () => {
+  it("returns the installation id recorded for the repo", async () => {
+    const { db } = dbSelect([{ installationId: "42" }]);
+    expect(await getInstallationIdForRepo(db, "acme/id-lookup")).toBe("42");
+  });
+
+  it("serves repeat lookups from the cache without re-querying", async () => {
+    const { db, select } = dbSelect([{ installationId: "42" }]);
+    expect(await getInstallationIdForRepo(db, "acme/id-cached")).toBe("42");
+    expect(await getInstallationIdForRepo(db, "acme/id-cached")).toBe("42");
+    expect(select).toHaveBeenCalledTimes(1);
+  });
+
+  it("caches a null for repos without the App installed", async () => {
+    const { db, select } = dbSelect([]);
+    expect(await getInstallationIdForRepo(db, "acme/id-missing")).toBeNull();
+    expect(await getInstallationIdForRepo(db, "acme/id-missing")).toBeNull();
+    expect(select).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("getRepoBotToken", () => {
+  const NOW = 1_700_000_000_000; // fixed epoch ms
+
+  it("returns null when the App isn't installed on the repo", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const { db } = dbSelect([]);
+    expect(await getRepoBotToken(db, "acme/bot-uninstalled", NOW)).toBeNull();
+    // No installation mapping → no token exchange is even attempted.
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("mints an installation token for the repo's installation", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 201,
+      statusText: "Created",
+      json: () =>
+        Promise.resolve({
+          token: "ghs_bot",
+          expires_at: new Date(NOW + 60 * 60_000).toISOString(),
+        }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { db } = dbSelect([{ installationId: "inst-bot" }]);
+    expect(await getRepoBotToken(db, "acme/bot-installed", NOW)).toBe(
+      "ghs_bot",
+    );
+    expect(fetchMock.mock.calls[0]![0]).toBe(
+      "https://api.github.com/app/installations/inst-bot/access_tokens",
+    );
+  });
+
+  it("returns null (never throws) when the token exchange fails", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 401,
+        statusText: "Unauthorized",
+        json: () => Promise.resolve({}),
+      }),
+    );
+    const { db } = dbSelect([{ installationId: "inst-broken" }]);
+    expect(await getRepoBotToken(db, "acme/bot-broken", NOW)).toBeNull();
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("installation cache eviction", () => {
+  const NOW = 1_700_000_000_000; // fixed epoch ms
+
+  it("upsertInstallation makes a new installation id visible immediately", async () => {
+    const repo = "acme/evict-on-upsert";
+    const before = dbSelect([{ installationId: "A" }]);
+    expect(await getInstallationIdForRepo(before.db, repo)).toBe("A");
+
+    const onConflictDoUpdate = vi.fn().mockResolvedValue(undefined);
+    const values = vi.fn(() => ({ onConflictDoUpdate }));
+    const insertDb = {
+      insert: vi.fn(() => ({ values })),
+    } as unknown as typeof Database;
+    await upsertInstallation(insertDb, repo, "B", "acme");
+    expect(values).toHaveBeenCalledWith({
+      repoFullName: repo,
+      installationId: "B",
+      accountLogin: "acme",
+    });
+
+    // Without eviction the 60s id cache would still answer "A".
+    const after = dbSelect([{ installationId: "B" }]);
+    expect(await getInstallationIdForRepo(after.db, repo)).toBe("B");
+    expect(after.select).toHaveBeenCalledTimes(1);
+  });
+
+  it("removeInstallation drops both the id cache and the installation's token", async () => {
+    const repo = "acme/evict-on-remove";
+    const before = dbSelect([{ installationId: "inst-rm" }]);
+    expect(await getInstallationIdForRepo(before.db, repo)).toBe("inst-rm");
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 201,
+      statusText: "Created",
+      json: () =>
+        Promise.resolve({
+          token: "ghs_revocable",
+          expires_at: new Date(NOW + 60 * 60_000).toISOString(),
+        }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await getInstallationToken("inst-rm", NOW);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    const returning = vi
+      .fn()
+      .mockResolvedValue([{ installationId: "inst-rm" }]);
+    const deleteDb = {
+      delete: vi.fn(() => ({ where: () => ({ returning }) })),
+    } as unknown as typeof Database;
+    await removeInstallation(deleteDb, repo);
+
+    // The uninstalled installation's (soon-revoked) token must not be served
+    // from cache — the next use re-mints.
+    await getInstallationToken("inst-rm", NOW);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    // And the repo's id mapping is re-read from the DB (now gone).
+    const after = dbSelect([]);
+    expect(await getInstallationIdForRepo(after.db, repo)).toBeNull();
+    expect(after.select).toHaveBeenCalledTimes(1);
   });
 });
 

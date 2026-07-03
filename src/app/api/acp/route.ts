@@ -2,9 +2,11 @@ import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 
 import { env } from "~/env";
+import { batchAwaitsInput } from "~/lib/acp/timeline";
 import { verifyIngestToken } from "~/lib/ingest";
 import { db } from "~/server/db";
-import { acpFrame } from "~/server/db/schema";
+import { acpFrame, taskRun } from "~/server/db/schema";
+import { sendPushToUser } from "~/server/push";
 
 // Harness ACP relay. The in-pod proxy drives this with the same per-job HMAC
 // token as the artifact ingest (it can't hold a session) and it's exempt from
@@ -32,6 +34,30 @@ function authorize(req: NextRequest): string | null {
     return null;
   }
   return jobName;
+}
+
+// Fires a background "waiting for input" push to the run's owner when an
+// interactive agent finishes a turn. Best-effort and off the response path: the
+// ACP relay is hot (the harness posts frames as they stream), so we never block
+// frame ingestion on the lookup + push. A pruned run row (no spawnedBy) is a
+// no-op, as is a user with no subscriptions or push not being configured.
+async function notifyAwaitingInput(jobName: string) {
+  const [run] = await db
+    .select({
+      spawnedBy: taskRun.spawnedBy,
+      displayName: taskRun.displayName,
+      repoFullName: taskRun.repoFullName,
+    })
+    .from(taskRun)
+    .where(eq(taskRun.jobName, jobName))
+    .limit(1);
+  if (!run?.spawnedBy) return;
+  await sendPushToUser(run.spawnedBy, {
+    title: "Agent waiting for input",
+    body: run.displayName ?? jobName,
+    tag: `await:${jobName}`,
+    url: run.repoFullName ? `/repo/${run.repoFullName}` : "/",
+  });
 }
 
 export async function GET(req: NextRequest) {
@@ -97,5 +123,19 @@ export async function POST(req: NextRequest) {
       payload,
     })),
   );
+
+  // A turn-end frame in this batch means the agent now awaits the user — alert
+  // the owner in the background (they may not have the app open). Fire-and-
+  // forget so the relay stays snappy; errors are swallowed, not surfaced to the
+  // harness.
+  if (batchAwaitsInput(frames as string[])) {
+    void notifyAwaitingInput(jobName).catch((err) => {
+      console.error("[bandolier:push] awaiting-input notify failed", {
+        job: jobName,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+  }
+
   return NextResponse.json({ ok: true });
 }

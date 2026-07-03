@@ -32,7 +32,7 @@ export function EffortPicker({
         Reasoning effort
       </label>
       <div className="flex items-center gap-2">
-        <div className="flex flex-1 gap-1.5">
+        <div className="flex min-w-0 flex-1 gap-1.5">
           {(["", ...EFFORT_LEVELS] as const).map((level) => {
             const active = value === level;
             return (
@@ -40,7 +40,7 @@ export function EffortPicker({
                 key={level || "default"}
                 type="button"
                 onClick={() => onChange(level)}
-                className={`flex-1 rounded-lg border px-2 py-1.5 text-xs capitalize transition ${
+                className={`min-w-0 flex-1 rounded-lg border px-2 py-1.5 text-xs capitalize transition ${
                   active
                     ? "border-purple-500/50 bg-purple-500/15 text-white"
                     : "border-white/10 bg-white/5 text-white/60 hover:bg-white/10"

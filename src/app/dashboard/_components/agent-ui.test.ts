@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   expiresAtLocal,
+  explainFailure,
   isAgentDone,
   isAgentOutputResolved,
   SPINNER_STATUSES,
@@ -229,5 +230,77 @@ describe("isAgentOutputResolved", () => {
         createdIssueState: "open",
       }),
     ).toBe(false);
+  });
+});
+
+describe("explainFailure", () => {
+  it("explains an OOM kill and suggests raising the memory limit", () => {
+    const e = explainFailure({
+      reason: "OOMKilled",
+      exitCode: 137,
+      message: null,
+    });
+    expect(e.title).toBe("Out of memory");
+    expect(e.why).toContain("memory");
+    expect(e.fix).toContain("memory limit");
+  });
+
+  it("treats a bare SIGKILL (exit 137) as a likely OOM kill", () => {
+    const e = explainFailure({ reason: "Error", exitCode: 137, message: null });
+    expect(e.why).toContain("137");
+    expect(e.fix).toContain("memory limit");
+  });
+
+  it("surfaces the Kubernetes eviction message verbatim", () => {
+    const e = explainFailure({
+      reason: "Evicted",
+      exitCode: null,
+      message: "The node was low on resource: memory.",
+    });
+    expect(e.title).toBe("Evicted");
+    expect(e.why).toBe("The node was low on resource: memory.");
+  });
+
+  it("explains an eviction without a message", () => {
+    const e = explainFailure({
+      reason: "Evicted",
+      exitCode: null,
+      message: null,
+    });
+    expect(e.why).toContain("evicted");
+  });
+
+  it("explains a deadline overrun", () => {
+    const e = explainFailure({
+      reason: "DeadlineExceeded",
+      exitCode: null,
+      message: null,
+    });
+    expect(e.title).toBe("Deadline exceeded");
+  });
+
+  it("points a plain crash at the logs, keeping the exit code", () => {
+    const e = explainFailure({ reason: "Error", exitCode: 1, message: null });
+    expect(e.title).toBe("Exited with code 1");
+    expect(e.fix).toContain("logs");
+  });
+
+  it("prefers the container's own message for a crash", () => {
+    const e = explainFailure({
+      reason: "Error",
+      exitCode: 2,
+      message: "panic: boom",
+    });
+    expect(e.why).toBe("panic: boom");
+  });
+
+  it("falls back to the raw reason when nothing else is known", () => {
+    const e = explainFailure({
+      reason: "NodeLost",
+      exitCode: null,
+      message: null,
+    });
+    expect(e.title).toBe("NodeLost");
+    expect(e.fix).toContain("logs");
   });
 });

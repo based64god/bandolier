@@ -15,6 +15,7 @@ import {
   type GithubItemState,
 } from "~/server/agents/github-issues";
 import { SPAWNED_BY_LABEL, spawnedByLabelValue } from "~/server/agents/labels";
+import { podFailure } from "~/server/agents/pod-failure";
 import {
   buildIssueSystemPrompt,
   buildIssueUserMessage,
@@ -565,6 +566,8 @@ async function podToTask(
     // collaborators' tasks (read-only); the UI keys its controls off this.
     ownedByViewer,
     status,
+    // Why a Failed pod failed (OOM kill, eviction, crash) — null otherwise.
+    failure: podFailure(pod),
     currently,
     expiresAt,
     pullRequestUrl,
@@ -739,6 +742,8 @@ export const agentsRouter = createTRPCRouter({
             parentJobName: annotations["bandolier.io/parent-job"] ?? null,
             parentDisplayName: annotations["bandolier.io/parent-name"] ?? null,
             status,
+            // Why a Failed pod failed (OOM kill, eviction, crash) — null otherwise.
+            failure: podFailure(pod),
             pullRequestUrl,
             pullRequestState,
             createdIssueUrl,

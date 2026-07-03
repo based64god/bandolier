@@ -144,7 +144,10 @@ export function OverviewPanel({ notify }: { notify: boolean }) {
                     <div
                       className={`flex flex-col items-center justify-center gap-1 ${ACTION_ROW_MIN_H}`}
                     >
-                      <StatusBadge status={agent.status} />
+                      <StatusBadge
+                        status={agent.status}
+                        failure={agent.failure}
+                      />
                       {agent.awaitingInput && (
                         <span
                           title="Waiting"

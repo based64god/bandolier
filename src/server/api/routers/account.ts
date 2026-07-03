@@ -39,6 +39,11 @@ function maskKey(key: string): string {
   return `${key.slice(0, 4)}…${key.slice(-4)}`;
 }
 
+// Single-line secrets pasted from a wrapped terminal line carry interior
+// spaces/newlines that survive trim(); real keys/tokens never contain
+// whitespace, so it's always safe to strip.
+const stripWhitespace = z.string().transform((s) => s.replace(/\s+/g, ""));
+
 export const accountRouter = createTRPCRouter({
   // Returns non-secret info about the user's stored AWS credentials.
   awsStatus: protectedProcedure.query(async ({ ctx }) => {
@@ -161,7 +166,9 @@ export const accountRouter = createTRPCRouter({
     }),
 
   setAnthropic: protectedProcedure
-    .input(z.object({ apiKey: z.string().min(1) }))
+    // Strip ALL whitespace, not just the ends: a key copied from a wrapped
+    // terminal line arrives with interior spaces/newlines that survive trim().
+    .input(z.object({ apiKey: stripWhitespace.pipe(z.string().min(1)) }))
     .mutation(async ({ ctx, input }) => {
       const validation = await validateAnthropicKey(input.apiKey);
       if (!validation.valid) {
@@ -185,7 +192,11 @@ export const accountRouter = createTRPCRouter({
     }),
 
   setAnthropicOauth: protectedProcedure
-    .input(z.object({ oauthToken: z.string().trim().min(1) }))
+    // Strip ALL whitespace, not just the ends: a setup-token copied from a
+    // wrapped terminal line arrives with interior spaces that survive trim(),
+    // pass the format check, and only fail at run time as the claude CLI's
+    // "401 Invalid bearer token" (OAuth tokens can't be probed at save time).
+    .input(z.object({ oauthToken: stripWhitespace.pipe(z.string().min(1)) }))
     .mutation(async ({ ctx, input }) => {
       const validation = validateAnthropicOauthToken(input.oauthToken);
       if (!validation.valid) {

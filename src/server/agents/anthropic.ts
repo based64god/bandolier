@@ -43,7 +43,11 @@ const OAUTH_TOKEN_PREFIX = "sk-ant-oat";
 /**
  * Validates the shape of a Claude Code OAuth token (`claude setup-token`).
  * OAuth tokens are scoped to Claude Code and can't be probed against the
- * Anthropic API, so this is a format check only.
+ * Anthropic API, so this is a format check only. Interior whitespace and
+ * out-of-charset bytes are rejected: a token copied from a wrapped terminal
+ * line picks up spaces/newlines that survive an ends-only trim, and the CLI
+ * then sends the mangled value as a legal-but-wrong bearer header — the
+ * failure only surfaces as a runtime "401 Invalid bearer token".
  */
 export function validateAnthropicOauthToken(
   token: string,
@@ -52,6 +56,20 @@ export function validateAnthropicOauthToken(
     return {
       valid: false,
       error: `Token should start with "${OAUTH_TOKEN_PREFIX}" — run \`claude setup-token\` and paste the result.`,
+    };
+  }
+  if (/\s/.test(token)) {
+    return {
+      valid: false,
+      error:
+        "Token contains whitespace — it was probably split across lines when copied from the terminal. Re-copy it as one unbroken line and save it again.",
+    };
+  }
+  if (!/^[A-Za-z0-9_-]+$/.test(token)) {
+    return {
+      valid: false,
+      error:
+        "Token contains unexpected characters — run `claude setup-token` and paste the result.",
     };
   }
   if (token.length < OAUTH_TOKEN_PREFIX.length + 20) {

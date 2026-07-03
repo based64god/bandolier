@@ -111,6 +111,32 @@ describe("validateAnthropicOauthToken", () => {
     expect(r.valid).toBe(false);
     expect(r.error).toMatch(/truncated/);
   });
+
+  it("rejects a token with interior spaces (wrapped terminal copy)", () => {
+    // The exact artifact seen in production: a valid token picks up spaces at
+    // a terminal line-wrap boundary. It passes prefix+length checks, and the
+    // CLI sends it as a legal-but-wrong bearer header (spaces are valid in
+    // header values), failing only at run time with 401 Invalid bearer token.
+    const r = validateAnthropicOauthToken(
+      `sk-ant-oat01-${"a".repeat(86)}  ${"a".repeat(9)}`,
+    );
+    expect(r.valid).toBe(false);
+    expect(r.error).toMatch(/whitespace/);
+  });
+
+  it("rejects a token with an interior newline", () => {
+    const r = validateAnthropicOauthToken(
+      `sk-ant-oat01-${"a".repeat(40)}\n${"a".repeat(10)}`,
+    );
+    expect(r.valid).toBe(false);
+    expect(r.error).toMatch(/whitespace/);
+  });
+
+  it("rejects a token with out-of-charset characters", () => {
+    const r = validateAnthropicOauthToken(`sk-ant-oat01-${"a".repeat(30)}%$`);
+    expect(r.valid).toBe(false);
+    expect(r.error).toMatch(/unexpected characters/);
+  });
 });
 
 describe("getUserAnthropicCredentials", () => {

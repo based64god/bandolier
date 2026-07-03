@@ -41,7 +41,9 @@ function creds(overrides: Partial<ModelCredentials>): ModelCredentials {
   return {
     aws: null,
     anthropicApiKey: null,
+    anthropicOauthToken: null,
     openaiApiKey: null,
+    codexAuthJson: null,
     geminiApiKey: null,
     source: "none",
     ...overrides,

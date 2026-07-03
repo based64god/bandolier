@@ -7,7 +7,7 @@ Agents can be launched two ways:
 - **From the dashboard** — pick a repo, write a task (or select an open issue), choose a model, and deploy.
 - **From a GitHub webhook** — when an issue is opened in a configured repo, Bandolier automatically launches an agent to work on it and open a PR.
 
-Every agent runs with the **deploying user's own credentials** — their GitHub OAuth token, their AWS Bedrock or Anthropic API key, and the cluster from their kubeconfig. There are no shared, server-side provider credentials; the available models are queried live from each user's provider.
+Every agent runs with the **deploying user's own credentials** — their GitHub OAuth token, their model-provider credentials (an AWS Bedrock or Anthropic API key, or a Claude Pro/Max or ChatGPT subscription login), and the cluster from their kubeconfig. There are no shared, server-side provider credentials; the available models are queried live from each user's provider.
 
 ---
 
@@ -46,7 +46,7 @@ Browser ──▶ Next.js app ──▶ Kubernetes API ──▶ Job (harness po
 - **A PostgreSQL database** — the included script starts one in a container.
 - **A Kubernetes cluster** the web app can reach and create Jobs in. For local development, [kind](https://kind.sigs.k8s.io/), [k3d](https://k3d.io/), or minikube all work. The cluster must be able to pull the harness image (see [The agent harness image](#the-agent-harness-image)).
 - **A GitHub OAuth app** — for sign-in and repo access.
-- **A model provider** — each user supplies their own AWS Bedrock credentials or Anthropic API key in the app; nothing provider-related is needed in server config.
+- **A model provider** — each user supplies their own credentials in the app: AWS Bedrock credentials, an Anthropic/OpenAI/Gemini API key, or a subscription login (a `claude setup-token` OAuth token for Claude Pro/Max, or `codex login`'s auth.json for ChatGPT). Nothing provider-related is needed in server config.
 
 ---
 
@@ -112,7 +112,7 @@ Open <http://localhost:3000> and sign in with GitHub.
 
 Open **Settings** in the dashboard and add:
 
-- **A model provider** — either AWS Bedrock credentials or an Anthropic API key. Credentials are validated before they're saved, and the model picker is populated live from whichever provider you configured.
+- **A model provider** — AWS Bedrock credentials, an API key, or a subscription login. For Claude Pro/Max, run `claude setup-token` locally and paste the `sk-ant-oat01-…` token; for ChatGPT, run `codex login` locally and paste the contents of `~/.codex/auth.json`. API keys are validated before they're saved and the model picker is populated live from your provider; subscription credentials can't be probed via the API, so they get a static list of current models and are verified on the first run.
 - **A kubeconfig** — the cluster your agents deploy into (a repo can also provide a shared one).
 
 You can now select a repo, deploy an agent, and watch it work.

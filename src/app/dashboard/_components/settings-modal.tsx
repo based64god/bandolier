@@ -30,6 +30,7 @@ function AnthropicSection() {
   const utils = api.useUtils();
   const { data: status } = api.account.anthropicStatus.useQuery();
   const [apiKey, setApiKey] = useState("");
+  const [oauthToken, setOauthToken] = useState("");
   const [result, setResult] = useState<string | null>(null);
 
   const setAnthropic = api.account.setAnthropic.useMutation({
@@ -37,6 +38,13 @@ function AnthropicSection() {
       void utils.account.anthropicStatus.invalidate();
       setApiKey("");
       setResult("Saved and verified ✓");
+    },
+  });
+  const setAnthropicOauth = api.account.setAnthropicOauth.useMutation({
+    onSuccess: () => {
+      void utils.account.anthropicStatus.invalidate();
+      setOauthToken("");
+      setResult("Saved ✓");
     },
   });
   const testAnthropic = api.account.testAnthropic.useMutation({
@@ -49,20 +57,24 @@ function AnthropicSection() {
     },
   });
 
+  const saveError =
+    setAnthropic.error?.message ?? setAnthropicOauth.error?.message;
+  const bothConfigured = !!status?.apiKeyMasked && !!status?.oauthTokenMasked;
+
   return (
     <div className="space-y-3">
-      <h3 className="text-sm font-semibold text-purple-300">
-        Anthropic API key
-      </h3>
+      <h3 className="text-sm font-semibold text-purple-300">Anthropic</h3>
 
-      {status?.configured && (
+      {/* API key */}
+      <p className="text-xs text-white/50">API key</p>
+      {status?.apiKeyMasked ? (
         <div className="flex items-center justify-between rounded-lg border border-white/10 bg-white/5 px-3 py-2.5 text-sm">
           <code className="text-purple-300">{status.apiKeyMasked}</code>
           <div className="flex items-center gap-2">
             <button
               onClick={() => {
                 setResult("Testing…");
-                testAnthropic.mutate();
+                testAnthropic.mutate({ kind: "api_key" });
               }}
               disabled={testAnthropic.isPending}
               className="rounded bg-white/10 px-2 py-1 text-xs hover:bg-white/20 disabled:opacity-50"
@@ -70,7 +82,7 @@ function AnthropicSection() {
               Test
             </button>
             <button
-              onClick={() => deleteAnthropic.mutate()}
+              onClick={() => deleteAnthropic.mutate({ kind: "api_key" })}
               disabled={deleteAnthropic.isPending}
               className="rounded bg-red-500/10 px-2 py-1 text-xs text-red-400 hover:bg-red-500/20 disabled:opacity-50"
             >
@@ -78,9 +90,7 @@ function AnthropicSection() {
             </button>
           </div>
         </div>
-      )}
-
-      {!status?.configured && (
+      ) : (
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -106,11 +116,72 @@ function AnthropicSection() {
         </form>
       )}
 
+      {/* Claude subscription (OAuth token) */}
+      <p className="text-xs text-white/50">
+        Claude subscription{" "}
+        <span className="text-white/30">
+          — run <code className="text-purple-300">claude setup-token</code> and
+          paste the token
+        </span>
+      </p>
+      {status?.oauthTokenMasked ? (
+        <div className="flex items-center justify-between rounded-lg border border-white/10 bg-white/5 px-3 py-2.5 text-sm">
+          <code className="text-purple-300">{status.oauthTokenMasked}</code>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                setResult("Testing…");
+                testAnthropic.mutate({ kind: "oauth_token" });
+              }}
+              disabled={testAnthropic.isPending}
+              className="rounded bg-white/10 px-2 py-1 text-xs hover:bg-white/20 disabled:opacity-50"
+            >
+              Test
+            </button>
+            <button
+              onClick={() => deleteAnthropic.mutate({ kind: "oauth_token" })}
+              disabled={deleteAnthropic.isPending}
+              className="rounded bg-red-500/10 px-2 py-1 text-xs text-red-400 hover:bg-red-500/20 disabled:opacity-50"
+            >
+              Remove
+            </button>
+          </div>
+        </div>
+      ) : (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            setResult(null);
+            setAnthropicOauth.mutate({ oauthToken });
+          }}
+          className="flex gap-2"
+        >
+          <input
+            type="password"
+            value={oauthToken}
+            onChange={(e) => setOauthToken(e.target.value)}
+            placeholder="sk-ant-oat01-…"
+            className="flex-1 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 focus:border-purple-500/50 focus:outline-none"
+          />
+          <button
+            type="submit"
+            disabled={setAnthropicOauth.isPending || !oauthToken}
+            className="rounded-lg bg-purple-600 px-3 py-2 text-sm font-medium text-black hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {setAnthropicOauth.isPending ? "Saving…" : "Save"}
+          </button>
+        </form>
+      )}
+
+      {bothConfigured && (
+        <p className="text-xs text-white/40">
+          Both are set — the deploy dialog lists each model once per credential
+          so you can pick per run; webhook and API runs use the API key.
+        </p>
+      )}
+
       <StatusFeedback
-        error={
-          setAnthropic.error?.message ??
-          (result?.startsWith("Invalid") ? result : null)
-        }
+        error={saveError ?? (result?.startsWith("Invalid") ? result : null)}
         ok={result && !result.startsWith("Invalid") ? result : null}
       />
     </div>
@@ -121,6 +192,7 @@ function OpenAISection() {
   const utils = api.useUtils();
   const { data: status } = api.account.openaiStatus.useQuery();
   const [apiKey, setApiKey] = useState("");
+  const [authJson, setAuthJson] = useState("");
   const [result, setResult] = useState<string | null>(null);
 
   const setOpenai = api.account.setOpenai.useMutation({
@@ -128,6 +200,13 @@ function OpenAISection() {
       void utils.account.openaiStatus.invalidate();
       setApiKey("");
       setResult("Saved and verified ✓");
+    },
+  });
+  const setCodexAuth = api.account.setCodexAuth.useMutation({
+    onSuccess: () => {
+      void utils.account.openaiStatus.invalidate();
+      setAuthJson("");
+      setResult("Saved ✓");
     },
   });
   const testOpenai = api.account.testOpenai.useMutation({
@@ -140,18 +219,23 @@ function OpenAISection() {
     },
   });
 
+  const saveError = setOpenai.error?.message ?? setCodexAuth.error?.message;
+  const bothConfigured = !!status?.apiKeyMasked && !!status?.chatgptConfigured;
+
   return (
     <div className="space-y-3">
-      <h3 className="text-sm font-semibold text-teal-300">OpenAI API key</h3>
+      <h3 className="text-sm font-semibold text-teal-300">OpenAI</h3>
 
-      {status?.configured && (
+      {/* API key */}
+      <p className="text-xs text-white/50">API key</p>
+      {status?.apiKeyMasked ? (
         <div className="flex items-center justify-between rounded-lg border border-white/10 bg-white/5 px-3 py-2.5 text-sm">
           <code className="text-teal-300">{status.apiKeyMasked}</code>
           <div className="flex items-center gap-2">
             <button
               onClick={() => {
                 setResult("Testing…");
-                testOpenai.mutate();
+                testOpenai.mutate({ kind: "api_key" });
               }}
               disabled={testOpenai.isPending}
               className="rounded bg-white/10 px-2 py-1 text-xs hover:bg-white/20 disabled:opacity-50"
@@ -159,7 +243,7 @@ function OpenAISection() {
               Test
             </button>
             <button
-              onClick={() => deleteOpenai.mutate()}
+              onClick={() => deleteOpenai.mutate({ kind: "api_key" })}
               disabled={deleteOpenai.isPending}
               className="rounded bg-red-500/10 px-2 py-1 text-xs text-red-400 hover:bg-red-500/20 disabled:opacity-50"
             >
@@ -167,9 +251,7 @@ function OpenAISection() {
             </button>
           </div>
         </div>
-      )}
-
-      {!status?.configured && (
+      ) : (
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -195,11 +277,72 @@ function OpenAISection() {
         </form>
       )}
 
+      {/* ChatGPT subscription (Codex auth.json) */}
+      <p className="text-xs text-white/50">
+        ChatGPT subscription{" "}
+        <span className="text-white/30">
+          — run <code className="text-teal-300">codex login</code>, then paste{" "}
+          <code className="text-teal-300">~/.codex/auth.json</code>
+        </span>
+      </p>
+      {status?.chatgptConfigured ? (
+        <div className="flex items-center justify-between rounded-lg border border-white/10 bg-white/5 px-3 py-2.5 text-sm">
+          <code className="text-teal-300">ChatGPT sign-in</code>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                setResult("Testing…");
+                testOpenai.mutate({ kind: "chatgpt" });
+              }}
+              disabled={testOpenai.isPending}
+              className="rounded bg-white/10 px-2 py-1 text-xs hover:bg-white/20 disabled:opacity-50"
+            >
+              Test
+            </button>
+            <button
+              onClick={() => deleteOpenai.mutate({ kind: "chatgpt" })}
+              disabled={deleteOpenai.isPending}
+              className="rounded bg-red-500/10 px-2 py-1 text-xs text-red-400 hover:bg-red-500/20 disabled:opacity-50"
+            >
+              Remove
+            </button>
+          </div>
+        </div>
+      ) : (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            setResult(null);
+            setCodexAuth.mutate({ authJson });
+          }}
+          className="space-y-2"
+        >
+          <textarea
+            value={authJson}
+            onChange={(e) => setAuthJson(e.target.value)}
+            placeholder='{"OPENAI_API_KEY": null, "tokens": { … }}'
+            rows={3}
+            className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 font-mono text-xs text-white placeholder-white/30 focus:border-teal-500/50 focus:outline-none"
+          />
+          <button
+            type="submit"
+            disabled={setCodexAuth.isPending || !authJson}
+            className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-medium hover:bg-teal-500 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {setCodexAuth.isPending ? "Saving…" : "Save"}
+          </button>
+        </form>
+      )}
+
+      {bothConfigured && (
+        <p className="text-xs text-white/40">
+          Both are set — the deploy dialog lists each model once per credential
+          so you can pick per run; webhook and API runs use the API key.
+        </p>
+      )}
+
       <StatusFeedback
-        error={
-          setOpenai.error?.message ??
-          (result?.startsWith("Invalid") ? result : null)
-        }
+        error={saveError ?? (result?.startsWith("Invalid") ? result : null)}
         ok={result && !result.startsWith("Invalid") ? result : null}
       />
     </div>

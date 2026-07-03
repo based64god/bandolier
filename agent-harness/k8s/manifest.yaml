@@ -99,6 +99,15 @@ spec:
                   name: bandolier-agent-example-creds
                   key: ANTHROPIC_API_KEY
                   optional: true
+            # Claude subscription (Pro/Max) auth: a long-lived OAuth token from
+            # `claude setup-token`. The server injects exactly one of this or
+            # ANTHROPIC_API_KEY; the claude CLI reads it from the env directly.
+            - name: CLAUDE_CODE_OAUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: bandolier-agent-example-creds
+                  key: CLAUDE_CODE_OAUTH_TOKEN
+                  optional: true
             # OpenAI models run via the Codex CLI instead of claude; the server
             # injects this when an OpenAI model is selected (and CLAUDE_MODEL then
             # holds the OpenAI model id, e.g. "gpt-5").
@@ -107,6 +116,15 @@ spec:
                 secretKeyRef:
                   name: bandolier-agent-example-creds
                   key: OPENAI_API_KEY
+                  optional: true
+            # ChatGPT-subscription auth for Codex: the contents of `codex login`'s
+            # ~/.codex/auth.json. The server injects exactly one of this or
+            # OPENAI_API_KEY; the harness writes it to ~/.codex/auth.json.
+            - name: CODEX_AUTH_JSON
+              valueFrom:
+                secretKeyRef:
+                  name: bandolier-agent-example-creds
+                  key: CODEX_AUTH_JSON
                   optional: true
             # Gemini models run via the Antigravity CLI (agy), which authenticates
             # against a Google Cloud project via Application Default Credentials.

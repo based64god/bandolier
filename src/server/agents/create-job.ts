@@ -233,10 +233,22 @@ export interface JobSpec {
   /** The acting user's Anthropic API key. Used when no AWS credentials are given. */
   anthropicApiKey?: string;
   /**
+   * The acting user's Claude subscription OAuth token (`claude setup-token`).
+   * An alternative to `anthropicApiKey`; injected as CLAUDE_CODE_OAUTH_TOKEN,
+   * which the claude CLI reads directly from the environment.
+   */
+  anthropicOauthToken?: string;
+  /**
    * The acting user's OpenAI API key. Used when an OpenAI model is selected; the
    * harness runs these through the OpenAI Codex CLI.
    */
   openaiApiKey?: string;
+  /**
+   * The acting user's ChatGPT-subscription auth (contents of `codex login`'s
+   * ~/.codex/auth.json). An alternative to `openaiApiKey`; injected as
+   * CODEX_AUTH_JSON and materialized by the harness at ~/.codex/auth.json.
+   */
+  codexAuthJson?: string;
   /**
    * The acting user's Google Cloud project credentials JSON (service-account key
    * or ADC). Used when a Gemini model is selected; the harness runs these through
@@ -295,9 +307,15 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
 
   const useUserAws = !!spec.awsCredentials;
   // Anthropic only applies when AWS isn't set (AWS Bedrock takes precedence).
-  const useUserAnthropic = !useUserAws && !!spec.anthropicApiKey;
+  // An API key and a subscription OAuth token are two routes to the same
+  // provider; a spec carries at most one of them.
+  const useUserAnthropic =
+    !useUserAws && (!!spec.anthropicApiKey || !!spec.anthropicOauthToken);
   // OpenAI / Gemini are lower precedence — used only when no Claude provider is.
-  const useUserOpenai = !useUserAws && !useUserAnthropic && !!spec.openaiApiKey;
+  const useUserOpenai =
+    !useUserAws &&
+    !useUserAnthropic &&
+    (!!spec.openaiApiKey || !!spec.codexAuthJson);
   const useUserGemini =
     !useUserAws && !useUserAnthropic && !useUserOpenai && !!spec.geminiApiKey;
   const useUserToken = !!spec.githubToken;
@@ -354,9 +372,17 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
         userRef("AWS_SESSION_TOKEN", true),
       ]
     : useUserAnthropic
-      ? [userRef("ANTHROPIC_API_KEY")]
+      ? [
+          spec.anthropicApiKey
+            ? userRef("ANTHROPIC_API_KEY")
+            : userRef("CLAUDE_CODE_OAUTH_TOKEN"),
+        ]
       : useUserOpenai
-        ? [userRef("OPENAI_API_KEY")]
+        ? [
+            spec.openaiApiKey
+              ? userRef("OPENAI_API_KEY")
+              : userRef("CODEX_AUTH_JSON"),
+          ]
         : [userRef("GOOGLE_PROJECT_CREDENTIALS")];
 
   const envVars: EnvVar[] = [
@@ -568,8 +594,18 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
   // they're garbage-collected when the Job is deleted (manually or via TTL).
   const stringData: Record<string, string> = {};
   if (useUserToken) stringData.GITHUB_TOKEN = spec.githubToken!;
-  if (useUserAnthropic) stringData.ANTHROPIC_API_KEY = spec.anthropicApiKey!;
-  if (useUserOpenai) stringData.OPENAI_API_KEY = spec.openaiApiKey!;
+  // An API key and a subscription credential can both be configured; the key
+  // takes precedence, so exactly one lands in the secret (matching the env var
+  // the pod references).
+  if (useUserAnthropic && spec.anthropicApiKey)
+    stringData.ANTHROPIC_API_KEY = spec.anthropicApiKey;
+  else if (useUserAnthropic && spec.anthropicOauthToken)
+    stringData.CLAUDE_CODE_OAUTH_TOKEN = spec.anthropicOauthToken;
+  if (useUserOpenai && spec.openaiApiKey)
+    stringData.OPENAI_API_KEY = spec.openaiApiKey;
+  // The harness writes this to ~/.codex/auth.json for ChatGPT-subscription auth.
+  else if (useUserOpenai && spec.codexAuthJson)
+    stringData.CODEX_AUTH_JSON = spec.codexAuthJson;
   // agy (Antigravity CLI) authenticates via Application Default Credentials; the
   // harness writes this project credentials JSON to ~/.gemini/credentials.json.
   if (useUserGemini) stringData.GOOGLE_PROJECT_CREDENTIALS = spec.geminiApiKey!;

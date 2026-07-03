@@ -38,6 +38,13 @@ const PROVIDER_LABELS = {
   },
 } as const;
 
+// Picker option key. A model can be offered once per credential kind (a user
+// with both an API key and a subscription sees e.g. "claude-opus-4-8" twice),
+// so options are keyed by id + auth rather than the bare id.
+function modelKey(m: { id: string; auth?: string }): string {
+  return m.auth ? `${m.id}::${m.auth}` : m.id;
+}
+
 export function DeployModal({
   onClose,
   namespace,
@@ -105,16 +112,28 @@ export function DeployModal({
 
   // Derive the effective model (no effect needed): an explicit choice, else the
   // user's preferred model (if still available), else a Sonnet, else the first
-  // available.
-  const preferredAvailable = models.some((m) => m.id === preferredModel);
-  const defaultModel =
-    (preferredAvailable ? preferredModel : "") ||
-    (models.find((m) => /sonnet/i.test(m.id) || /sonnet/i.test(m.label))?.id ??
-      models[0]?.id ??
-      "");
+  // available. Selection state holds the option KEY (id + credential kind), not
+  // the bare id — the same model can be offered once per credential kind, and
+  // the key disambiguates "run on my API key" from "run on my subscription".
+  // A legacy stored preference may be a bare id; resolve it by id as a fallback.
+  const preferredOption =
+    models.find((m) => modelKey(m) === preferredModel) ??
+    models.find((m) => m.id === preferredModel);
+  const fallbackOption =
+    models.find((m) => /sonnet/i.test(m.id) || /sonnet/i.test(m.label)) ??
+    models[0];
+  const defaultModel = preferredOption
+    ? modelKey(preferredOption)
+    : fallbackOption
+      ? modelKey(fallbackOption)
+      : "";
   const effectiveModel = model || defaultModel;
-  const selectedModel = models.find((m) => m.id === effectiveModel) ?? null;
-  const isPreferred = !!effectiveModel && effectiveModel === preferredModel;
+  const selectedModel =
+    models.find((m) => modelKey(m) === effectiveModel) ?? null;
+  const isPreferred =
+    !!selectedModel &&
+    (modelKey(selectedModel) === preferredModel ||
+      selectedModel.id === preferredModel);
 
   // Reasoning effort only applies to Claude models (Anthropic / Bedrock). Hide
   // the picker for OpenAI/Gemini and never send a value for them. Default to the
@@ -162,8 +181,9 @@ export function DeployModal({
       repoUrl: repoUrl || undefined,
       repoFullName,
       branch,
-      model: effectiveModel,
+      model: selectedModel?.id ?? effectiveModel.split("::")[0]!,
       modelProvider: selectedModel?.provider,
+      modelAuth: selectedModel?.auth,
       effort:
         effortSupported && effectiveEffort
           ? (effectiveEffort as EffortLevel)
@@ -177,10 +197,19 @@ export function DeployModal({
 
   // Badge reflects the selected model's provider so it's clear what this deploy
   // will run on; falls back to the account's primary provider before a model
-  // loads.
+  // loads. Subscription-backed selections say so instead of "… API".
   const badgeProvider =
     selectedModel?.provider ?? providerInfo?.provider ?? "none";
-  const providerMeta = PROVIDER_LABELS[badgeProvider];
+  const providerMeta =
+    selectedModel?.auth === "subscription"
+      ? {
+          ...PROVIDER_LABELS[badgeProvider],
+          label:
+            badgeProvider === "openai"
+              ? "ChatGPT subscription"
+              : "Claude subscription",
+        }
+      : PROVIDER_LABELS[badgeProvider];
 
   return (
     <div
@@ -398,13 +427,13 @@ export function DeployModal({
               <div className="min-w-0 flex-1">
                 <SearchableSelect
                   options={models.map((m) => ({
-                    value: m.id,
+                    value: modelKey(m),
                     searchText:
-                      `${m.label} ${m.id} ${m.provider}`.toLowerCase(),
+                      `${m.label} ${m.id} ${m.provider} ${m.auth ?? ""}`.toLowerCase(),
                     label: (
                       <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
                         <span className="truncate text-white">{m.label}</span>
-                        <ProviderTag provider={m.provider} />
+                        <ProviderTag provider={m.provider} auth={m.auth} />
                       </span>
                     ),
                   }))}

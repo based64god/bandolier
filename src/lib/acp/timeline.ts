@@ -166,8 +166,16 @@ export function applyFrames(
  * non-interactive log collapses runs of [harness] diagnostic lines.
  */
 export type TimelineGroup =
-  | { type: "message"; id: string; item: Extract<TimelineItem, { type: "message" }> }
-  | { type: "tools"; id: string; items: Extract<TimelineItem, { type: "tool" }>[] };
+  | {
+      type: "message";
+      id: string;
+      item: Extract<TimelineItem, { type: "message" }>;
+    }
+  | {
+      type: "tools";
+      id: string;
+      items: Extract<TimelineItem, { type: "tool" }>[];
+    };
 
 /**
  * Collapses runs of consecutive tool calls in the timeline into `tools` groups,

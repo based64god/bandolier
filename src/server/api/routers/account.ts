@@ -3,8 +3,9 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 
 import {
-  getUserAnthropicKey,
+  getUserAnthropicCredentials,
   validateAnthropicKey,
+  validateAnthropicOauthToken,
 } from "~/server/agents/anthropic";
 import { cleanSessionToken, validateAwsCredentials } from "~/server/agents/aws";
 import {
@@ -17,7 +18,11 @@ import {
   summarizeGeminiCredentials,
   validateGeminiCredentials,
 } from "~/server/agents/gemini";
-import { getUserOpenaiKey, validateOpenaiKey } from "~/server/agents/openai";
+import {
+  getUserOpenaiCredentials,
+  validateCodexAuthJson,
+  validateOpenaiKey,
+} from "~/server/agents/openai";
 import { getUserAwsCredentials } from "~/server/agents/user-aws";
 import { getRepoCredentials } from "~/server/agents/webhook-config";
 import {
@@ -115,19 +120,45 @@ export const accountRouter = createTRPCRouter({
     return { success: true };
   }),
 
-  // ── Anthropic API key ─────────────────────────────────────────────────────
+  // ── Anthropic credentials (API key or Claude subscription OAuth token) ─────
 
+  // Both credential kinds can be configured at once; the API key takes
+  // precedence at run time, and the UI shows each kind separately.
   anthropicStatus: protectedProcedure.query(async ({ ctx }) => {
-    const key = await getUserAnthropicKey(ctx.db, ctx.session.user.id);
-    if (!key) return { configured: false as const };
-    return { configured: true as const, apiKeyMasked: maskKey(key) };
+    const creds = await getUserAnthropicCredentials(
+      ctx.db,
+      ctx.session.user.id,
+    );
+    return {
+      configured: !!(creds.apiKey ?? creds.oauthToken),
+      apiKeyMasked: creds.apiKey ? maskKey(creds.apiKey) : null,
+      oauthTokenMasked: creds.oauthToken ? maskKey(creds.oauthToken) : null,
+    };
   }),
 
-  testAnthropic: protectedProcedure.mutation(async ({ ctx }) => {
-    const key = await getUserAnthropicKey(ctx.db, ctx.session.user.id);
-    if (!key) return { valid: false as const, error: "No API key configured." };
-    return validateAnthropicKey(key);
-  }),
+  testAnthropic: protectedProcedure
+    .input(
+      z
+        .object({ kind: z.enum(["api_key", "oauth_token"]).optional() })
+        .optional(),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const creds = await getUserAnthropicCredentials(
+        ctx.db,
+        ctx.session.user.id,
+      );
+      const kind = input?.kind ?? (creds.apiKey ? "api_key" : "oauth_token");
+      if (kind === "oauth_token") {
+        // OAuth tokens only work through the Claude Code CLI, so a live API
+        // probe isn't possible — re-check the format instead.
+        if (!creds.oauthToken)
+          return { valid: false as const, error: "No OAuth token configured." };
+        return validateAnthropicOauthToken(creds.oauthToken);
+      }
+      if (!creds.apiKey)
+        return { valid: false as const, error: "No API key configured." };
+      return validateAnthropicKey(creds.apiKey);
+    }),
 
   setAnthropic: protectedProcedure
     .input(z.object({ apiKey: z.string().min(1) }))
@@ -140,6 +171,8 @@ export const accountRouter = createTRPCRouter({
         });
       }
 
+      // Both kinds can coexist — setting the key leaves any OAuth token alone
+      // (the key takes precedence at run time).
       await ctx.db
         .insert(userAnthropicCredentials)
         .values({ userId: ctx.session.user.id, apiKey: input.apiKey })
@@ -151,26 +184,95 @@ export const accountRouter = createTRPCRouter({
       return { valid: true as const };
     }),
 
-  deleteAnthropic: protectedProcedure.mutation(async ({ ctx }) => {
-    await ctx.db
-      .delete(userAnthropicCredentials)
-      .where(eq(userAnthropicCredentials.userId, ctx.session.user.id));
-    return { success: true };
-  }),
+  setAnthropicOauth: protectedProcedure
+    .input(z.object({ oauthToken: z.string().trim().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      const validation = validateAnthropicOauthToken(input.oauthToken);
+      if (!validation.valid) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: validation.error ?? "OAuth token is invalid.",
+        });
+      }
 
-  // ── OpenAI API key ────────────────────────────────────────────────────────
+      await ctx.db
+        .insert(userAnthropicCredentials)
+        .values({
+          userId: ctx.session.user.id,
+          oauthToken: input.oauthToken,
+        })
+        .onConflictDoUpdate({
+          target: userAnthropicCredentials.userId,
+          set: { oauthToken: input.oauthToken, updatedAt: new Date() },
+        });
 
+      return { valid: true as const };
+    }),
+
+  deleteAnthropic: protectedProcedure
+    .input(
+      z
+        .object({ kind: z.enum(["api_key", "oauth_token"]).optional() })
+        .optional(),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const userId = ctx.session.user.id;
+      if (input?.kind) {
+        const creds = await getUserAnthropicCredentials(ctx.db, userId);
+        const otherRemains =
+          input.kind === "api_key" ? !!creds.oauthToken : !!creds.apiKey;
+        if (otherRemains) {
+          await ctx.db
+            .update(userAnthropicCredentials)
+            .set(
+              input.kind === "api_key"
+                ? { apiKey: null, updatedAt: new Date() }
+                : { oauthToken: null, updatedAt: new Date() },
+            )
+            .where(eq(userAnthropicCredentials.userId, userId));
+          return { success: true };
+        }
+      }
+      await ctx.db
+        .delete(userAnthropicCredentials)
+        .where(eq(userAnthropicCredentials.userId, userId));
+      return { success: true };
+    }),
+
+  // ── OpenAI credentials (API key or ChatGPT-subscription auth.json) ─────────
+
+  // Both credential kinds can be configured at once; the API key takes
+  // precedence at run time, and the UI shows each kind separately.
   openaiStatus: protectedProcedure.query(async ({ ctx }) => {
-    const key = await getUserOpenaiKey(ctx.db, ctx.session.user.id);
-    if (!key) return { configured: false as const };
-    return { configured: true as const, apiKeyMasked: maskKey(key) };
+    const creds = await getUserOpenaiCredentials(ctx.db, ctx.session.user.id);
+    return {
+      configured: !!(creds.apiKey ?? creds.codexAuthJson),
+      apiKeyMasked: creds.apiKey ? maskKey(creds.apiKey) : null,
+      chatgptConfigured: !!creds.codexAuthJson,
+    };
   }),
 
-  testOpenai: protectedProcedure.mutation(async ({ ctx }) => {
-    const key = await getUserOpenaiKey(ctx.db, ctx.session.user.id);
-    if (!key) return { valid: false as const, error: "No API key configured." };
-    return validateOpenaiKey(key);
-  }),
+  testOpenai: protectedProcedure
+    .input(
+      z.object({ kind: z.enum(["api_key", "chatgpt"]).optional() }).optional(),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const creds = await getUserOpenaiCredentials(ctx.db, ctx.session.user.id);
+      const kind = input?.kind ?? (creds.apiKey ? "api_key" : "chatgpt");
+      if (kind === "chatgpt") {
+        // ChatGPT session tokens can't be probed against the OpenAI API —
+        // re-check the auth.json shape instead.
+        if (!creds.codexAuthJson)
+          return {
+            valid: false as const,
+            error: "No ChatGPT auth configured.",
+          };
+        return validateCodexAuthJson(creds.codexAuthJson);
+      }
+      if (!creds.apiKey)
+        return { valid: false as const, error: "No API key configured." };
+      return validateOpenaiKey(creds.apiKey);
+    }),
 
   setOpenai: protectedProcedure
     .input(z.object({ apiKey: z.string().min(1) }))
@@ -183,6 +285,8 @@ export const accountRouter = createTRPCRouter({
         });
       }
 
+      // Both kinds can coexist — setting the key leaves any ChatGPT auth alone
+      // (the key takes precedence at run time).
       await ctx.db
         .insert(userOpenaiCredentials)
         .values({ userId: ctx.session.user.id, apiKey: input.apiKey })
@@ -194,12 +298,58 @@ export const accountRouter = createTRPCRouter({
       return { valid: true as const };
     }),
 
-  deleteOpenai: protectedProcedure.mutation(async ({ ctx }) => {
-    await ctx.db
-      .delete(userOpenaiCredentials)
-      .where(eq(userOpenaiCredentials.userId, ctx.session.user.id));
-    return { success: true };
-  }),
+  setCodexAuth: protectedProcedure
+    .input(z.object({ authJson: z.string().trim().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      const validation = validateCodexAuthJson(input.authJson);
+      if (!validation.valid) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: validation.error ?? "auth.json is invalid.",
+        });
+      }
+
+      await ctx.db
+        .insert(userOpenaiCredentials)
+        .values({
+          userId: ctx.session.user.id,
+          codexAuthJson: input.authJson,
+        })
+        .onConflictDoUpdate({
+          target: userOpenaiCredentials.userId,
+          set: { codexAuthJson: input.authJson, updatedAt: new Date() },
+        });
+
+      return { valid: true as const };
+    }),
+
+  deleteOpenai: protectedProcedure
+    .input(
+      z.object({ kind: z.enum(["api_key", "chatgpt"]).optional() }).optional(),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const userId = ctx.session.user.id;
+      if (input?.kind) {
+        const creds = await getUserOpenaiCredentials(ctx.db, userId);
+        const otherRemains =
+          input.kind === "api_key" ? !!creds.codexAuthJson : !!creds.apiKey;
+        if (otherRemains) {
+          await ctx.db
+            .update(userOpenaiCredentials)
+            .set(
+              input.kind === "api_key"
+                ? { apiKey: null, updatedAt: new Date() }
+                : { codexAuthJson: null, updatedAt: new Date() },
+            )
+            .where(eq(userOpenaiCredentials.userId, userId));
+          return { success: true };
+        }
+      }
+      await ctx.db
+        .delete(userOpenaiCredentials)
+        .where(eq(userOpenaiCredentials.userId, userId));
+      return { success: true };
+    }),
 
   // ── Gemini project credentials ──────────────────────────────────────────────
 

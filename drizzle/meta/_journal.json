@@ -134,6 +134,13 @@
       "when": 1782954234616,
       "tag": "0018_fluffy_vanisher",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1783061108206,
+      "tag": "0019_large_shockwave",
+      "breakpoints": true
     }
   ]
 }

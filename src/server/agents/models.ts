@@ -20,6 +20,14 @@ export interface ModelOption {
   label: string;
   /** The provider this model is served by. */
   provider: ModelProvider;
+  /**
+   * Which credential kind serves this model, for providers that support both a
+   * metered API key and a subscription login (Anthropic, OpenAI). Shown in the
+   * picker so a user with both configured can see which set a run will use —
+   * the API key (or Bedrock) takes precedence when both are set. Unset for
+   * Bedrock/Gemini, which have a single credential kind.
+   */
+  auth?: "api_key" | "subscription";
 }
 
 /**
@@ -51,8 +59,45 @@ async function listAnthropicModels(apiKey: string): Promise<ModelOption[]> {
     id: m.id,
     label: m.display_name,
     provider: "anthropic" as const,
+    auth: "api_key" as const,
   }));
 }
+
+/**
+ * The Claude models offered to Claude-subscription (OAuth token) users. OAuth
+ * tokens from `claude setup-token` are scoped to the Claude Code CLI and can't
+ * call GET /v1/models, so the picker uses this static list of current models.
+ */
+const SUBSCRIPTION_ANTHROPIC_MODELS: ModelOption[] = (
+  [
+    { id: "claude-fable-5", label: "Claude Fable 5" },
+    { id: "claude-opus-4-8", label: "Claude Opus 4.8" },
+    { id: "claude-sonnet-5", label: "Claude Sonnet 5" },
+    { id: "claude-haiku-4-5", label: "Claude Haiku 4.5" },
+  ] as const
+).map((m) => ({
+  ...m,
+  provider: "anthropic" as const,
+  auth: "subscription" as const,
+}));
+
+/**
+ * The models the Codex CLI offers with ChatGPT-subscription auth. A pasted
+ * auth.json holds OAuth session tokens that can't call GET /v1/models, so the
+ * picker uses this static list. Keep in sync with the Codex CLI's ChatGPT
+ * model set (https://developers.openai.com/codex/models).
+ */
+const SUBSCRIPTION_CODEX_MODELS: ModelOption[] = (
+  [
+    { id: "gpt-5.5", label: "GPT-5.5" },
+    { id: "gpt-5.4", label: "GPT-5.4" },
+    { id: "gpt-5.4-mini", label: "GPT-5.4 Mini" },
+  ] as const
+).map((m) => ({
+  ...m,
+  provider: "openai" as const,
+  auth: "subscription" as const,
+}));
 
 // ── OpenAI ─────────────────────────────────────────────────────────────────
 
@@ -62,6 +107,7 @@ async function listOpenaiModels(apiKey: string): Promise<ModelOption[]> {
     id: m.id,
     label: m.label,
     provider: "openai" as const,
+    auth: "api_key" as const,
   }));
 }
 
@@ -163,8 +209,12 @@ export async function listModelsForUser(
 ): Promise<ModelList> {
   const creds = await resolveModelCredentials(database, userId, repoFullName);
 
-  // Fetch each configured provider concurrently. The Claude side is one provider
-  // (Bedrock beats an Anthropic key); OpenAI and Gemini are independent.
+  // Fetch each configured provider concurrently. On the metered side, Bedrock
+  // beats an Anthropic key (two routes to the same models); OpenAI and Gemini
+  // are independent. Subscription credentials are listed ALONGSIDE the metered
+  // set — the picker offers the same model once per credential kind, tagged via
+  // `auth`, so a user with both can pin a run to either (e.g. subscription
+  // quota for personal runs, the API key for work).
   const tasks: { provider: string; run: Promise<ModelOption[]> }[] = [];
   if (creds.aws)
     tasks.push({ provider: "bedrock", run: listBedrockModels(creds.aws) });
@@ -173,10 +223,23 @@ export async function listModelsForUser(
       provider: "anthropic",
       run: listAnthropicModels(creds.anthropicApiKey),
     });
+  if (creds.anthropicOauthToken)
+    // Subscription OAuth tokens only work through the Claude Code CLI, not the
+    // models API, so the picker gets a static list of current Claude models.
+    tasks.push({
+      provider: "anthropic",
+      run: Promise.resolve(SUBSCRIPTION_ANTHROPIC_MODELS),
+    });
   if (creds.openaiApiKey)
     tasks.push({
       provider: "openai",
       run: listOpenaiModels(creds.openaiApiKey),
+    });
+  if (creds.codexAuthJson)
+    // Same for ChatGPT-subscription auth: no models endpoint, static list.
+    tasks.push({
+      provider: "openai",
+      run: Promise.resolve(SUBSCRIPTION_CODEX_MODELS),
     });
   if (creds.geminiApiKey)
     tasks.push({

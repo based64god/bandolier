@@ -66,7 +66,7 @@ export function TaskRow({
             keeps the pill centered regardless of its (status-dependent) width,
             mirroring the InteractiveRow's status cell. */}
         <div className="flex justify-center">
-          <StatusBadge status={agent.status} />
+          <StatusBadge status={agent.status} failure={agent.failure} />
         </div>
       </td>
 

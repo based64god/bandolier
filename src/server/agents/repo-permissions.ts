@@ -104,13 +104,17 @@ export async function getUserRepoPermission(
 function hasModelCredential(creds: {
   aws: AwsCredentials | null;
   anthropicApiKey: string | null;
+  anthropicOauthToken: string | null;
   openaiApiKey: string | null;
+  codexAuthJson: string | null;
   geminiApiKey: string | null;
 }): boolean {
   return (
     !!creds.aws ||
     !!creds.anthropicApiKey ||
+    !!creds.anthropicOauthToken ||
     !!creds.openaiApiKey ||
+    !!creds.codexAuthJson ||
     !!creds.geminiApiKey
   );
 }

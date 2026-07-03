@@ -660,16 +660,23 @@ function RepoDefaultModelSection({ repoFullName }: { repoFullName: string }) {
         provider default.
       </p>
       <SearchableSelect
-        options={models.map((m) => ({
-          value: m.id,
-          searchText: `${m.label} ${m.id} ${m.provider}`.toLowerCase(),
-          label: (
-            <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
-              <span className="truncate text-white">{m.label}</span>
-              <ProviderTag provider={m.provider} />
-            </span>
-          ),
-        }))}
+        options={models
+          // The deploy picker offers a model once per credential kind, but the
+          // webhook default is stored as a bare model id and webhook runs pick
+          // credentials by precedence — so collapse duplicates to the first
+          // (highest-precedence) entry per id.
+          .filter((m, i, all) => all.findIndex((x) => x.id === m.id) === i)
+          .map((m) => ({
+            value: m.id,
+            searchText:
+              `${m.label} ${m.id} ${m.provider} ${m.auth ?? ""}`.toLowerCase(),
+            label: (
+              <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
+                <span className="truncate text-white">{m.label}</span>
+                <ProviderTag provider={m.provider} auth={m.auth} />
+              </span>
+            ),
+          }))}
         value={config?.defaultWebhookModel ?? null}
         onChange={(v) => {
           setResult(null);

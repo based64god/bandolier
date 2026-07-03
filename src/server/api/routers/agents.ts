@@ -588,8 +588,14 @@ export const agentsRouter = createTRPCRouter({
         ctx.session.user.id,
         input?.repoFullName,
       );
-      const { aws, anthropicApiKey, openaiApiKey, geminiApiKey } =
-        pickProvider(creds);
+      const {
+        aws,
+        anthropicApiKey,
+        anthropicOauthToken,
+        openaiApiKey,
+        codexAuthJson,
+        geminiApiKey,
+      } = pickProvider(creds);
       if (aws) {
         return {
           provider: "bedrock" as const,
@@ -597,14 +603,14 @@ export const agentsRouter = createTRPCRouter({
           source: creds.source,
         };
       }
-      if (anthropicApiKey) {
+      if (anthropicApiKey ?? anthropicOauthToken) {
         return {
           provider: "anthropic" as const,
           region: null,
           source: creds.source,
         };
       }
-      if (openaiApiKey) {
+      if (openaiApiKey ?? codexAuthJson) {
         return {
           provider: "openai" as const,
           region: null,
@@ -1215,6 +1221,12 @@ export const agentsRouter = createTRPCRouter({
           modelProvider: z
             .enum(["anthropic", "bedrock", "openai", "gemini"])
             .optional(),
+          // Which credential kind to run on, for providers where both a metered
+          // API key and a subscription login can be configured (Anthropic,
+          // OpenAI). The picker offers the same model once per kind; this pins
+          // the run to the picked one. Optional: unset falls back to the
+          // API-key-beats-subscription precedence.
+          modelAuth: z.enum(["api_key", "subscription"]).optional(),
           // Reasoning effort for the run (Claude providers only; ignored for
           // OpenAI/Gemini). Optional — unset uses the CLI default.
           effort: z.enum(EFFORT_LEVELS).optional(),
@@ -1289,23 +1301,37 @@ export const agentsRouter = createTRPCRouter({
         input.modelProvider ??
         (resolved.aws
           ? "bedrock"
-          : resolved.anthropicApiKey
+          : resolved.anthropicApiKey || resolved.anthropicOauthToken
             ? "anthropic"
-            : resolved.openaiApiKey
+            : resolved.openaiApiKey || resolved.codexAuthJson
               ? "openai"
               : resolved.geminiApiKey
                 ? "gemini"
                 : undefined);
 
+      // The picker offers a model once per credential kind, so an explicit
+      // modelAuth pins the run to that kind ("run this on my subscription" vs
+      // "on my API key"). Unset — programmatic clients — falls back to the
+      // API-key-beats-subscription precedence.
+      const wantSubscription = input.modelAuth === "subscription";
+      const wantApiKey = input.modelAuth === "api_key";
       const awsCredentials =
         provider === "bedrock" ? (resolved.aws ?? primary.aws) : null;
       const anthropicApiKey =
-        provider === "anthropic"
+        provider === "anthropic" && !wantSubscription
           ? (resolved.anthropicApiKey ?? primary.anthropicApiKey)
           : null;
+      const anthropicOauthToken =
+        provider === "anthropic" && !wantApiKey && !anthropicApiKey
+          ? (resolved.anthropicOauthToken ?? primary.anthropicOauthToken)
+          : null;
       const openaiApiKey =
-        provider === "openai"
+        provider === "openai" && !wantSubscription
           ? (resolved.openaiApiKey ?? primary.openaiApiKey)
+          : null;
+      const codexAuthJson =
+        provider === "openai" && !wantApiKey && !openaiApiKey
+          ? (resolved.codexAuthJson ?? primary.codexAuthJson)
           : null;
       const geminiApiKey =
         provider === "gemini"
@@ -1315,7 +1341,9 @@ export const agentsRouter = createTRPCRouter({
       if (
         !awsCredentials &&
         !anthropicApiKey &&
+        !anthropicOauthToken &&
         !openaiApiKey &&
+        !codexAuthJson &&
         !geminiApiKey
       ) {
         throw new TRPCError({
@@ -1565,7 +1593,9 @@ export const agentsRouter = createTRPCRouter({
           githubToken: githubToken ?? undefined,
           awsCredentials: awsCredentials ?? undefined,
           anthropicApiKey: anthropicApiKey ?? undefined,
+          anthropicOauthToken: anthropicOauthToken ?? undefined,
           openaiApiKey: openaiApiKey ?? undefined,
+          codexAuthJson: codexAuthJson ?? undefined,
           geminiApiKey: geminiApiKey ?? undefined,
           kubeconfig,
           agentImage: agentImage ?? undefined,

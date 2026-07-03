@@ -285,6 +285,26 @@ func TestBuildEnvOpenAI(t *testing.T) {
 	}
 }
 
+func TestBuildEnvCodexAuthJson(t *testing.T) {
+	// With ChatGPT-subscription auth injected (and no API key), buildEnv writes
+	// the auth.json to ~/.codex/auth.json where the Codex CLI expects it.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("OPENAI_API_KEY", "")
+	authJSON := `{"OPENAI_API_KEY":null,"tokens":{"access_token":"at","refresh_token":"rt","account_id":"acc"}}`
+	t.Setenv("CODEX_AUTH_JSON", authJSON)
+
+	buildEnv(providerOpenAI)
+
+	data, err := os.ReadFile(filepath.Join(home, ".codex", "auth.json"))
+	if err != nil {
+		t.Fatalf("auth.json not written: %v", err)
+	}
+	if string(data) != authJSON {
+		t.Errorf("auth.json should contain the injected JSON verbatim, got: %s", data)
+	}
+}
+
 func TestCodexArgs(t *testing.T) {
 	cfg := config{model: "gpt-5"}
 
@@ -585,12 +605,24 @@ func TestToolSummaryUnknownShape(t *testing.T) {
 
 func TestDetectProvider(t *testing.T) {
 	// Clear all provider-selecting vars, then assert each selection path.
-	for _, k := range []string{"CLAUDE_CODE_USE_BEDROCK", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_PROJECT_CREDENTIALS", "GOOGLE_APPLICATION_CREDENTIALS", "ANTIGRAVITY_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"} {
+	for _, k := range []string{"CLAUDE_CODE_USE_BEDROCK", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "OPENAI_API_KEY", "CODEX_AUTH_JSON", "GOOGLE_PROJECT_CREDENTIALS", "GOOGLE_APPLICATION_CREDENTIALS", "ANTIGRAVITY_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"} {
 		t.Setenv(k, "")
 	}
 	if got := detectProvider(); got != providerNone {
 		t.Errorf("no env → %v, want providerNone", got)
 	}
+
+	t.Setenv("CODEX_AUTH_JSON", `{"tokens":{"access_token":"x"}}`)
+	if got := detectProvider(); got != providerOpenAI {
+		t.Errorf("CODEX_AUTH_JSON set → %v, want providerOpenAI", got)
+	}
+	t.Setenv("CODEX_AUTH_JSON", "")
+
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-x")
+	if got := detectProvider(); got != providerAnthropic {
+		t.Errorf("CLAUDE_CODE_OAUTH_TOKEN set → %v, want providerAnthropic", got)
+	}
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 
 	t.Setenv("GOOGLE_PROJECT_CREDENTIALS", `{"project_id":"p"}`)
 	if got := detectProvider(); got != providerGemini {

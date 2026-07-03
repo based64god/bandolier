@@ -313,7 +313,11 @@ export const userAnthropicCredentials = pgTable("user_anthropic_credentials", {
   userId: text("user_id")
     .primaryKey()
     .references(() => user.id, { onDelete: "cascade" }),
-  apiKey: text("api_key").notNull(),
+  // Exactly one of apiKey / oauthToken is set: a row holds either an Anthropic
+  // API key or a Claude subscription OAuth token from `claude setup-token`
+  // (sk-ant-oat01-…, injected into agents as CLAUDE_CODE_OAUTH_TOKEN).
+  apiKey: text("api_key"),
+  oauthToken: text("oauth_token"),
   createdAt: timestamp("created_at")
     .$defaultFn(() => /* @__PURE__ */ new Date())
     .notNull(),
@@ -327,7 +331,11 @@ export const userOpenaiCredentials = pgTable("user_openai_credentials", {
   userId: text("user_id")
     .primaryKey()
     .references(() => user.id, { onDelete: "cascade" }),
-  apiKey: text("api_key").notNull(),
+  // Exactly one of apiKey / codexAuthJson is set: a row holds either an OpenAI
+  // API key or the contents of `codex login`'s ~/.codex/auth.json for
+  // ChatGPT-subscription auth (injected into agents as CODEX_AUTH_JSON).
+  apiKey: text("api_key"),
+  codexAuthJson: text("codex_auth_json"),
   createdAt: timestamp("created_at")
     .$defaultFn(() => /* @__PURE__ */ new Date())
     .notNull(),

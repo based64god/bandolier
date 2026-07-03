@@ -33,17 +33,74 @@ export async function validateOpenaiKey(
   }
 }
 
-/** Loads a user's stored OpenAI API key, or null if none is configured. */
-export async function getUserOpenaiKey(
+/**
+ * Validates the contents of `codex login`'s ~/.codex/auth.json for
+ * ChatGPT-subscription auth. The tokens are OAuth session tokens that can't be
+ * probed against the OpenAI API, so this checks the file's shape only.
+ */
+export function validateCodexAuthJson(raw: string): OpenaiValidation {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return {
+      valid: false,
+      error:
+        "Not valid JSON — paste the full contents of ~/.codex/auth.json after running `codex login`.",
+    };
+  }
+  if (typeof parsed !== "object" || parsed === null) {
+    return { valid: false, error: "Expected a JSON object." };
+  }
+  const tokens = (parsed as { tokens?: unknown }).tokens;
+  const hasTokens =
+    typeof tokens === "object" &&
+    tokens !== null &&
+    (typeof (tokens as { access_token?: unknown }).access_token === "string" ||
+      typeof (tokens as { refresh_token?: unknown }).refresh_token ===
+        "string");
+  if (!hasTokens) {
+    const apiKey = (parsed as { OPENAI_API_KEY?: unknown }).OPENAI_API_KEY;
+    if (typeof apiKey === "string" && apiKey.length > 0) {
+      return {
+        valid: false,
+        error:
+          "This auth.json holds an API key, not ChatGPT tokens — paste the key into the API key field instead.",
+      };
+    }
+    return {
+      valid: false,
+      error:
+        "No ChatGPT session tokens found — run `codex login` (browser sign-in) and paste the resulting ~/.codex/auth.json.",
+    };
+  }
+  return { valid: true };
+}
+
+/** A user's OpenAI credentials: exactly one of the fields is set (or neither). */
+export interface OpenaiCredentials {
+  apiKey: string | null;
+  /** Contents of `codex login`'s ~/.codex/auth.json (ChatGPT subscription). */
+  codexAuthJson: string | null;
+}
+
+/** Loads a user's stored OpenAI credentials (API key or Codex auth.json). */
+export async function getUserOpenaiCredentials(
   database: typeof db,
   userId: string,
-): Promise<string | null> {
+): Promise<OpenaiCredentials> {
   const [row] = await database
-    .select({ apiKey: userOpenaiCredentials.apiKey })
+    .select({
+      apiKey: userOpenaiCredentials.apiKey,
+      codexAuthJson: userOpenaiCredentials.codexAuthJson,
+    })
     .from(userOpenaiCredentials)
     .where(eq(userOpenaiCredentials.userId, userId))
     .limit(1);
-  return row?.apiKey ?? null;
+  return {
+    apiKey: row?.apiKey ?? null,
+    codexAuthJson: row?.codexAuthJson ?? null,
+  };
 }
 
 interface OpenaiModel {

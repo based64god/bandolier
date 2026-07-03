@@ -1,7 +1,7 @@
-import { getUserAnthropicKey } from "~/server/agents/anthropic";
+import { getUserAnthropicCredentials } from "~/server/agents/anthropic";
 import type { AwsCredentials } from "~/server/agents/aws";
 import { getUserGeminiKey } from "~/server/agents/gemini";
-import { getUserOpenaiKey } from "~/server/agents/openai";
+import { getUserOpenaiCredentials } from "~/server/agents/openai";
 import { getUserAwsCredentials } from "~/server/agents/user-aws";
 import { getRepoCredentials } from "~/server/agents/webhook-config";
 import type { db } from "~/server/db";
@@ -18,19 +18,14 @@ import type { db } from "~/server/db";
 export interface ModelCredentials {
   aws: AwsCredentials | null;
   anthropicApiKey: string | null;
+  /** Claude subscription OAuth token (`claude setup-token`) — user-scoped only. */
+  anthropicOauthToken: string | null;
   openaiApiKey: string | null;
+  /** ChatGPT-subscription auth.json (`codex login`) — user-scoped only. */
+  codexAuthJson: string | null;
   geminiApiKey: string | null;
   /** Where the credentials came from — useful for logging / UI. */
   source: "user" | "repo" | "none";
-}
-
-function hasAny(
-  aws: AwsCredentials | null,
-  anthropic: string | null,
-  openai: string | null = null,
-  gemini: string | null = null,
-): boolean {
-  return !!aws || !!anthropic || !!openai || !!gemini;
 }
 
 /**
@@ -49,10 +44,16 @@ export async function resolveModelCredentials(
   repoFullName?: string,
 ): Promise<ModelCredentials> {
   const userAws = await getUserAwsCredentials(database, userId);
-  const userAnthropic = await getUserAnthropicKey(database, userId);
-  const userOpenai = await getUserOpenaiKey(database, userId);
+  const userAnthropic = await getUserAnthropicCredentials(database, userId);
+  const userOpenai = await getUserOpenaiCredentials(database, userId);
   const userGemini = await getUserGeminiKey(database, userId);
-  const userHas = hasAny(userAws, userAnthropic, userOpenai, userGemini);
+  const userHas =
+    !!userAws ||
+    !!userAnthropic.apiKey ||
+    !!userAnthropic.oauthToken ||
+    !!userOpenai.apiKey ||
+    !!userOpenai.codexAuthJson ||
+    !!userGemini;
 
   const repo = repoFullName
     ? await getRepoCredentials(database, repoFullName)
@@ -61,17 +62,24 @@ export async function resolveModelCredentials(
   const repoAnthropic = repo?.anthropicApiKey ?? null;
   const repoOpenai = repo?.openaiApiKey ?? null;
   const repoGemini = repo?.geminiApiKey ?? null;
-  const repoHas = hasAny(repoAws, repoAnthropic, repoOpenai, repoGemini);
+  const repoHas = !!repoAws || !!repoAnthropic || !!repoOpenai || !!repoGemini;
 
-  // AWS Bedrock and Anthropic are two routes to the same (Claude) models with a
-  // precedence between them, so they move as one unit: a repo set must never mix
-  // the repo's AWS with the user's Anthropic (or vice versa).
+  // AWS Bedrock, an Anthropic key, and a Claude subscription OAuth token are
+  // all routes to the same (Claude) models with a precedence between them, so
+  // they move as one unit: a repo set must never mix the repo's AWS with the
+  // user's Anthropic (or vice versa). Subscription credentials are personal, so
+  // repos only ever hold API keys.
   const repoHasClaude = !!repoAws || !!repoAnthropic;
+  // Same for the OpenAI side: an API key and a ChatGPT auth.json are two routes
+  // to the same models, so the repo's key must not mix with the user's auth.json.
+  const repoHasOpenai = !!repoOpenai;
 
   const userSet: ModelCredentials = {
     aws: userAws,
-    anthropicApiKey: userAnthropic,
-    openaiApiKey: userOpenai,
+    anthropicApiKey: userAnthropic.apiKey,
+    anthropicOauthToken: userAnthropic.oauthToken,
+    openaiApiKey: userOpenai.apiKey,
+    codexAuthJson: userOpenai.codexAuthJson,
     geminiApiKey: userGemini,
     source: userHas ? "user" : "none",
   };
@@ -79,10 +87,12 @@ export async function resolveModelCredentials(
     // Claude side as one coherent unit: the repo's Claude set when it has one,
     // else fall back to the user's whole Claude set — never a mix of the two.
     aws: repoHasClaude ? repoAws : userAws,
-    anthropicApiKey: repoHasClaude ? repoAnthropic : userAnthropic,
-    // OpenAI and Gemini are independent providers (no shared models, no
-    // precedence), so each falls back to the user's own key on its own.
-    openaiApiKey: repoOpenai ?? userOpenai,
+    anthropicApiKey: repoHasClaude ? repoAnthropic : userAnthropic.apiKey,
+    anthropicOauthToken: repoHasClaude ? null : userAnthropic.oauthToken,
+    // OpenAI side likewise; Gemini is a single-credential provider and falls
+    // back to the user's own key on its own.
+    openaiApiKey: repoHasOpenai ? repoOpenai : userOpenai.apiKey,
+    codexAuthJson: repoHasOpenai ? null : userOpenai.codexAuthJson,
     geminiApiKey: repoGemini ?? userGemini,
     source: repoHas ? "repo" : "none",
   };
@@ -96,41 +106,39 @@ export async function resolveModelCredentials(
 /**
  * Collapses a credential set to a single primary provider for callers that need
  * one (webhook/REST deploys with no model picker, and the provider badge): AWS
- * Bedrock beats an Anthropic key, which beats an OpenAI key. Exactly one of the
- * returned fields is non-null. The interactive deploy path instead routes by the
- * provider of the model the user actually picked.
+ * Bedrock beats Anthropic credentials (API key or subscription OAuth token),
+ * which beat OpenAI credentials (API key or ChatGPT auth.json). At most one
+ * provider's fields are non-null. The interactive deploy path instead routes by
+ * the provider of the model the user actually picked.
  */
 export function pickProvider(creds: ModelCredentials): {
   aws: AwsCredentials | null;
   anthropicApiKey: string | null;
+  anthropicOauthToken: string | null;
   openaiApiKey: string | null;
+  codexAuthJson: string | null;
   geminiApiKey: string | null;
 } {
-  if (creds.aws)
-    return {
-      aws: creds.aws,
-      anthropicApiKey: null,
-      openaiApiKey: null,
-      geminiApiKey: null,
-    };
-  if (creds.anthropicApiKey)
-    return {
-      aws: null,
-      anthropicApiKey: creds.anthropicApiKey,
-      openaiApiKey: null,
-      geminiApiKey: null,
-    };
-  if (creds.openaiApiKey)
-    return {
-      aws: null,
-      anthropicApiKey: null,
-      openaiApiKey: creds.openaiApiKey,
-      geminiApiKey: null,
-    };
-  return {
+  const none = {
     aws: null,
     anthropicApiKey: null,
+    anthropicOauthToken: null,
     openaiApiKey: null,
-    geminiApiKey: creds.geminiApiKey,
+    codexAuthJson: null,
+    geminiApiKey: null,
   };
+  if (creds.aws) return { ...none, aws: creds.aws };
+  if (creds.anthropicApiKey || creds.anthropicOauthToken)
+    return {
+      ...none,
+      anthropicApiKey: creds.anthropicApiKey,
+      anthropicOauthToken: creds.anthropicOauthToken,
+    };
+  if (creds.openaiApiKey || creds.codexAuthJson)
+    return {
+      ...none,
+      openaiApiKey: creds.openaiApiKey,
+      codexAuthJson: creds.codexAuthJson,
+    };
+  return { ...none, geminiApiKey: creds.geminiApiKey };
 }

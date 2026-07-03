@@ -202,9 +202,9 @@ type providerKind int
 
 const (
 	providerNone      providerKind = iota
-	providerAnthropic              // direct Anthropic API (claude CLI)
+	providerAnthropic              // direct Anthropic API or Claude subscription OAuth (claude CLI)
 	providerBedrock                // AWS Bedrock (claude CLI)
-	providerOpenAI                 // OpenAI API (codex CLI)
+	providerOpenAI                 // OpenAI API or ChatGPT subscription (codex CLI)
 	providerGemini                 // Google Gemini models via the Antigravity CLI (agy)
 )
 
@@ -215,10 +215,14 @@ func detectProvider() providerKind {
 	if os.Getenv("AWS_ACCESS_KEY_ID") != "" && os.Getenv("AWS_SECRET_ACCESS_KEY") != "" {
 		return providerBedrock
 	}
-	if os.Getenv("ANTHROPIC_API_KEY") != "" {
+	// CLAUDE_CODE_OAUTH_TOKEN is a Claude subscription token from
+	// `claude setup-token`; the claude CLI reads it directly from the env.
+	if os.Getenv("ANTHROPIC_API_KEY") != "" || os.Getenv("CLAUDE_CODE_OAUTH_TOKEN") != "" {
 		return providerAnthropic
 	}
-	if os.Getenv("OPENAI_API_KEY") != "" {
+	// CODEX_AUTH_JSON carries the contents of `codex login`'s auth.json for
+	// ChatGPT-subscription users; buildEnv materializes it at ~/.codex/auth.json.
+	if os.Getenv("OPENAI_API_KEY") != "" || os.Getenv("CODEX_AUTH_JSON") != "" {
 		return providerOpenAI
 	}
 	if os.Getenv("GOOGLE_PROJECT_CREDENTIALS") != "" ||
@@ -1001,17 +1005,50 @@ func buildEnv(provider providerKind) []string {
 	case providerBedrock:
 		env = setEnvIfMissing(env, "CLAUDE_CODE_USE_BEDROCK", "1")
 	case providerOpenAI:
-		// Codex authenticates with OPENAI_API_KEY; mirror it to CODEX_API_KEY,
-		// which some Codex versions read instead, so either name works.
-		if key := os.Getenv("OPENAI_API_KEY"); key != "" {
-			env = setEnvIfMissing(env, "CODEX_API_KEY", key)
-		}
+		env = setupCodexCredentials(env)
 	case providerGemini:
 		// agy (Antigravity CLI) authenticates against a Google Cloud project via
 		// Application Default Credentials. The server injects the project
 		// credentials JSON as GOOGLE_PROJECT_CREDENTIALS; materialize it and point
 		// agy at it. Legacy *_API_KEY values are still honored as a fallback.
 		env = setupGeminiCredentials(env)
+	}
+	return env
+}
+
+// codexAuthPath is where the harness materializes `codex login`'s auth.json
+// (injected as CODEX_AUTH_JSON) — ~/.codex/auth.json, where the Codex CLI
+// looks for its ChatGPT-subscription session.
+func codexAuthPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		home = "/root"
+	}
+	return filepath.Join(home, ".codex", "auth.json")
+}
+
+// setupCodexCredentials prepares Codex CLI authentication. With OPENAI_API_KEY
+// it mirrors the key to CODEX_API_KEY (which some Codex versions read instead,
+// so either name works). With CODEX_AUTH_JSON — the contents of `codex login`'s
+// auth.json, for ChatGPT-subscription users — it writes the file to
+// ~/.codex/auth.json where the CLI expects it. The server injects exactly one
+// of the two; the API key wins if both are somehow present.
+func setupCodexCredentials(env []string) []string {
+	if key := os.Getenv("OPENAI_API_KEY"); key != "" {
+		return setEnvIfMissing(env, "CODEX_API_KEY", key)
+	}
+	authJSON := os.Getenv("CODEX_AUTH_JSON")
+	if authJSON == "" {
+		return env
+	}
+	path := codexAuthPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		log.Printf("[harness] warn: could not create %s: %v", filepath.Dir(path), err)
+		return env
+	}
+	if err := os.WriteFile(path, []byte(authJSON), 0o600); err != nil {
+		log.Printf("[harness] warn: could not write Codex auth.json: %v", err)
+		return env
 	}
 	return env
 }

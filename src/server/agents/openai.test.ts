@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isChatModel } from "~/server/agents/openai";
+import { isChatModel, validateCodexAuthJson } from "~/server/agents/openai";
 
 describe("isChatModel", () => {
   it("keeps GPT chat families", () => {
@@ -59,5 +59,49 @@ describe("isChatModel", () => {
   it("is case-insensitive on the family prefix", () => {
     expect(isChatModel("GPT-4o")).toBe(true);
     expect(isChatModel("O1-Preview")).toBe(true);
+  });
+});
+
+describe("validateCodexAuthJson", () => {
+  it("accepts a real-shaped auth.json with ChatGPT tokens", () => {
+    const raw = JSON.stringify({
+      OPENAI_API_KEY: null,
+      tokens: {
+        id_token: "id",
+        access_token: "at",
+        refresh_token: "rt",
+        account_id: "acc",
+      },
+      last_refresh: "2026-07-01T00:00:00Z",
+    });
+    expect(validateCodexAuthJson(raw)).toEqual({ valid: true });
+  });
+
+  it("accepts tokens with only a refresh_token", () => {
+    const raw = JSON.stringify({ tokens: { refresh_token: "rt" } });
+    expect(validateCodexAuthJson(raw).valid).toBe(true);
+  });
+
+  it("rejects invalid JSON", () => {
+    const r = validateCodexAuthJson("not json");
+    expect(r.valid).toBe(false);
+    expect(r.error).toMatch(/JSON/);
+  });
+
+  it("rejects non-object JSON", () => {
+    expect(validateCodexAuthJson('"a string"').valid).toBe(false);
+  });
+
+  it("steers an API-key-only auth.json to the API key field", () => {
+    const raw = JSON.stringify({ OPENAI_API_KEY: "sk-abc", tokens: null });
+    const r = validateCodexAuthJson(raw);
+    expect(r.valid).toBe(false);
+    expect(r.error).toMatch(/API key/);
+  });
+
+  it("rejects an object without session tokens", () => {
+    const r = validateCodexAuthJson("{}");
+    expect(r.valid).toBe(false);
+    expect(r.error).toMatch(/codex login/);
   });
 });

@@ -295,9 +295,24 @@ async function resolveWebhookRun(opts: {
   const awsCredentials = provider === "bedrock" ? resolved.aws : null;
   const anthropicApiKey =
     provider === "anthropic" ? resolved.anthropicApiKey : null;
+  // Subscription credentials apply only when no metered key is set — both can
+  // be configured, with the API key taking precedence.
+  const anthropicOauthToken =
+    provider === "anthropic" && !anthropicApiKey
+      ? resolved.anthropicOauthToken
+      : null;
   const openaiApiKey = provider === "openai" ? resolved.openaiApiKey : null;
+  const codexAuthJson =
+    provider === "openai" && !openaiApiKey ? resolved.codexAuthJson : null;
   const geminiApiKey = provider === "gemini" ? resolved.geminiApiKey : null;
-  if (!awsCredentials && !anthropicApiKey && !openaiApiKey && !geminiApiKey) {
+  if (
+    !awsCredentials &&
+    !anthropicApiKey &&
+    !anthropicOauthToken &&
+    !openaiApiKey &&
+    !codexAuthJson &&
+    !geminiApiKey
+  ) {
     console.log(
       "[bandolier:webhook] skipped — no credentials for the selected model",
       { ...logCtx, sender: sender.login, model },
@@ -341,7 +356,9 @@ async function resolveWebhookRun(opts: {
     effort,
     awsCredentials,
     anthropicApiKey,
+    anthropicOauthToken,
     openaiApiKey,
+    codexAuthJson,
     geminiApiKey,
     kubeconfig,
     prWriterModel,
@@ -392,7 +409,9 @@ async function handleIssueOpened(
     effort,
     awsCredentials,
     anthropicApiKey,
+    anthropicOauthToken,
     openaiApiKey,
+    codexAuthJson,
     geminiApiKey,
     kubeconfig,
     prWriterModel,
@@ -465,7 +484,9 @@ async function handleIssueOpened(
     githubToken: linked.accessToken ?? undefined,
     awsCredentials: awsCredentials ?? undefined,
     anthropicApiKey: anthropicApiKey ?? undefined,
+    anthropicOauthToken: anthropicOauthToken ?? undefined,
     openaiApiKey: openaiApiKey ?? undefined,
+    codexAuthJson: codexAuthJson ?? undefined,
     geminiApiKey: geminiApiKey ?? undefined,
     kubeconfig,
     agentImage: agentImage ?? undefined,
@@ -683,7 +704,9 @@ async function handleIssueComment(
     effort,
     awsCredentials,
     anthropicApiKey,
+    anthropicOauthToken,
     openaiApiKey,
+    codexAuthJson,
     geminiApiKey,
     kubeconfig,
     prWriterModel,
@@ -777,7 +800,9 @@ async function handleIssueComment(
     githubToken: linked.accessToken ?? undefined,
     awsCredentials: awsCredentials ?? undefined,
     anthropicApiKey: anthropicApiKey ?? undefined,
+    anthropicOauthToken: anthropicOauthToken ?? undefined,
     openaiApiKey: openaiApiKey ?? undefined,
+    codexAuthJson: codexAuthJson ?? undefined,
     geminiApiKey: geminiApiKey ?? undefined,
     kubeconfig,
     agentImage: agentImage ?? undefined,

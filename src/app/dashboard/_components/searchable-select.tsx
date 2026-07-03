@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Fragment,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -54,6 +55,7 @@ export function SearchableSelect({
   searchPlaceholder = "Search…",
   emptyText = "No options.",
   clearLabel,
+  recentValues,
   className = "",
 }: {
   options: SelectOption[];
@@ -67,6 +69,12 @@ export function SearchableSelect({
   emptyText?: string;
   /** When set, a "none" row appears and this is shown in the trigger for null. */
   clearLabel?: string;
+  /**
+   * Values shown in a "Recent" group above the full list while the search box
+   * is empty (the full list keeps them too). Values without a matching option
+   * are ignored.
+   */
+  recentValues?: string[];
   /** Extra classes for the root (e.g. a fixed width); defaults to full width. */
   className?: string;
 }) {
@@ -155,22 +163,40 @@ export function SearchableSelect({
 
   const selected = options.find((o) => o.value === value) ?? null;
 
+  // Recent picks, resolved against the option list (stale values drop out).
+  // They render as a headed group above the full list, but only while the
+  // search box is empty — search results stay a single flat list.
+  const recentOptions = (recentValues ?? [])
+    .map((v) => options.find((o) => o.value === v))
+    .filter((o): o is SelectOption => o !== undefined);
+  const showRecent = !query && recentOptions.length > 0;
+
+  const sections: { heading: string; options: SelectOption[] }[] = showRecent
+    ? [
+        { heading: "Recent", options: recentOptions },
+        { heading: "All", options: filtered },
+      ]
+    : [{ heading: "", options: filtered }];
+
   // The clear/none row (when present) is keyboard-navigable too, so arrow keys
   // and Enter walk the same list the user sees, in display order.
   const showClear = clearLabel !== undefined && !query;
   const navValues: (string | null)[] = [
     ...(showClear ? [null] : []),
-    ...filtered.map((o) => o.value),
+    ...sections.flatMap((s) => s.options.map((o) => o.value)),
   ];
 
-  // The nav index of the currently-selected value within the unfiltered list,
-  // so opening can start arrow-key navigation on the current selection rather
-  // than always at the top. Computed against `options` (not `filtered`) since
-  // the search box is empty on open. Falls back to the first row.
+  // The nav index of the currently-selected value within the list as it will
+  // render on open (search resets to empty, so the recent group counts), so
+  // opening can start arrow-key navigation on the current selection rather
+  // than always at the top. Falls back to the first row.
   function selectedNavIndex() {
+    const clearOffset = clearLabel !== undefined ? 1 : 0;
+    const recent = recentOptions.findIndex((o) => o.value === value);
+    if (recent >= 0) return recent + clearOffset;
     const i = options.findIndex((o) => o.value === value);
     if (i < 0) return 0;
-    return i + (clearLabel !== undefined ? 1 : 0);
+    return i + recentOptions.length + clearOffset;
   }
 
   function openDropdown() {
@@ -323,30 +349,50 @@ export function SearchableSelect({
                     No matches for &ldquo;{search}&rdquo;.
                   </li>
                 ) : (
-                  filtered.map((o, i) => {
-                    const isSelected = o.value === value;
-                    const navIndex = i + (showClear ? 1 : 0);
-                    const isHighlighted = highlight === navIndex;
+                  sections.map((section, si) => {
+                    // Nav indices run continuously across sections (after the
+                    // clear row), matching `navValues`; headings don't count.
+                    const base =
+                      (showClear ? 1 : 0) +
+                      sections
+                        .slice(0, si)
+                        .reduce((n, s) => n + s.options.length, 0);
                     return (
-                      <li key={o.value}>
-                        <button
-                          type="button"
-                          data-nav={navIndex}
-                          onClick={() => choose(o.value)}
-                          onMouseEnter={() => setHighlight(navIndex)}
-                          className={`flex w-full items-center gap-1.5 px-4 py-2 text-left text-sm transition ${
-                            isSelected
-                              ? "bg-purple-600/40"
-                              : isHighlighted
-                                ? "bg-white/10"
-                                : ""
-                          }`}
-                        >
-                          <span className="flex min-w-0 flex-1 items-center">
-                            {o.label}
-                          </span>
-                        </button>
-                      </li>
+                      <Fragment key={section.heading || "all"}>
+                        {section.heading && (
+                          <li className="px-4 pt-2 pb-1 text-[10px] font-medium tracking-wider text-white/30 uppercase">
+                            {section.heading}
+                          </li>
+                        )}
+                        {section.options.map((o, i) => {
+                          const isSelected = o.value === value;
+                          const navIndex = base + i;
+                          const isHighlighted = highlight === navIndex;
+                          return (
+                            // A recent option repeats in the full list below,
+                            // so keys are namespaced per section.
+                            <li key={`${section.heading}:${o.value}`}>
+                              <button
+                                type="button"
+                                data-nav={navIndex}
+                                onClick={() => choose(o.value)}
+                                onMouseEnter={() => setHighlight(navIndex)}
+                                className={`flex w-full items-center gap-1.5 px-4 py-2 text-left text-sm transition ${
+                                  isSelected
+                                    ? "bg-purple-600/40"
+                                    : isHighlighted
+                                      ? "bg-white/10"
+                                      : ""
+                                }`}
+                              >
+                                <span className="flex min-w-0 flex-1 items-center">
+                                  {o.label}
+                                </span>
+                              </button>
+                            </li>
+                          );
+                        })}
+                      </Fragment>
                     );
                   })
                 )}

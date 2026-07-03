@@ -35,8 +35,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # env.js validates a handful of vars at import time; unit tests reach that
-      # graph, so provide inert placeholders. No real services are contacted.
+      # env.js validates a handful of vars at import time. Lint/typecheck never
+      # execute it, so skip validation there. Tests must NOT skip it: vitest's
+      # config supplies inert placeholders for the required vars, and skipping
+      # would also drop the schema defaults some code under test relies on
+      # (e.g. AGENT_EGRESS_BLOCKED_CIDRS).
       - name: Lint
         run: pnpm lint
         env:
@@ -49,8 +52,6 @@ jobs:
 
       - name: Test
         run: pnpm test:coverage
-        env:
-          SKIP_ENV_VALIDATION: "1"
 
       - name: Upload coverage report
         if: always()

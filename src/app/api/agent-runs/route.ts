@@ -12,6 +12,7 @@ import {
 } from "~/server/agents/artifacts";
 import { db } from "~/server/db";
 import { taskRun } from "~/server/db/schema";
+import { sendPushToUser } from "~/server/push";
 
 /**
  * Authenticates a harness callback by its per-job HMAC token, returning the
@@ -103,10 +104,15 @@ export async function POST(req: NextRequest) {
 
   const transcript = await req.text();
 
-  // The run row names the repo, which decides where its transcript lives. A
-  // pruned row (or a repo-less run) means no store, so no upload.
+  // The run row names the repo, which decides where its transcript lives, plus
+  // who to notify (spawnedBy) and how to label the alert. A pruned row (or a
+  // repo-less run) means no store, so no upload.
   const [run] = await db
-    .select({ repoFullName: taskRun.repoFullName })
+    .select({
+      repoFullName: taskRun.repoFullName,
+      spawnedBy: taskRun.spawnedBy,
+      displayName: taskRun.displayName,
+    })
     .from(taskRun)
     .where(eq(taskRun.jobName, jobName))
     .limit(1);
@@ -159,6 +165,21 @@ export async function POST(req: NextRequest) {
       updatedAt: new Date(),
     })
     .where(eq(taskRun.jobName, jobName));
+
+  // Background push: this callback is the server-side "run finished" signal, so
+  // alert the owner's subscribed browsers even if the app is closed. Best-effort
+  // — sendPushToUser never throws, and it's a no-op when push isn't configured
+  // or the user has no subscriptions. The harness may report the terminal state
+  // via x-bandolier-status ("Succeeded"/"Failed"); absent it, a neutral title.
+  if (run?.spawnedBy) {
+    const failed = req.headers.get("x-bandolier-status") === "Failed";
+    await sendPushToUser(run.spawnedBy, {
+      title: failed ? "Agent failed" : "Agent finished",
+      body: run.displayName ?? jobName,
+      tag: `complete:${jobName}`,
+      url: run.repoFullName ? `/repo/${run.repoFullName}` : "/",
+    });
+  }
 
   console.log("[bandolier:ingest] run output stored", {
     job: jobName,

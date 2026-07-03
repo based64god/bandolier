@@ -292,18 +292,32 @@ export function InteractiveRow({
             colSpan={isDesktop ? TASK_COLUMNS : MOBILE_TASK_COLUMNS}
             className="p-0"
           >
-            <SessionHeader podName={agent.name} tokens={agent.tokens} />
-            <Conversation items={session.items} running={running} />
-            <SessionComposer
-              running={running}
-              awaiting={awaiting}
-              ready={session.ready}
-              sendPending={session.sendPending}
-              sendError={session.sendError}
-              commands={session.commands}
-              onSend={session.sendPrompt}
-              focusSignal={focusSignal}
-            />
+            {/* Fill the viewport (`85vh`) so an expanded session dominates the
+                screen: the header and composer take their natural height while
+                the conversation flexes to fill the rest and scrolls. Because a
+                single expanded session is this tall, Tab-cycling between waiting
+                tasks pushes the neighbouring rows off-screen — each awaiting
+                session reads as its own full view rather than a cramped inline
+                pane competing with the others. `min-h-0` lets the conversation
+                shrink below its content so the flex child actually scrolls. */}
+            <div className="flex h-[85vh] flex-col">
+              <div className="shrink-0">
+                <SessionHeader podName={agent.name} tokens={agent.tokens} />
+              </div>
+              <Conversation items={session.items} running={running} />
+              <div className="shrink-0">
+                <SessionComposer
+                  running={running}
+                  awaiting={awaiting}
+                  ready={session.ready}
+                  sendPending={session.sendPending}
+                  sendError={session.sendError}
+                  commands={session.commands}
+                  onSend={session.sendPrompt}
+                  focusSignal={focusSignal}
+                />
+              </div>
+            </div>
           </td>
         </tr>
       )}
@@ -364,7 +378,10 @@ function Conversation({
   }
 
   return (
-    <div className="relative">
+    // Grow to fill the expanded session's flex column; `min-h-0` overrides the
+    // default `min-height: auto` so this can shrink below its content and hand a
+    // bounded height to the scroll container below.
+    <div className="relative flex min-h-0 flex-1 flex-col">
       <div
         ref={ref}
         onScroll={(e) => {
@@ -374,7 +391,7 @@ function Conversation({
           stick.current = atBottom;
           setPinned(atBottom);
         }}
-        className="h-72 space-y-2 overflow-auto bg-black/30 px-4 py-3 text-[13px] leading-5"
+        className="min-h-0 flex-1 space-y-2 overflow-auto bg-black/30 px-4 py-3 text-[13px] leading-5"
       >
         {items.length === 0 ? (
           <span className="font-mono text-[11px] text-white/30">

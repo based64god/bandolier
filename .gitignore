@@ -48,3 +48,10 @@ yarn-error.log*
 
 agent-harness/harness
 .env*
+
+# opentofu (deploy/terraform): providers, state, and secret-bearing tfvars.
+# The .terraform.lock.hcl files ARE committed.
+.terraform/
+*.tfstate
+*.tfstate.*
+terraform.tfvars

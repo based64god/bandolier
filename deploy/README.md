@@ -7,6 +7,10 @@ each user's kubeconfig points at, while this chart runs the web app itself.
 
 - `helm/bandolier/` — a Helm chart deploying the app, its configuration, database
   migrations, and (optionally) a bundled Postgres.
+- `terraform/digitalocean/` — an OpenTofu configuration that provisions the
+  infrastructure on DigitalOcean (DOKS cluster, managed Postgres, a Spaces
+  bucket for run artifacts, optional DNS + TLS) **and** installs the chart. See
+  [its README](terraform/digitalocean/README.md).
 
 > The web app is **cluster-agnostic** about where agents run: it talks to agent
 > clusters only through user-supplied kubeconfig strings, never in-cluster
@@ -18,16 +22,16 @@ each user's kubeconfig points at, while this chart runs the web app itself.
 
 The self-host workflow publishes two images from the repo-root `Dockerfile`:
 
-| Image | Stage | Purpose |
-| ----- | ----- | ------- |
-| `ghcr.io/based64god/bandolier` | `runner` | The lean Next.js standalone server. This is the app. |
+| Image                                  | Stage      | Purpose                                                                          |
+| -------------------------------------- | ---------- | -------------------------------------------------------------------------------- |
+| `ghcr.io/based64god/bandolier`         | `runner`   | The lean Next.js standalone server. This is the app.                             |
 | `ghcr.io/based64god/bandolier-migrate` | `migrator` | `drizzle-kit` + the SQL under `drizzle/`. Runs schema migrations as a Helm hook. |
 
 Both share a tag scheme, so pinning `image.tag` to a release (e.g. `v0.1.0`) pins
 the migrator too (the chart defaults `migrations.image.tag` to `image.tag`).
 
 These are **distinct** from the agent-side images
-(`bandolier-agent-harness`, `bandolier-self-host`), which run *inside* agent Job
+(`bandolier-agent-harness`, `bandolier-self-host`), which run _inside_ agent Job
 pods and are documented in the main [README](../README.md).
 
 ## Prerequisites
@@ -39,6 +43,10 @@ pods and are documented in the main [README](../README.md).
   `<your-public-url>/api/auth/callback/github`.
 - An ingress controller and DNS if you want to expose the app at a hostname
   (otherwise use `kubectl port-forward`).
+
+> Don't have any of that yet? [`terraform/digitalocean`](terraform/digitalocean)
+> stands up the cluster, database, artifact storage, and the chart itself on
+> DigitalOcean in one `tofu apply`.
 
 ## Quick start (bundled Postgres, port-forward)
 
@@ -135,11 +143,11 @@ sealed-secrets / external-secrets operators.
 
 `postgres.mode` selects how the app gets its database:
 
-| Mode | What it deploys | Use it for |
-| ---- | --------------- | ---------- |
-| `external` (default) | Nothing — you provide `secrets.databaseUrl`. | Production with a managed database. |
-| `bundled` | A single-replica StatefulSet + PVC. | Evaluation / quick starts. |
-| `cnpg` | A CloudNativePG `Cluster` (HA, failover, rolling upgrades, backups). | In-cluster production Postgres. |
+| Mode                 | What it deploys                                                      | Use it for                          |
+| -------------------- | -------------------------------------------------------------------- | ----------------------------------- |
+| `external` (default) | Nothing — you provide `secrets.databaseUrl`.                         | Production with a managed database. |
+| `bundled`            | A single-replica StatefulSet + PVC.                                  | Evaluation / quick starts.          |
+| `cnpg`               | A CloudNativePG `Cluster` (HA, failover, rolling upgrades, backups). | In-cluster production Postgres.     |
 
 For `bundled`/`cnpg`, the app's `DATABASE_URL` is **derived** from
 `postgres.auth` (database/username/password) and the deployed service, so
@@ -174,7 +182,7 @@ Inspect the cluster with `kubectl get cluster bandolier-postgres`.
 ## Run artifacts (bundled MinIO)
 
 Bandolier stores run transcripts in S3, configured **per repository** in the app
-UI (Settings → a repo's *Run artifact storage*) — there is no server-wide bucket,
+UI (Settings → a repo's _Run artifact storage_) — there is no server-wide bucket,
 and the chart does **not** wire storage into the app automatically. Setting
 `minio.enabled=true` is purely a convenience: it deploys an in-cluster,
 S3-compatible MinIO and pre-creates a bucket, giving you an endpoint + credentials
@@ -187,7 +195,7 @@ helm upgrade --install bandolier deploy/helm/bandolier ... \
   --set minio.auth.rootPassword=<secret-key>
 ```
 
-Then in a repo's *Run artifact storage* settings use:
+Then in a repo's _Run artifact storage_ settings use:
 
 - **Endpoint** — `http://bandolier-minio.<namespace>.svc:9000` (reachable only
   from agent pods **in this cluster**; enable `minio.ingress` for off-cluster
@@ -229,19 +237,19 @@ The chart's values map onto the app's environment (validated in
 [`src/env.js`](../src/env.js)); see the [main README's configuration
 reference](../README.md#configuration-reference) for what each variable does.
 
-| Value | Env var | Notes |
-| ----- | ------- | ----- |
-| `config.betterAuthUrl` | `BETTER_AUTH_URL` | Public URL; must match how you reach the app. |
-| `config.k8sLabelSelector` | `K8S_LABEL_SELECTOR` | Selector for Bandolier-managed agent pods. |
-| `config.agentNetworkPolicy` | `AGENT_NETWORK_POLICY` | Agent-pod isolation (needs a policy CNI). |
-| `config.agentEgressBlockedCidrs` | `AGENT_EGRESS_BLOCKED_CIDRS` | CIDRs agents can't reach. |
-| `config.githubAppSlug` | `NEXT_PUBLIC_GITHUB_APP_SLUG` | Links repo-config UI to the App. |
-| `secrets.betterAuthSecret` | `BETTER_AUTH_SECRET` | **Required.** Session/token signing key. |
-| `secrets.githubClientId` / `githubClientSecret` | `BETTER_AUTH_GITHUB_CLIENT_ID` / `_SECRET` | **Required.** OAuth app. |
-| `secrets.databaseUrl` | `DATABASE_URL` | **Required** when `postgres.mode=external`; ignored for `bundled`/`cnpg`. |
-| `secrets.githubWebhookSecret` | `GITHUB_WEBHOOK_SECRET` | Optional. Webhook signature verification. |
-| `secrets.githubAppId` / `githubAppPrivateKey` / `githubAppClientId` / `githubAppClientSecret` | `GITHUB_APP_*` | Optional. Bot identity. |
-| `secrets.appPassword` | `APP_PASSWORD` | Optional. Shared password gate. |
+| Value                                                                                         | Env var                                    | Notes                                                                     |
+| --------------------------------------------------------------------------------------------- | ------------------------------------------ | ------------------------------------------------------------------------- |
+| `config.betterAuthUrl`                                                                        | `BETTER_AUTH_URL`                          | Public URL; must match how you reach the app.                             |
+| `config.k8sLabelSelector`                                                                     | `K8S_LABEL_SELECTOR`                       | Selector for Bandolier-managed agent pods.                                |
+| `config.agentNetworkPolicy`                                                                   | `AGENT_NETWORK_POLICY`                     | Agent-pod isolation (needs a policy CNI).                                 |
+| `config.agentEgressBlockedCidrs`                                                              | `AGENT_EGRESS_BLOCKED_CIDRS`               | CIDRs agents can't reach.                                                 |
+| `config.githubAppSlug`                                                                        | `NEXT_PUBLIC_GITHUB_APP_SLUG`              | Links repo-config UI to the App.                                          |
+| `secrets.betterAuthSecret`                                                                    | `BETTER_AUTH_SECRET`                       | **Required.** Session/token signing key.                                  |
+| `secrets.githubClientId` / `githubClientSecret`                                               | `BETTER_AUTH_GITHUB_CLIENT_ID` / `_SECRET` | **Required.** OAuth app.                                                  |
+| `secrets.databaseUrl`                                                                         | `DATABASE_URL`                             | **Required** when `postgres.mode=external`; ignored for `bundled`/`cnpg`. |
+| `secrets.githubWebhookSecret`                                                                 | `GITHUB_WEBHOOK_SECRET`                    | Optional. Webhook signature verification.                                 |
+| `secrets.githubAppId` / `githubAppPrivateKey` / `githubAppClientId` / `githubAppClientSecret` | `GITHUB_APP_*`                             | Optional. Bot identity.                                                   |
+| `secrets.appPassword`                                                                         | `APP_PASSWORD`                             | Optional. Shared password gate.                                           |
 
 See [`helm/bandolier/values.yaml`](helm/bandolier/values.yaml) for the full,
 commented list (replicas, resources, probes, ingress, and `postgres.*` /

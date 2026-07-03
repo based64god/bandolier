@@ -615,7 +615,7 @@ describe("createAgentJob", () => {
       expect(
         jobCall().body.spec.template.spec.containers[0]!.resources,
       ).toEqual({
-        requests: { cpu: "500m", memory: "512Mi" },
+        requests: { cpu: "1000m", memory: "1024Mi" },
         limits: { cpu: "2", memory: "2Gi" },
       });
     });
@@ -625,7 +625,7 @@ describe("createAgentJob", () => {
       expect(
         jobCall().body.spec.template.spec.containers[0]!.resources,
       ).toEqual({
-        requests: { cpu: "500m", memory: "512Mi" },
+        requests: { cpu: "2000m", memory: "4096Mi" },
         limits: { cpu: "4", memory: "8Gi" },
       });
     });
@@ -639,24 +639,28 @@ describe("createAgentJob", () => {
   });
 
   describe("podResources", () => {
-    it("keeps the baseline requests under a larger limit", () => {
+    it("requests half of the configured limits", () => {
       expect(podResources({ cpu: "4", memory: "8Gi" })).toEqual({
-        requests: { cpu: "500m", memory: "512Mi" },
+        requests: { cpu: "2000m", memory: "4096Mi" },
         limits: { cpu: "4", memory: "8Gi" },
       });
     });
 
-    it("clamps requests down to a limit below the baseline (k8s rejects request > limit)", () => {
-      expect(podResources({ cpu: "250m", memory: "256Mi" })).toEqual({
-        requests: { cpu: "250m", memory: "256Mi" },
-        limits: { cpu: "250m", memory: "256Mi" },
+    it("halves small and odd limits into whole millicores / Mi", () => {
+      expect(podResources({ cpu: "250m", memory: "255Mi" })).toEqual({
+        requests: { cpu: "125m", memory: "128Mi" }, // 127.5Mi rounds up
+        limits: { cpu: "250m", memory: "255Mi" },
       });
     });
 
-    it("resolves each field independently", () => {
+    it("resolves each field independently, defaulting to the built-in limits", () => {
       expect(podResources({ memory: "16Gi" })).toEqual({
-        requests: { cpu: "500m", memory: "512Mi" },
+        requests: { cpu: "1000m", memory: "8192Mi" },
         limits: { cpu: "2", memory: "16Gi" },
+      });
+      expect(podResources()).toEqual({
+        requests: { cpu: "1000m", memory: "1024Mi" },
+        limits: { cpu: "2", memory: "2Gi" },
       });
     });
 

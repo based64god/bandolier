@@ -7,6 +7,7 @@ import {
   pickLatestGeminiFlash,
   pickLatestGptMini,
   pickLatestSonnet,
+  pickPrWriterModel,
   type ModelOption,
 } from "~/server/agents/models";
 
@@ -140,6 +141,67 @@ describe("pickLatestGeminiFlash", () => {
       gemini("gemini-2.0-flash"),
     ];
     expect(pickLatestGeminiFlash(models)).toBe("gemini-2.0-flash");
+  });
+});
+
+describe("pickPrWriterModel", () => {
+  const apiKey = (id: string): ModelOption => ({
+    id,
+    label: id,
+    provider: "anthropic",
+    auth: "api_key",
+  });
+  const subscription = (id: string): ModelOption => ({
+    id,
+    label: id,
+    provider: "anthropic",
+    auth: "subscription",
+  });
+
+  it("returns undefined when no model is selected", () => {
+    expect(pickPrWriterModel([apiKey("claude-sonnet-5")], undefined)).toBe(
+      undefined,
+    );
+  });
+
+  it("picks the latest Sonnet from the metered set for an API-key run", () => {
+    const models = [
+      apiKey("claude-sonnet-5-20260101"),
+      subscription("claude-sonnet-5"),
+    ];
+    expect(pickPrWriterModel(models, models[0])).toBe(
+      "claude-sonnet-5-20260101",
+    );
+  });
+
+  it("never leaks a dated API-key Sonnet into a subscription run", () => {
+    // The regression: a subscription-selected job used the OAuth token, but the
+    // writer was picked across the merged list and a newer dated API-key id won,
+    // which the subscription can't invoke. The writer must stay subscription-only.
+    const subModel = subscription("claude-sonnet-5");
+    const models = [apiKey("claude-sonnet-5-20260101"), subModel];
+    expect(pickPrWriterModel(models, subModel)).toBe("claude-sonnet-5");
+  });
+
+  it("keeps the writer on the selected model's provider", () => {
+    const gptMini = openai("gpt-5-mini");
+    const models = [gptMini, openai("gpt-5"), subscription("claude-sonnet-5")];
+    expect(pickPrWriterModel(models, openai("gpt-5"))).toBe("gpt-5-mini");
+  });
+
+  it("picks the latest Flash for a Gemini run", () => {
+    const geminiPro = gemini("gemini-3-pro");
+    const models = [geminiPro, gemini("gemini-3-flash")];
+    expect(pickPrWriterModel(models, geminiPro)).toBe("gemini-3-flash");
+  });
+
+  it("uses auth-less Bedrock models for a Bedrock run", () => {
+    const profile: ModelOption = {
+      id: "us.anthropic.claude-sonnet-5-20260101-v1:0",
+      label: "Claude Sonnet 5",
+      provider: "bedrock",
+    };
+    expect(pickPrWriterModel([profile], profile)).toBe(profile.id);
   });
 });
 

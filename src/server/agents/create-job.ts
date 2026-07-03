@@ -318,18 +318,22 @@ export function podResources(compute?: ComputeSpec): {
   requests: { cpu: string; memory: string };
   limits: { cpu: string; memory: string };
 } {
-  for (const [value, validate] of [
-    [compute?.cpu, validateCpuQuantity],
-    [compute?.memory, validateMemoryQuantity],
+  const validated: { cpu?: string; memory?: string } = {};
+  for (const [key, value, validate] of [
+    ["cpu", compute?.cpu, validateCpuQuantity],
+    ["memory", compute?.memory, validateMemoryQuantity],
   ] as const) {
     if (value !== undefined) {
       const validation = validate(value);
       if (!validation.valid) throw new Error(validation.error);
+      // Use the normalized quantity so a bare "8" limit becomes "8Gi", not
+      // 8 bytes, if it ever reaches the pod without going through the UI paths.
+      validated[key] = validation.normalized;
     }
   }
 
-  const cpuLimit = compute?.cpu ?? DEFAULT_CPU_LIMIT;
-  const memoryLimit = compute?.memory ?? DEFAULT_MEMORY_LIMIT;
+  const cpuLimit = validated.cpu ?? DEFAULT_CPU_LIMIT;
+  const memoryLimit = validated.memory ?? DEFAULT_MEMORY_LIMIT;
   // Emit requests in fixed units (millicores / Mi) so halving any valid limit
   // stays a whole-number Kubernetes quantity.
   const cpuRequest = `${Math.ceil(cpuToMillicores(cpuLimit)! / 2)}m`;

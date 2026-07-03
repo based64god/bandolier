@@ -85,18 +85,34 @@ describe("validateMemoryQuantity", () => {
     });
   });
 
+  it("defaults a bare number to Gi", () => {
+    expect(validateMemoryQuantity("4")).toEqual({
+      valid: true,
+      normalized: "4Gi",
+    });
+    expect(validateMemoryQuantity(" 1.5 ")).toEqual({
+      valid: true,
+      normalized: "1.5Gi",
+    });
+  });
+
   it("rejects a malformed quantity with a usage hint", () => {
     const v = validateMemoryQuantity("4 gigs");
     expect(v.valid).toBe(false);
     if (!v.valid) expect(v.error).toContain("Invalid memory quantity");
   });
 
-  it("rejects unit mistakes below the floor (bytes / megabytes typos)", () => {
-    // "512" reads as 512 bytes and "64Mi" is under any workable harness
-    // footprint — both are almost certainly unit mistakes.
-    expect(validateMemoryQuantity("512").valid).toBe(false);
+  it("rejects unit mistakes below the floor (megabytes typos)", () => {
+    // An explicit small unit like "64Mi" is under any workable harness
+    // footprint — almost certainly a unit mistake. (A bare "512" is read as
+    // Gi, not bytes, so it's valid.)
     expect(validateMemoryQuantity("64Mi").valid).toBe(false);
+    expect(validateMemoryQuantity("4M").valid).toBe(false);
     expect(validateMemoryQuantity("128Mi").valid).toBe(true);
+    expect(validateMemoryQuantity("512")).toEqual({
+      valid: true,
+      normalized: "512Gi",
+    });
   });
 
   it("rejects values past the ceiling", () => {

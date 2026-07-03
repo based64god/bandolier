@@ -43,31 +43,25 @@ RUN go version && node --version && npm --version
 
 # ── Chromium + Playwright ─────────────────────────────────────────────────────
 # So agents can drive a headless browser to inspect site visuals (screenshots,
-# rendered DOM, layout). We install Debian's own Chromium, then install Playwright
-# globally and point it at the system binary — PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD
-# keeps Playwright from fetching a second, bundled copy, so the browser can never
-# drift from the one the OS patches. (The base image is debian:latest, which
-# ships chromium.)
-#
-# The chromium package already depends on the shared libraries a headless browser
-# needs, so apt pulls those in — we don't hand-list them (their names churn, e.g.
-# the Debian t64 transition). Fonts are only a recommends, so we add them
-# explicitly for correct text/emoji rendering in screenshots.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        chromium \
-        fonts-liberation \
-        fonts-noto-color-emoji \
+# rendered DOM, layout). We install Playwright globally and let it manage its own
+# Chromium: `playwright install --with-deps chromium` fetches the exact browser
+# build Playwright is tested against and apt-installs the shared libraries a
+# headless browser needs. Letting the installer resolve those libs (rather than
+# hand-listing them, or reusing Debian's chromium and pointing Playwright at it —
+# Playwright has no env var to override the executable path, only the bundled
+# browser it downloads) keeps us off the treadmill of churning package names
+# (e.g. the Debian t64 transition). The emoji font isn't among Playwright's deps,
+# so we add it explicitly for correct emoji rendering in screenshots.
+RUN npm install -g playwright-core playwright \
+    && playwright install --with-deps chromium \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends fonts-noto-color-emoji \
     && rm -rf /var/lib/apt/lists/*
 
-# PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD stops Playwright from fetching its own bundled
-# browsers; PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH points launches at the system
-# Chromium installed above.
-ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=true
-ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
-RUN npm install -g playwright-core playwright
-
-# Fail the build loudly if the browser can't launch headless on this image.
-RUN chromium --headless --no-sandbox --disable-gpu --dump-dom about:blank >/dev/null
+# Fail the build loudly if Playwright can't actually launch its Chromium headless.
+# NODE_PATH lets `require` resolve the globally-installed package; --no-sandbox
+# because the image runs as root.
+RUN NODE_PATH=/usr/local/lib/node_modules node -e "require('playwright').chromium.launch({args:['--no-sandbox']}).then(b=>b.close()).then(()=>console.log('playwright chromium ok')).catch(e=>{console.error(e);process.exit(1)})"
 
 # Inherit the harness ENTRYPOINT (/usr/local/bin/harness) and env (HOME, PATH,
 # IS_SANDBOX, …) from the base image.

@@ -6,10 +6,9 @@ import { EffortPicker } from "~/app/dashboard/_components/effort-picker";
 
 /**
  * Dev-only harness that mounts EffortPicker in isolation (no tRPC/auth), so the
- * segmented control and the "Preferred" toggle can be exercised in a real
- * browser — e.g. with Playwright. Not linked from the app. The selected level
- * and preferred flag are echoed below so a test can assert what each click
- * resolves to.
+ * dropdown and the "Preferred" toggle can be exercised in a real browser — e.g.
+ * with Playwright. Not linked from the app. The selected level and preferred
+ * flag are echoed below so a test can assert what each selection resolves to.
  */
 export default function EffortPickerHarness() {
   const [value, setValue] = useState("");

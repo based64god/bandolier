@@ -1,15 +1,26 @@
 "use client";
 
 import { EFFORT_LEVELS } from "~/lib/effort";
+import { SearchableSelect } from "./searchable-select";
 
 // ── Effort picker ──────────────────────────────────────────────────────────
 //
-// A segmented control for the reasoning-effort level ("default" + the Claude
-// CLI levels), with an optional "Preferred" toggle that pins the dashboard
-// default. Rendered only for Claude models (the caller gates on
+// A dropdown for the reasoning-effort level ("default" + the Claude CLI levels),
+// with an optional "Preferred" toggle that pins the dashboard default. Backed by
+// the same SearchableSelect the model picker uses so long level names never
+// overflow the control. Rendered only for Claude models (the caller gates on
 // providerSupportsEffort); the OpenAI/Gemini CLIs don't take an effort flag.
 // Kept as a standalone component so it can be previewed in isolation (see
 // /dev/effort-picker) and reused wherever effort is chosen.
+
+// Human-facing labels for the CLI's terse level ids.
+const EFFORT_LABELS: Record<string, string> = {
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  xhigh: "Extra high",
+  max: "Max",
+};
 
 export function EffortPicker({
   value,
@@ -32,24 +43,20 @@ export function EffortPicker({
         Reasoning effort
       </label>
       <div className="flex items-center gap-2">
-        <div className="flex min-w-0 flex-1 gap-1.5">
-          {(["", ...EFFORT_LEVELS] as const).map((level) => {
-            const active = value === level;
-            return (
-              <button
-                key={level || "default"}
-                type="button"
-                onClick={() => onChange(level)}
-                className={`min-w-0 flex-1 rounded-lg border px-2 py-1.5 text-xs capitalize transition ${
-                  active
-                    ? "border-purple-500/50 bg-purple-500/15 text-white"
-                    : "border-white/10 bg-white/5 text-white/60 hover:bg-white/10"
-                }`}
-              >
-                {level || "default"}
-              </button>
-            );
-          })}
+        <div className="min-w-0 flex-1">
+          <SearchableSelect
+            options={EFFORT_LEVELS.map((level) => ({
+              value: level,
+              searchText:
+                `${level} ${EFFORT_LABELS[level] ?? level}`.toLowerCase(),
+              label: <span className="text-white">{EFFORT_LABELS[level]}</span>,
+            }))}
+            value={value || null}
+            onChange={(v) => onChange(v ?? "")}
+            placeholder="Default"
+            clearLabel="Default"
+            searchPlaceholder="Search effort…"
+          />
         </div>
         {preferred && (
           <label

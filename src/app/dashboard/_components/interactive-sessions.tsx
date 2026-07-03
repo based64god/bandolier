@@ -261,12 +261,14 @@ export function InteractiveRow({
         >
           {/* Reserve the tallest control's height (`ACTION_ROW_MIN_H`) so the
               row keeps a constant height whether or not the "End session"
-              button is present — without it, a row shrinks the moment a
+              control is present — without it, a row shrinks the moment a
               session ends and its button disappears, shifting rows below it.
-              The group wraps on narrow viewports (`flex-wrap`) so the "End
-              session" button and terminate glyph stack within the slim mobile
-              Actions column rather than overflowing leftward onto the adjacent
-              Task description; it stays on one line from `lg` up. */}
+              On mobile the "End session" button is a compact icon (below) so it
+              and the terminate glyph fit on one line inside the Actions column,
+              keeping a running row the same height as its single-line
+              neighbours; the full-text button appears from `lg` up. `flex-wrap`
+              is only a safety net for ultra-narrow viewports — at the widths the
+              Actions column is sized for, the pair never wraps. */}
           <div
             className={`flex flex-wrap items-center justify-end gap-2 lg:flex-nowrap ${ACTION_ROW_MIN_H}`}
           >
@@ -277,10 +279,24 @@ export function InteractiveRow({
                   session.endSession();
                 }}
                 disabled={ending}
-                className="rounded-md border border-white/10 px-3 py-1.5 text-xs whitespace-nowrap text-white/60 hover:bg-white/10 disabled:opacity-40"
+                className="flex items-center justify-center rounded-md border border-white/10 p-1 text-xs whitespace-nowrap text-white/60 hover:bg-white/10 disabled:opacity-40 lg:px-3 lg:py-1.5"
                 title="Close the session and open a PR if there are commits"
+                aria-label="End session"
               >
-                {ending ? "Ending…" : "End session"}
+                {/* Full label from `lg` up; a compact "stop" glyph on mobile so
+                    the control keeps the terminate glyph's footprint and the two
+                    stay on one line within the slim Actions column. */}
+                <span className="hidden lg:inline">
+                  {ending ? "Ending…" : "End session"}
+                </span>
+                <svg
+                  viewBox="0 0 16 16"
+                  fill="currentColor"
+                  aria-hidden="true"
+                  className="h-5 w-5 lg:hidden"
+                >
+                  <rect x="4" y="4" width="8" height="8" rx="1.5" />
+                </svg>
               </button>
             )}
             <button

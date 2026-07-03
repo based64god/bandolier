@@ -707,18 +707,18 @@ export function AgentDashboard({
                               width: "w-[12%]",
                               optional: true,
                             },
-                            // Holds the "End session" button (shown on running
-                            // interactive rows) plus the terminate control. The
-                            // action controls are compact and wrap on narrow
-                            // viewports (see TaskRow / InteractiveRow), so this
-                            // column only needs room for the widest single
-                            // control — the rest stacks within the cell instead
-                            // of overflowing leftward onto the Task description.
-                            // Keeping it slim here is what gives the Task column
-                            // real width on mobile: a large fixed share starved
-                            // the description to a sliver even on rows whose
-                            // only action is the small terminate (×) glyph.
-                            { label: "", width: "w-[22%] lg:w-[16%]" },
+                            // Holds the "End session" control (on running
+                            // interactive rows) alongside the terminate control.
+                            // On mobile the "End session" button collapses to a
+                            // compact icon (see InteractiveRow) so both controls
+                            // sit on one line: the column is sized to fit that
+                            // icon + glyph pair without wrapping, because a
+                            // wrapped second line would make a running row taller
+                            // than its single-line neighbours. The full-text
+                            // "End session" button only appears from `lg` up,
+                            // where the narrower `lg:w-[16%]` share still holds it
+                            // and the terminate glyph on one line.
+                            { label: "", width: "w-[30%] lg:w-[16%]" },
                           ].map((h, i) => (
                             <th
                               key={i}

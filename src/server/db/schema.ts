@@ -239,10 +239,10 @@ export const repoWebhookConfig = pgTable("repo_webhook_config", {
   // ── Repo-scoped credentials (admin-only) ──────────────────────────────────
   // Shared infrastructure for everyone working on this repo: a kubeconfig the
   // repo's agents run on and model credentials they authenticate with. Only a
-  // repo admin can set these. A server-wide kubeconfig still overrides the
-  // repo's. SECURITY: these are shared across every Bandolier user with access
-  // to the repo, so the cluster/keys must be scoped to what that group should
-  // be trusted with — see the warning surfaced in the repo config UI.
+  // repo admin can set these. SECURITY: these are shared across every
+  // Bandolier user with access to the repo, so the cluster/keys must be scoped
+  // to what that group should be trusted with — see the warning surfaced in
+  // the repo config UI.
   kubeconfig: text("kubeconfig"),
   anthropicApiKey: text("anthropic_api_key"),
   openaiApiKey: text("openai_api_key"),

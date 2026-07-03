@@ -136,3 +136,86 @@ export function expiresAtLocal(expiresAt: string | null): string {
   });
   return `${date}, ${time}`;
 }
+
+// Mirrors the `failure` field podToTask distills from a Failed pod's status.
+export interface TaskFailure {
+  reason: string;
+  exitCode: number | null;
+  message: string | null;
+}
+
+export interface FailureExplanation {
+  /** Short headline, e.g. "Out of memory". */
+  title: string;
+  /** What happened, in plain language. */
+  why: string;
+  /** What the user can do about it. */
+  fix: string;
+}
+
+const CHECK_LOGS_FIX =
+  "Open the task's logs (tap the row) to see its last output before it died.";
+const RAISE_MEMORY_FIX =
+  "Retry with a higher memory limit: set Memory when creating the task, or " +
+  "raise the default under Settings → Agent compute (or the repo's config).";
+
+/**
+ * Turns the raw Kubernetes failure detail into a human explanation and a
+ * suggested fix, shown when the user taps a Failed status badge. A bare
+ * "Failed" pill tells the user nothing — an OOM kill in particular has a
+ * one-line remedy (raise the memory limit) they can't discover from the logs,
+ * which just stop mid-run.
+ */
+export function explainFailure(failure: TaskFailure): FailureExplanation {
+  const { reason, exitCode, message } = failure;
+
+  if (reason === "OOMKilled") {
+    return {
+      title: "Out of memory",
+      why: "The agent used more memory than the pod's limit allows, so Kubernetes killed it (OOMKilled).",
+      fix: RAISE_MEMORY_FIX,
+    };
+  }
+
+  if (reason === "Evicted") {
+    return {
+      title: "Evicted",
+      why:
+        message ??
+        "The node ran short of resources and Kubernetes evicted the pod.",
+      fix: "Retry the task — evictions are usually transient node pressure. If it keeps happening, ask your cluster admin about capacity.",
+    };
+  }
+
+  if (reason === "DeadlineExceeded") {
+    return {
+      title: "Deadline exceeded",
+      why: "The job ran longer than its allowed deadline and was terminated.",
+      fix: "Retry the task; if it keeps timing out, split the work into smaller tasks.",
+    };
+  }
+
+  // SIGKILL without an explicit OOMKilled reason — most often still the
+  // out-of-memory killer, just reported by the node rather than the cgroup.
+  if (exitCode === 137) {
+    return {
+      title: "Killed",
+      why: "The agent was force-killed (exit code 137, SIGKILL) — usually the out-of-memory killer when the pod hits its memory limit.",
+      fix: RAISE_MEMORY_FIX,
+    };
+  }
+
+  if (exitCode !== null) {
+    return {
+      title: `Exited with code ${exitCode}`,
+      why: message ?? "The agent process crashed or exited with an error.",
+      fix: CHECK_LOGS_FIX,
+    };
+  }
+
+  return {
+    title: reason,
+    why: message ?? "The pod failed without reporting a specific cause.",
+    fix: CHECK_LOGS_FIX,
+  };
+}

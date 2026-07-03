@@ -163,7 +163,7 @@ export function InteractiveRow({
             the left of the column. */}
         <td className="px-3 py-2 text-center align-middle md:px-4 md:py-3">
           <div className="flex flex-col items-center gap-1">
-            <StatusBadge status={agent.status} />
+            <StatusBadge status={agent.status} failure={agent.failure} />
             {awaiting && (
               <span
                 title="Waiting"

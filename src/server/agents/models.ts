@@ -346,6 +346,41 @@ export function pickLatestGeminiFlash(
 }
 
 /**
+ * Picks the out-of-band PR-writer model for a run: the cheap same-provider model
+ * that writes the PR title/description from the commits — the latest Sonnet for
+ * Claude, the latest GPT mini for OpenAI, the latest Flash for Gemini.
+ *
+ * It is chosen ONLY from the models the run's own credentials serve: the same
+ * provider as `selected`, and — where a provider exposes both a metered API key
+ * and a subscription login (Anthropic, OpenAI) — the same `auth` kind. The
+ * harness invokes the writer with the very credentials that provision the job, so
+ * a subscription run must never be handed a dated API-key model id it can't
+ * invoke (nor an API-key run a subscription-only alias). Picking across the whole
+ * merged list let such a mismatch through and made `claude --model …` fail with
+ * an unknown-model error, so PR copy generation silently fell back to the
+ * baseline. Returns undefined when no matching writer model exists.
+ */
+export function pickPrWriterModel(
+  models: ModelOption[],
+  selected: ModelOption | undefined,
+): string | undefined {
+  if (!selected) return undefined;
+  const candidates = models.filter(
+    (m) =>
+      m.provider === selected.provider &&
+      (m.auth === undefined || m.auth === selected.auth),
+  );
+  switch (selected.provider) {
+    case "openai":
+      return pickLatestGptMini(candidates);
+    case "gemini":
+      return pickLatestGeminiFlash(candidates);
+    default:
+      return pickLatestSonnet(candidates);
+  }
+}
+
+/**
  * Fuzzy-resolves a free-text query (e.g. from a `model:<query>` issue label) to a
  * concrete model id: every model whose id or label contains the query
  * (case-insensitive) is a candidate, and the latest by version wins. So `opus` →

@@ -2,6 +2,9 @@
 
 import { useEffect, useRef, useSyncExternalStore } from "react";
 
+import { env } from "~/env";
+import { api } from "~/trpc/react";
+
 const PREF_KEY = "bandolier:notify";
 
 type AlertAgent = { name: string; status: string; displayName: string };
@@ -155,6 +158,84 @@ export async function requestNotificationPermission() {
   if (Notification.permission === "default") {
     await Notification.requestPermission();
   }
+}
+
+// ── Background push (Web Push / VAPID) ──────────────────────────────────────────
+
+const VAPID_PUBLIC_KEY = env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+
+/** VAPID's applicationServerKey is a URL-safe base64 string; the browser wants bytes. */
+function urlBase64ToUint8Array(base64: string): Uint8Array<ArrayBuffer> {
+  const padding = "=".repeat((4 - (base64.length % 4)) % 4);
+  const normalized = (base64 + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const raw = atob(normalized);
+  const bytes = new Uint8Array(new ArrayBuffer(raw.length));
+  for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+  return bytes;
+}
+
+/** True when the browser and build can do background push. */
+function pushSupported(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    "serviceWorker" in navigator &&
+    "PushManager" in window &&
+    Boolean(VAPID_PUBLIC_KEY)
+  );
+}
+
+/**
+ * Keeps the browser's push subscription in sync with the notification
+ * preference so the server can alert this device even when the app is closed.
+ * While enabled (and permission is granted) it subscribes and persists the
+ * subscription server-side; while disabled it tears the subscription down. Runs
+ * on every visit, so a rotated subscription is refreshed on load. A no-op when
+ * push isn't supported or VAPID keys aren't configured — the foreground in-tab
+ * alerts keep working regardless.
+ */
+export function useBackgroundPush(enabled: boolean) {
+  const { mutate: saveSub } = api.push.subscribe.useMutation();
+  const { mutate: dropSub } = api.push.unsubscribe.useMutation();
+
+  useEffect(() => {
+    if (!pushSupported()) return;
+    let cancelled = false;
+
+    void (async () => {
+      const reg = await navigator.serviceWorker.ready;
+      if (cancelled) return;
+
+      if (enabled) {
+        if (Notification.permission !== "granted") return;
+        const sub =
+          (await reg.pushManager.getSubscription()) ??
+          (await reg.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY!),
+          }));
+        if (cancelled) return;
+        const json = sub.toJSON();
+        if (json.endpoint && json.keys?.p256dh && json.keys?.auth) {
+          saveSub({
+            endpoint: json.endpoint,
+            keys: { p256dh: json.keys.p256dh, auth: json.keys.auth },
+          });
+        }
+        return;
+      }
+
+      // Disabled: drop the local subscription and forget it server-side.
+      const sub = await reg.pushManager.getSubscription();
+      if (!sub) return;
+      const { endpoint } = sub;
+      await sub.unsubscribe();
+      if (!cancelled) dropSub({ endpoint });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled, saveSub, dropSub]);
 }
 
 // ── Completion detection ───────────────────────────────────────────────────────

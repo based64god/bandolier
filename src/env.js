@@ -53,6 +53,15 @@ export const env = createEnv({
     // set, visitors must enter it before reaching anything (the GitHub webhook
     // is exempt — it authenticates via signature). Unset = gate disabled.
     APP_PASSWORD: z.string().optional(),
+    // ── Web Push (VAPID) ──────────────────────────────────────────────────────
+    // Keys for signing background push notifications, so a user is alerted when
+    // their agent finishes even with the app closed. Generate a pair with
+    // `pnpm vapid:generate`; the public half is exposed to the client below.
+    // VAPID_SUBJECT identifies the sender to push services (a mailto: or https:
+    // URL). All three are required together to enable push; unset = push
+    // notifications are skipped (foreground in-tab alerts still work).
+    VAPID_PRIVATE_KEY: z.string().optional(),
+    VAPID_SUBJECT: z.string().optional(),
   },
 
   /**
@@ -65,6 +74,10 @@ export const env = createEnv({
     // page). When set, the repo-config UI links straight to the App's install
     // page; unset = the UI shows generic install guidance instead.
     NEXT_PUBLIC_GITHUB_APP_SLUG: z.string().optional(),
+    // The VAPID public key, used as the `applicationServerKey` when the browser
+    // subscribes to push. Must match VAPID_PRIVATE_KEY above; unset = the client
+    // never attempts a push subscription.
+    NEXT_PUBLIC_VAPID_PUBLIC_KEY: z.string().optional(),
   },
 
   /**
@@ -88,7 +101,10 @@ export const env = createEnv({
     GITHUB_APP_CLIENT_ID: process.env.GITHUB_APP_CLIENT_ID,
     GITHUB_APP_CLIENT_SECRET: process.env.GITHUB_APP_CLIENT_SECRET,
     APP_PASSWORD: process.env.APP_PASSWORD,
+    VAPID_PRIVATE_KEY: process.env.VAPID_PRIVATE_KEY,
+    VAPID_SUBJECT: process.env.VAPID_SUBJECT,
     NEXT_PUBLIC_GITHUB_APP_SLUG: process.env.NEXT_PUBLIC_GITHUB_APP_SLUG,
+    NEXT_PUBLIC_VAPID_PUBLIC_KEY: process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY,
   },
   /**
    * Run `build` or `dev` with `SKIP_ENV_VALIDATION` to skip env validation. This is especially

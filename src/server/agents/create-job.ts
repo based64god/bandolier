@@ -311,8 +311,8 @@ export interface JobSpec {
 /**
  * The pod's resource requests/limits for a run's (validated) compute config.
  * Limits come from the spec, falling back to the built-in defaults; requests
- * keep the modest baseline the scheduler bin-packs on, clamped to the limit
- * (Kubernetes rejects a pod whose request exceeds its limit).
+ * are half the limit, so the scheduler's bin-packing footprint scales with
+ * the run's configured size while still leaving burst headroom.
  */
 export function podResources(compute?: ComputeSpec): {
   requests: { cpu: string; memory: string };
@@ -330,12 +330,10 @@ export function podResources(compute?: ComputeSpec): {
 
   const cpuLimit = compute?.cpu ?? DEFAULT_CPU_LIMIT;
   const memoryLimit = compute?.memory ?? DEFAULT_MEMORY_LIMIT;
-  const cpuRequest =
-    cpuToMillicores(cpuLimit)! < cpuToMillicores("500m")! ? cpuLimit : "500m";
-  const memoryRequest =
-    memoryToBytes(memoryLimit)! < memoryToBytes("512Mi")!
-      ? memoryLimit
-      : "512Mi";
+  // Emit requests in fixed units (millicores / Mi) so halving any valid limit
+  // stays a whole-number Kubernetes quantity.
+  const cpuRequest = `${Math.ceil(cpuToMillicores(cpuLimit)! / 2)}m`;
+  const memoryRequest = `${Math.ceil(memoryToBytes(memoryLimit)! / 2 / 1024 ** 2)}Mi`;
   return {
     requests: { cpu: cpuRequest, memory: memoryRequest },
     limits: { cpu: cpuLimit, memory: memoryLimit },

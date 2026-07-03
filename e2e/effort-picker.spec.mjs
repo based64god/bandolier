@@ -1,4 +1,4 @@
-// Browser smoke test for the EffortPicker segmented control + Preferred toggle.
+// Browser smoke test for the EffortPicker dropdown + Preferred toggle.
 // Playwright is installed globally in this environment; resolve it locally
 // first, else fall back to the global install.
 //
@@ -34,29 +34,53 @@ const preferred = () => page.getByTestId("preferred").innerText();
 
 await page.goto(`${BASE}/dev/effort-picker`);
 
+// The dropdown trigger is the picker's only closed-state button.
+const trigger = page.getByRole("button").first();
+// Pick a level by opening the dropdown and clicking its row (labelled with the
+// human-facing name); returns once the panel has closed again.
+async function pick(label) {
+  await trigger.click();
+  const search = page.getByPlaceholder("Search effort…");
+  await search.waitFor({ state: "visible", timeout: 5000 });
+  await page.getByRole("button", { name: label, exact: true }).click();
+  await search.waitFor({ state: "hidden", timeout: 5000 });
+}
+
 // ── All five levels + default are selectable ────────────────────────────────
 check("starts on the default level", (await value()) === "default");
 
-for (const level of ["low", "medium", "high", "xhigh", "max"]) {
-  await page.getByRole("button", { name: level, exact: true }).click();
-  check(`clicking '${level}' selects it`, (await value()) === level);
+for (const [label, level] of [
+  ["Low", "low"],
+  ["Medium", "medium"],
+  ["High", "high"],
+  ["Extra high", "xhigh"],
+  ["Max", "max"],
+]) {
+  await pick(label);
+  check(
+    `selecting '${label}' resolves to '${level}'`,
+    (await value()) === level,
+  );
 }
 
 // ── Preferred toggle pins the current level ──────────────────────────────────
-await page.getByRole("button", { name: "high", exact: true }).click();
+await pick("High");
 await page.getByRole("checkbox").check();
 check("Preferred pins the selected level", (await preferred()) === "high");
 
 // Switching level leaves the old pin until re-toggled (mirrors the modal).
-await page.getByRole("button", { name: "low", exact: true }).click();
+await pick("Low");
 check("changing level keeps the prior pin", (await preferred()) === "high");
 await page.getByRole("checkbox").check();
 check("re-checking re-pins to the new level", (await preferred()) === "low");
 
 // ── Back to default clears the value, disabling the pin ──────────────────────
-await page.getByRole("button", { name: "default", exact: true }).click();
+await pick("Default");
 check("can return to default", (await value()) === "default");
-check("Preferred toggle disabled at default", await page.getByRole("checkbox").isDisabled());
+check(
+  "Preferred toggle disabled at default",
+  await page.getByRole("checkbox").isDisabled(),
+);
 
 await browser.close();
 console.log(`\n${passed} passed, ${failed} failed`);

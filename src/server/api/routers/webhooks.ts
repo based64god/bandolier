@@ -18,6 +18,7 @@ import {
   validateNetworkPolicyYaml,
 } from "~/server/agents/network-policy";
 import { isRepoAdmin } from "~/server/agents/webhook-config";
+import { validateCpuQuantity, validateMemoryQuantity } from "~/lib/compute";
 import { EFFORT_LEVELS } from "~/lib/effort";
 import { type db } from "~/server/db";
 import { repoWebhookConfig } from "~/server/db/schema";
@@ -88,6 +89,8 @@ export const webhooksRouter = createTRPCRouter({
           agentImage: repoWebhookConfig.agentImage,
           defaultWebhookModel: repoWebhookConfig.defaultWebhookModel,
           defaultWebhookEffort: repoWebhookConfig.defaultWebhookEffort,
+          computeCpu: repoWebhookConfig.computeCpu,
+          computeMemory: repoWebhookConfig.computeMemory,
           systemPrompt: repoWebhookConfig.systemPrompt,
           allowPrivateEgress: repoWebhookConfig.allowPrivateEgress,
           allowAllPortsEgress: repoWebhookConfig.allowAllPortsEgress,
@@ -106,6 +109,10 @@ export const webhooksRouter = createTRPCRouter({
         agentImage: row?.agentImage ?? "",
         defaultWebhookModel: row?.defaultWebhookModel ?? null,
         defaultWebhookEffort: row?.defaultWebhookEffort ?? null,
+        // Default agent compute for the repo ("" = none; fall through to the
+        // user default, then the built-in limit).
+        computeCpu: row?.computeCpu ?? "",
+        computeMemory: row?.computeMemory ?? "",
         systemPrompt: row?.systemPrompt ?? "",
         // Network-policy egress toggles (both off unless a row turns them on).
         allowPrivateEgress,
@@ -257,6 +264,44 @@ export const webhooksRouter = createTRPCRouter({
       const value = input.effort ? input.effort : null;
       await upsertRepoConfig(ctx.db, input.repoFullName, ctx.session.user.id, {
         defaultWebhookEffort: value,
+      });
+      return { success: true };
+    }),
+
+  // Set (or clear, with blank strings) the repo's default agent compute (CPU /
+  // memory limit), applied to every run for the repo unless a per-task
+  // override (deploy form, or an issue's `cpu:`/`memory:` label) or a
+  // preferred user default wins. Validated as Kubernetes quantities; partial
+  // upsert so it doesn't clobber other config.
+  setDefaultCompute: protectedProcedure
+    .input(
+      z.object({
+        repoFullName: z.string().min(1),
+        cpu: z.string(),
+        memory: z.string(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await requireRepoAdmin(ctx, input.repoFullName);
+      let cpu: string | null = null;
+      if (input.cpu.trim()) {
+        const v = validateCpuQuantity(input.cpu);
+        if (!v.valid) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: v.error });
+        }
+        cpu = v.normalized;
+      }
+      let memory: string | null = null;
+      if (input.memory.trim()) {
+        const v = validateMemoryQuantity(input.memory);
+        if (!v.valid) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: v.error });
+        }
+        memory = v.normalized;
+      }
+      await upsertRepoConfig(ctx.db, input.repoFullName, ctx.session.user.id, {
+        computeCpu: cpu,
+        computeMemory: memory,
       });
       return { success: true };
     }),

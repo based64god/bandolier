@@ -28,6 +28,7 @@ import {
   postIssueCommentReturningId,
   postIssueCommentWithFallback,
 } from "~/server/agents/github-issues";
+import { mergeCompute, resolveCompute } from "~/server/agents/compute";
 import { resolveKubeconfig } from "~/server/agents/kubeconfig";
 import {
   getUserRepoPermission,
@@ -57,6 +58,7 @@ import {
   buildResumeUserMessage,
   makeIssueBranch,
 } from "~/lib/issue-prompt";
+import { parseCpuQuery, parseMemoryQuery } from "~/lib/compute";
 import { parseEffortQuery, providerSupportsEffort } from "~/lib/effort";
 
 // ── Webhook signature verification ────────────────────────────────────────────
@@ -138,31 +140,24 @@ interface InstallationPayload {
   repositories_removed?: { full_name: string }[];
 }
 
-// An issue label of the form `model:<query>` lets the author pick the model for
-// that issue's agent — the query is fuzzy-resolved against the available models.
+// Issue labels of the form `<prefix><value>` let the author configure that
+// issue's agent per issue:
+//   - `model:<query>`  — fuzzy-resolved against the available models.
+//   - `effort:<level>` — reasoning effort (low|medium|high|xhigh|max); Claude
+//                        runs only, ignored otherwise.
+//   - `cpu:<qty>` / `memory:<qty>` — the agent pod's compute limits, as
+//                        Kubernetes quantities (e.g. cpu:4, memory:8Gi).
 const MODEL_LABEL_PREFIX = "model:";
-
-function modelLabelQuery(labels: { name: string }[]): string | null {
-  for (const l of labels) {
-    const name = l.name.trim();
-    if (name.toLowerCase().startsWith(MODEL_LABEL_PREFIX)) {
-      const q = name.slice(MODEL_LABEL_PREFIX.length).trim();
-      if (q) return q;
-    }
-  }
-  return null;
-}
-
-// An issue label of the form `effort:<level>` lets the author pick the reasoning
-// effort for that issue's Claude agent (low|medium|high|xhigh|max). Mirrors the
-// `model:` label; only meaningful on Claude runs and ignored otherwise.
 const EFFORT_LABEL_PREFIX = "effort:";
+const CPU_LABEL_PREFIX = "cpu:";
+const MEMORY_LABEL_PREFIX = "memory:";
 
-function effortLabelQuery(labels: { name: string }[]): string | null {
+/** The value of the first label carrying the given prefix, or null. */
+function labelQuery(labels: { name: string }[], prefix: string): string | null {
   for (const l of labels) {
     const name = l.name.trim();
-    if (name.toLowerCase().startsWith(EFFORT_LABEL_PREFIX)) {
-      const q = name.slice(EFFORT_LABEL_PREFIX.length).trim();
+    if (name.toLowerCase().startsWith(prefix)) {
+      const q = name.slice(prefix.length).trim();
       if (q) return q;
     }
   }
@@ -232,15 +227,15 @@ async function resolveWebhookRun(opts: {
   //      the latest Claude Opus), letting the author pick per issue.
   //   2. The repo's configured default webhook model, when still available.
   //   3. The provider's sensible default (prefers Sonnet).
-  const labelQuery = modelLabelQuery(labels);
+  const modelQuery = labelQuery(labels, MODEL_LABEL_PREFIX);
   let model: string | undefined;
-  if (labelQuery) {
-    model = fuzzyPickModel(labelQuery, models);
+  if (modelQuery) {
+    model = fuzzyPickModel(modelQuery, models);
     console.log(
       model
         ? "[bandolier:webhook] model selected from issue label"
         : "[bandolier:webhook] no model matched issue label",
-      { ...logCtx, label: `${MODEL_LABEL_PREFIX}${labelQuery}`, model },
+      { ...logCtx, label: `${MODEL_LABEL_PREFIX}${modelQuery}`, model },
     );
   }
   if (!model && opts.defaultModel) {
@@ -272,7 +267,7 @@ async function resolveWebhookRun(opts: {
   // ignored (falls through to the default, then the CLI default).
   let effort: string | undefined;
   if (provider && providerSupportsEffort(provider)) {
-    const effortQuery = effortLabelQuery(labels);
+    const effortQuery = labelQuery(labels, EFFORT_LABEL_PREFIX);
     const labelEffort = effortQuery ? parseEffortQuery(effortQuery) : undefined;
     const repoEffort = opts.defaultEffort
       ? parseEffortQuery(opts.defaultEffort)
@@ -290,6 +285,41 @@ async function resolveWebhookRun(opts: {
         source: labelEffort ? "issue label" : "repo default",
       });
     }
+  }
+
+  // Resolve the run's compute (CPU / memory limit). Precedence mirrors the
+  // model's: a `cpu:<qty>` / `memory:<qty>` issue label overrides the
+  // repo/user default (resolveCompute orders those by the repo's
+  // prefer-credentials flag); an invalid label value is ignored with a log.
+  const cpuQuery = labelQuery(labels, CPU_LABEL_PREFIX);
+  const memoryQuery = labelQuery(labels, MEMORY_LABEL_PREFIX);
+  const labelCpu = cpuQuery ? parseCpuQuery(cpuQuery) : undefined;
+  const labelMemory = memoryQuery ? parseMemoryQuery(memoryQuery) : undefined;
+  if (cpuQuery && !labelCpu) {
+    console.log("[bandolier:webhook] invalid cpu issue label ignored", {
+      ...logCtx,
+      label: `${CPU_LABEL_PREFIX}${cpuQuery}`,
+    });
+  }
+  if (memoryQuery && !labelMemory) {
+    console.log("[bandolier:webhook] invalid memory issue label ignored", {
+      ...logCtx,
+      label: `${MEMORY_LABEL_PREFIX}${memoryQuery}`,
+    });
+  }
+  const compute = mergeCompute(
+    await resolveCompute(db, linked.userId, repoFullName),
+    { cpu: labelCpu, memory: labelMemory },
+  );
+  if (compute) {
+    console.log("[bandolier:webhook] compute selected", {
+      ...logCtx,
+      ...compute,
+      source:
+        (labelCpu ?? labelMemory)
+          ? "issue label + defaults"
+          : "repo/user default",
+    });
   }
 
   const awsCredentials = provider === "bedrock" ? resolved.aws : null;
@@ -354,6 +384,7 @@ async function resolveWebhookRun(opts: {
     linked,
     model,
     effort,
+    compute,
     awsCredentials,
     anthropicApiKey,
     anthropicOauthToken,
@@ -407,6 +438,7 @@ async function handleIssueOpened(
     linked,
     model,
     effort,
+    compute,
     awsCredentials,
     anthropicApiKey,
     anthropicOauthToken,
@@ -469,6 +501,7 @@ async function handleIssueOpened(
     branch: repository.default_branch,
     model,
     effort,
+    compute,
     // PR title/description are written out-of-band of the task model by a cheap
     // same-provider writer (latest Sonnet for Claude, latest GPT mini for OpenAI).
     prWriterModel,
@@ -702,6 +735,7 @@ async function handleIssueComment(
     linked,
     model,
     effort,
+    compute,
     awsCredentials,
     anthropicApiKey,
     anthropicOauthToken,
@@ -786,6 +820,7 @@ async function handleIssueComment(
     parentDisplayName: parent.displayName,
     model,
     effort,
+    compute,
     prWriterModel,
     // Only true issues enter the harness's issue mode — a PR number isn't
     // viewable through `gh issue view`, and the PR link comes from the run's

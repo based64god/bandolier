@@ -716,6 +716,90 @@ function KubeconfigSection() {
   );
 }
 
+function ComputeSection() {
+  const utils = api.useUtils();
+  const { data: status } = api.account.computeStatus.useQuery();
+  // null = untouched; the stored value (or blank) shows until the user types.
+  const [cpu, setCpu] = useState<string | null>(null);
+  const [memory, setMemory] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  const cpuValue = cpu ?? status?.cpu ?? "";
+  const memoryValue = memory ?? status?.memory ?? "";
+  const dirty = cpu !== null || memory !== null;
+
+  const save = api.account.setCompute.useMutation({
+    onSuccess: () => {
+      void utils.account.computeStatus.invalidate();
+      void utils.agents.deployDefaults.invalidate();
+      setCpu(null);
+      setMemory(null);
+      setSaved(true);
+    },
+  });
+
+  return (
+    <div className="space-y-3 border-t border-white/10 pt-6">
+      <h3 className="text-sm font-semibold text-emerald-300">Agent compute</h3>
+      <p className="text-xs text-white/40">
+        Default CPU / memory limit for the agents you deploy, as Kubernetes
+        quantities (e.g. <code className="text-white/60">4</code> CPUs,{" "}
+        <code className="text-white/60">8Gi</code> memory). A repository can set
+        its own default, and each task can override both. Blank = the built-in
+        limit.
+      </p>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          setSaved(false);
+          save.mutate({ cpu: cpuValue, memory: memoryValue });
+        }}
+        className="flex items-end gap-3"
+      >
+        <div className="space-y-1.5">
+          <label className="block text-xs font-medium text-white/60">CPU</label>
+          <input
+            type="text"
+            value={cpuValue}
+            onChange={(e) => {
+              setCpu(e.target.value);
+              setSaved(false);
+            }}
+            placeholder="2"
+            className="w-28 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 focus:border-emerald-500/50 focus:outline-none"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className="block text-xs font-medium text-white/60">
+            Memory
+          </label>
+          <input
+            type="text"
+            value={memoryValue}
+            onChange={(e) => {
+              setMemory(e.target.value);
+              setSaved(false);
+            }}
+            placeholder="2Gi"
+            className="w-28 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 focus:border-emerald-500/50 focus:outline-none"
+          />
+        </div>
+        <button
+          type="submit"
+          disabled={save.isPending || !dirty}
+          className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-black hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {save.isPending ? "Saving…" : "Save"}
+        </button>
+      </form>
+      <StatusFeedback
+        error={save.error?.message}
+        ok={saved ? "Saved ✓" : null}
+      />
+    </div>
+  );
+}
+
 function KubeconfigSetupHelp() {
   const [copied, setCopied] = useState(false);
 
@@ -982,6 +1066,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           <div className="border-t border-white/10" />
           <AwsSection />
           <KubeconfigSection />
+          <ComputeSection />
           <ApiKeysSection />
         </div>
       </div>

@@ -47,7 +47,15 @@ interface JobCall {
             runAsGroup: number;
             fsGroup: number;
           };
-          containers: { name: string; image: string; env: EnvVar[] }[];
+          containers: {
+            name: string;
+            image: string;
+            env: EnvVar[];
+            resources: {
+              requests: { cpu: string; memory: string };
+              limits: { cpu: string; memory: string };
+            };
+          }[];
         };
       };
     };
@@ -181,6 +189,7 @@ const {
   createAgentJob,
   ensureNamespace,
   ensureServiceAccount,
+  podResources,
   DEFAULT_HARNESS_IMAGE,
   DEFAULT_MAX_TURNS,
   JOB_TTL_SECONDS,
@@ -599,6 +608,61 @@ describe("createAgentJob", () => {
       expect(jobCall().body.spec.template.spec.containers[0]!.image).toBe(
         "ghcr.io/acme/harness:1",
       );
+    });
+
+    it("applies the built-in resource limits when the spec carries no compute", async () => {
+      await createAgentJob(baseSpec());
+      expect(
+        jobCall().body.spec.template.spec.containers[0]!.resources,
+      ).toEqual({
+        requests: { cpu: "500m", memory: "512Mi" },
+        limits: { cpu: "2", memory: "2Gi" },
+      });
+    });
+
+    it("applies the spec's compute as the pod's limits", async () => {
+      await createAgentJob(baseSpec({ compute: { cpu: "4", memory: "8Gi" } }));
+      expect(
+        jobCall().body.spec.template.spec.containers[0]!.resources,
+      ).toEqual({
+        requests: { cpu: "500m", memory: "512Mi" },
+        limits: { cpu: "4", memory: "8Gi" },
+      });
+    });
+
+    it("rejects a malformed compute quantity instead of creating the job", async () => {
+      await expect(
+        createAgentJob(baseSpec({ compute: { memory: "lots" } })),
+      ).rejects.toThrow(/Invalid memory quantity/);
+      expect(createNamespacedJob).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("podResources", () => {
+    it("keeps the baseline requests under a larger limit", () => {
+      expect(podResources({ cpu: "4", memory: "8Gi" })).toEqual({
+        requests: { cpu: "500m", memory: "512Mi" },
+        limits: { cpu: "4", memory: "8Gi" },
+      });
+    });
+
+    it("clamps requests down to a limit below the baseline (k8s rejects request > limit)", () => {
+      expect(podResources({ cpu: "250m", memory: "256Mi" })).toEqual({
+        requests: { cpu: "250m", memory: "256Mi" },
+        limits: { cpu: "250m", memory: "256Mi" },
+      });
+    });
+
+    it("resolves each field independently", () => {
+      expect(podResources({ memory: "16Gi" })).toEqual({
+        requests: { cpu: "500m", memory: "512Mi" },
+        limits: { cpu: "2", memory: "16Gi" },
+      });
+    });
+
+    it("throws on out-of-bounds quantities", () => {
+      expect(() => podResources({ cpu: "999" })).toThrow(/CPU must be/);
+      expect(() => podResources({ memory: "2Ti" })).toThrow(/Memory must be/);
     });
   });
 

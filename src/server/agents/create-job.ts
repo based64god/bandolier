@@ -1,5 +1,14 @@
 import type { AwsCredentials } from "~/server/agents/aws";
 import { env } from "~/env";
+import {
+  cpuToMillicores,
+  DEFAULT_CPU_LIMIT,
+  DEFAULT_MEMORY_LIMIT,
+  memoryToBytes,
+  validateCpuQuantity,
+  validateMemoryQuantity,
+  type ComputeSpec,
+} from "~/lib/compute";
 import { ingestToken } from "~/lib/ingest";
 import { SPAWNED_BY_LABEL, spawnedByLabelValue } from "~/server/agents/labels";
 import {
@@ -283,12 +292,54 @@ export interface JobSpec {
    */
   repoSystemPrompt?: string;
   /**
+   * CPU / memory limit for the agent pod, resolved by the caller from the
+   * per-task override and the repo/user defaults (see resolveCompute). Unset
+   * fields use the built-in DEFAULT_CPU_LIMIT / DEFAULT_MEMORY_LIMIT. Values
+   * are re-validated here so an unvalidated caller can't create a pod with a
+   * malformed or out-of-bounds quantity.
+   */
+  compute?: ComputeSpec;
+  /**
    * Per-repo agent NetworkPolicy configuration (admin-set in repo config):
    * egress-loosening toggles, or a raw custom policy YAML that replaces the
    * built-in policy entirely. Applied to the namespace's policy before the Job
    * is created. Unset = the default isolated egress.
    */
   networkPolicy?: NetworkPolicyOptions;
+}
+
+/**
+ * The pod's resource requests/limits for a run's (validated) compute config.
+ * Limits come from the spec, falling back to the built-in defaults; requests
+ * keep the modest baseline the scheduler bin-packs on, clamped to the limit
+ * (Kubernetes rejects a pod whose request exceeds its limit).
+ */
+export function podResources(compute?: ComputeSpec): {
+  requests: { cpu: string; memory: string };
+  limits: { cpu: string; memory: string };
+} {
+  for (const [value, validate] of [
+    [compute?.cpu, validateCpuQuantity],
+    [compute?.memory, validateMemoryQuantity],
+  ] as const) {
+    if (value !== undefined) {
+      const validation = validate(value);
+      if (!validation.valid) throw new Error(validation.error);
+    }
+  }
+
+  const cpuLimit = compute?.cpu ?? DEFAULT_CPU_LIMIT;
+  const memoryLimit = compute?.memory ?? DEFAULT_MEMORY_LIMIT;
+  const cpuRequest =
+    cpuToMillicores(cpuLimit)! < cpuToMillicores("500m")! ? cpuLimit : "500m";
+  const memoryRequest =
+    memoryToBytes(memoryLimit)! < memoryToBytes("512Mi")!
+      ? memoryLimit
+      : "512Mi";
+  return {
+    requests: { cpu: cpuRequest, memory: memoryRequest },
+    limits: { cpu: cpuLimit, memory: memoryLimit },
+  };
 }
 
 /** Per-job secret holding the acting user's credentials (GitHub / AWS / Anthropic). */
@@ -576,10 +627,7 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
                 image: spec.agentImage ?? DEFAULT_HARNESS_IMAGE,
                 imagePullPolicy: "Always",
                 env: envVars,
-                resources: {
-                  requests: { cpu: "500m", memory: "512Mi" },
-                  limits: { cpu: "2", memory: "2Gi" },
-                },
+                resources: podResources(spec.compute),
                 volumeMounts: [{ name: "workspace", mountPath: "/workspace" }],
               },
             ],

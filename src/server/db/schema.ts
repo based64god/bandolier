@@ -229,6 +229,14 @@ export const repoWebhookConfig = pgTable("repo_webhook_config", {
   // `effort:<level>` label overrides this per issue. Ignored for non-Claude
   // providers (OpenAI/Gemini), whose CLIs don't take an effort flag.
   defaultWebhookEffort: text("default_webhook_effort"),
+  // Optional default compute (CPU / memory limit) for agents run for this repo,
+  // as Kubernetes quantities (e.g. "4"/"4Gi"). Applies to every run for the
+  // repo (dashboard, issue, and webhook) the way agentImage does; ordered
+  // against the user's own default by preferRepoCredentials, and overridden
+  // per task by the deploy form or an issue's `cpu:<qty>` / `memory:<qty>`
+  // label. Null = fall through to the user default, then the built-in limit.
+  computeCpu: text("compute_cpu"),
+  computeMemory: text("compute_memory"),
   // Optional repo-attached system prompt: a blanket instruction appended to the
   // system prompt of every agent run for this repo (dashboard, issue, and
   // webhook; all providers and modes), letting admins set repo-wide guidance —
@@ -375,6 +383,26 @@ export const apiKey = pgTable("api_key", {
   expiresAt: timestamp("expires_at"),
   createdAt: timestamp("created_at")
     .$defaultFn(() => /* @__PURE__ */ new Date())
+    .notNull(),
+});
+
+// A user's default compute (CPU / memory limit) for the agents they deploy, as
+// Kubernetes quantities. Resolved like the user kubeconfig: a repo's own
+// default can win per its prefer-credentials flag, and a per-task override
+// (deploy form, or issue `cpu:`/`memory:` labels) beats both. Either field may
+// be null — set just a memory default and CPU falls through to the built-in.
+export const userCompute = pgTable("user_compute", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+  cpu: text("cpu"),
+  memory: text("memory"),
+  createdAt: timestamp("created_at")
+    .$defaultFn(() => /* @__PURE__ */ new Date())
+    .notNull(),
+  updatedAt: timestamp("updated_at")
+    .$defaultFn(() => /* @__PURE__ */ new Date())
+    .$onUpdate(() => new Date())
     .notNull(),
 });
 

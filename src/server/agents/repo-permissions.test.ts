@@ -55,9 +55,24 @@ describe("getUserRepoPermission", () => {
     expect(await getUserRepoPermission("tok", "o/r", "carol")).toBe("admin");
   });
 
+  it("normalizes the triage permission level", async () => {
+    mockFetchOnce({ permission: "triage" });
+    expect(await getUserRepoPermission("tok", "o/r", "gina")).toBe("triage");
+  });
+
+  it("normalizes the read permission level", async () => {
+    mockFetchOnce({ permission: "read" });
+    expect(await getUserRepoPermission("tok", "o/r", "hana")).toBe("read");
+  });
+
   it("maps an unknown permission string to none", async () => {
     mockFetchOnce({ permission: "something-custom" });
     expect(await getUserRepoPermission("tok", "o/r", "dave")).toBe("none");
+  });
+
+  it("returns none when the response carries neither field", async () => {
+    mockFetchOnce({});
+    expect(await getUserRepoPermission("tok", "o/r", "ivan")).toBe("none");
   });
 
   it("fails closed (none) on an API error", async () => {

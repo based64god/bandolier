@@ -31,6 +31,15 @@ describe("parseTokenMarkerPayload", () => {
     });
   });
 
+  it("floors fractional values", () => {
+    expect(parseTokenMarkerPayload('{"input_tokens":3.9}')).toEqual({
+      inputTokens: 3,
+      outputTokens: 0,
+      cacheReadInputTokens: 0,
+      cacheCreationInputTokens: 0,
+    });
+  });
+
   it("coerces negative / non-numeric fields to zero", () => {
     expect(
       parseTokenMarkerPayload('{"input_tokens":-3,"output_tokens":"x"}'),
@@ -67,6 +76,14 @@ describe("parseTokenUsageFromLogs", () => {
     });
   });
 
+  it("returns null when the last marker is garbage, even if an earlier one parses", () => {
+    // Last-marker-wins is absolute: a corrupt final marker yields null rather
+    // than falling back to the stale earlier total.
+    const logs =
+      'BANDOLIER_TOKENS={"input_tokens":5}\n' + "BANDOLIER_TOKENS=not-json\n";
+    expect(parseTokenUsageFromLogs(logs)).toBeNull();
+  });
+
   it("handles a marker at end of buffer with no trailing newline", () => {
     expect(
       parseTokenUsageFromLogs('BANDOLIER_TOKENS={"output_tokens":4}'),
@@ -99,8 +116,12 @@ describe("formatTokens", () => {
     [1234, "1.2K"],
     [12_345, "12.3K"],
     [150_000, "150K"],
+    // Boundary quirk: 999_999 rounds within the K branch to "1000K", not "1M".
+    [999_999, "1000K"],
     [1_000_000, "1M"],
     [1_500_000, "1.5M"],
+    [100_000_000, "100M"],
+    [150_000_000, "150M"],
   ])("formats %i as %s", (n, want) => {
     expect(formatTokens(n)).toBe(want);
   });

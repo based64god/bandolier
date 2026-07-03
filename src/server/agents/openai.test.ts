@@ -1,6 +1,30 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { isChatModel, validateCodexAuthJson } from "~/server/agents/openai";
+import type { db as Database } from "~/server/db";
+import {
+  getUserOpenaiCredentials,
+  isChatModel,
+  listOpenaiModels,
+  validateCodexAuthJson,
+  validateOpenaiKey,
+} from "~/server/agents/openai";
+
+// Minimal duck-typed drizzle select chain: resolves `rows` for any query.
+function fakeDb(
+  rows: { apiKey: string | null; codexAuthJson: string | null }[],
+): typeof Database {
+  return {
+    select: () => ({
+      from: () => ({
+        where: () => ({ limit: () => Promise.resolve(rows) }),
+      }),
+    }),
+  } as unknown as typeof Database;
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe("isChatModel", () => {
   it("keeps GPT chat families", () => {
@@ -103,5 +127,133 @@ describe("validateCodexAuthJson", () => {
     const r = validateCodexAuthJson("{}");
     expect(r.valid).toBe(false);
     expect(r.error).toMatch(/codex login/);
+  });
+});
+
+describe("validateOpenaiKey", () => {
+  it("is valid on a 200 from GET /v1/models", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(validateOpenaiKey("sk-test")).resolves.toEqual({
+      valid: true,
+    });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://api.openai.com/v1/models");
+    expect((init.headers as Record<string, string>).Authorization).toBe(
+      "Bearer sk-test",
+    );
+  });
+
+  it("maps 401 to a bad-key message", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: false, status: 401 }),
+    );
+    await expect(validateOpenaiKey("sk-bad")).resolves.toEqual({
+      valid: false,
+      error: "API key is invalid.",
+    });
+  });
+
+  it("maps other statuses to a generic API error", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: false, status: 500 }),
+    );
+    await expect(validateOpenaiKey("sk-test")).resolves.toEqual({
+      valid: false,
+      error: "OpenAI API error: 500",
+    });
+  });
+
+  it("surfaces network Error messages", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockRejectedValue(new Error("ECONNREFUSED")),
+    );
+    await expect(validateOpenaiKey("sk-test")).resolves.toEqual({
+      valid: false,
+      error: "ECONNREFUSED",
+    });
+  });
+
+  it("falls back to a generic message on non-Error failures", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue("boom"));
+    await expect(validateOpenaiKey("sk-test")).resolves.toEqual({
+      valid: false,
+      error: "Could not reach OpenAI API.",
+    });
+  });
+});
+
+describe("getUserOpenaiCredentials", () => {
+  it("returns the stored credentials row", async () => {
+    const db = fakeDb([{ apiKey: "sk-x", codexAuthJson: null }]);
+    await expect(getUserOpenaiCredentials(db, "user-1")).resolves.toEqual({
+      apiKey: "sk-x",
+      codexAuthJson: null,
+    });
+  });
+
+  it("returns nulls when the user has no stored credentials", async () => {
+    await expect(
+      getUserOpenaiCredentials(fakeDb([]), "user-1"),
+    ).resolves.toEqual({ apiKey: null, codexAuthJson: null });
+  });
+});
+
+describe("listOpenaiModels", () => {
+  it("throws on a non-ok response", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 500,
+        statusText: "Internal Server Error",
+      }),
+    );
+    await expect(listOpenaiModels("sk-test")).rejects.toThrow(
+      "OpenAI API 500: Internal Server Error",
+    );
+  });
+
+  it("keeps only chat models, sorted by label", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          data: [
+            { id: "o3" },
+            { id: "gpt-4o" },
+            { id: "whisper-1" },
+            { id: "text-embedding-3-large" },
+            { id: "dall-e-3" },
+          ],
+        }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    // Non-chat endpoints are dropped; the survivors sort by label.
+    await expect(listOpenaiModels("sk-test")).resolves.toEqual([
+      { id: "gpt-4o", label: "gpt-4o" },
+      { id: "o3", label: "o3" },
+    ]);
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect((init.headers as Record<string, string>).Authorization).toBe(
+      "Bearer sk-test",
+    );
+  });
+
+  it("returns an empty list for an empty data array", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ data: [] }),
+      }),
+    );
+    await expect(listOpenaiModels("sk-test")).resolves.toEqual([]);
   });
 });

@@ -210,8 +210,8 @@ async function inspectPod(
 }
 
 /**
- * Resolves the kubeconfig to use (server-wide, repo-scoped, or the user's own —
- * see resolveKubeconfig), throwing if none is set. Pass `repoFullName` so a
+ * Resolves the kubeconfig to use (repo-scoped or the user's own — see
+ * resolveKubeconfig), throwing if none is set. Pass `repoFullName` so a
  * repo's shared cluster is considered for repo-scoped views.
  */
 async function requireKubeconfig(
@@ -1279,8 +1279,8 @@ export const agentsRouter = createTRPCRouter({
       // non-member can't deploy under another team's kubeconfig/cloud creds.
       await assertRepoAccess(ctx.db, userId, input.repoFullName);
 
-      // Resolve the cluster: server-wide, then repo-scoped vs. the user's own
-      // per the repo's prefer-credentials flag.
+      // Resolve the cluster: repo-scoped vs. the user's own per the repo's
+      // prefer-credentials flag.
       const kubeconfig = await requireKubeconfig(
         ctx.db,
         userId,

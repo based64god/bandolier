@@ -26,24 +26,27 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reportsDirectory: "./coverage",
-      reporter: ["text", "html", "lcov"],
+      // json-summary feeds scripts/coverage-badge.mjs, which CI publishes to
+      // the `badges` branch for the README's coverage badge.
+      reporter: ["text", "html", "lcov", "json-summary"],
       // Only the modules under test carry meaningful coverage; the broader app
-      // (React components, DB/K8s/network glue) is out of scope for unit tests.
+      // (React components, tRPC routers, DB glue) is out of scope for unit
+      // tests. Test files themselves are excluded by vitest's defaults.
       include: [
         "src/lib/**/*.ts",
-        "src/server/agents/labels.ts",
-        "src/server/agents/namespace.ts",
-        "src/server/agents/aws.ts",
-        "src/server/agents/github-token.ts",
-        "src/server/agents/models.ts",
-        "src/server/agents/openai.ts",
-        "src/server/agents/gemini.ts",
-        "src/server/agents/resolve-credentials.ts",
-        "src/server/agents/repo-permissions.ts",
+        "src/proxy.ts",
+        "src/server/agents/**/*.ts",
         "src/server/api/rest.ts",
-        "src/app/dashboard/_components/parse-aws.ts",
+        "src/server/k8s/client.ts",
         "src/app/dashboard/_components/agent-ui.ts",
         "src/app/dashboard/_components/log-segments.ts",
+        "src/app/dashboard/_components/notifications.ts",
+        "src/app/dashboard/_components/parse-aws.ts",
+        "src/app/dashboard/_components/preferred-effort.ts",
+        "src/app/dashboard/_components/preferred-model.ts",
+        "src/app/dashboard/_components/recent-repos.ts",
+        "src/app/dashboard/_components/slash-commands.ts",
+        "src/app/dashboard/_components/view-prefs.ts",
       ],
     },
   },

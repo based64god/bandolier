@@ -1,5 +1,8 @@
 # Bandolier
 
+[![CI](https://github.com/based64god/bandolier/actions/workflows/ci.yml/badge.svg)](https://github.com/based64god/bandolier/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fbased64god%2Fbandolier%2Fbadges%2Fcoverage.json)](https://github.com/based64god/bandolier/actions/workflows/ci.yml)
+
 Bandolier is a web app for running [Claude Code](https://www.anthropic.com/claude-code) agents as Kubernetes Jobs. You sign in with GitHub, point an agent at a repository or an issue, and Bandolier spins up an isolated pod that clones the repo, runs Claude Code non-interactively, and opens a pull request with the result. You watch progress live from a dashboard.
 
 Agents can be launched two ways:

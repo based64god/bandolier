@@ -664,6 +664,13 @@ describe("createAgentJob", () => {
       });
     });
 
+    it("reads a bare memory number as Gi", () => {
+      expect(podResources({ memory: "8" })).toEqual({
+        requests: { cpu: "1000m", memory: "4096Mi" },
+        limits: { cpu: "2", memory: "8Gi" },
+      });
+    });
+
     it("throws on out-of-bounds quantities", () => {
       expect(() => podResources({ cpu: "999" })).toThrow(/CPU must be/);
       expect(() => podResources({ memory: "2Ti" })).toThrow(/Memory must be/);

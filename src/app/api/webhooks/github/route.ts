@@ -39,9 +39,7 @@ import {
   fuzzyPickModel,
   listModelsForUser,
   pickDefaultModel,
-  pickLatestGeminiFlash,
-  pickLatestGptMini,
-  pickLatestSonnet,
+  pickPrWriterModel,
 } from "~/server/agents/models";
 import { repoToNamespace } from "~/server/agents/namespace";
 import { resolveModelCredentials } from "~/server/agents/resolve-credentials";
@@ -259,7 +257,8 @@ async function resolveWebhookRun(opts: {
   // Route credentials by the chosen model's provider (mirrors the deploy path).
   // A model is only ever listed when its provider's credentials resolved, so the
   // matching set is present here.
-  const provider = models.find((m) => m.id === model)?.provider;
+  const selectedModel = models.find((m) => m.id === model);
+  const provider = selectedModel?.provider;
 
   // Resolve the reasoning effort, but only for a Claude provider — the OpenAI and
   // Gemini CLIs don't take it. Precedence mirrors the model's: an `effort:<level>`
@@ -371,14 +370,10 @@ async function resolveWebhookRun(opts: {
     return null;
   }
 
-  // Out-of-band PR writer from the same provider as the chosen model: the latest
-  // Sonnet for Claude, the latest GPT mini for OpenAI, the latest Flash for Gemini.
-  const prWriterModel =
-    provider === "openai"
-      ? pickLatestGptMini(models)
-      : provider === "gemini"
-        ? pickLatestGeminiFlash(models)
-        : pickLatestSonnet(models);
+  // Out-of-band PR writer from the same provider AND credential kind as the chosen
+  // model (the latest Sonnet for Claude, GPT mini for OpenAI, Flash for Gemini),
+  // picked only from the models the job's own credentials serve.
+  const prWriterModel = pickPrWriterModel(models, selectedModel);
 
   return {
     linked,

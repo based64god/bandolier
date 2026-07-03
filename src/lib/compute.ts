@@ -23,8 +23,9 @@ export const DEFAULT_MEMORY_LIMIT = "2Gi";
 
 // Bounds on what a single agent pod may claim. The ceilings bound typos and
 // abuse (a "memory:2000Gi" label must not park an unschedulable pod or eat the
-// cluster); the memory floor catches unit mistakes like "512" (bytes) or
-// "4M" — no harness run survives under 128Mi.
+// cluster); the memory floor catches unit mistakes like "4M" or "64Mi" — no
+// harness run survives under 128Mi. (A bare number like "4" is not a mistake:
+// validateMemoryQuantity reads it as Gi.)
 const MAX_CPU_MILLIS = 64_000; // 64 cores
 const MIN_MEMORY_BYTES = 128 * 1024 ** 2; // 128Mi
 const MAX_MEMORY_BYTES = 512 * 1024 ** 3; // 512Gi
@@ -93,16 +94,21 @@ export function validateCpuQuantity(value: string): QuantityValidation {
 }
 
 /**
- * Validates a memory limit. Returns the normalized (trimmed) quantity to
- * store, or a human-readable error for the settings/deploy UI.
+ * Validates a memory limit. Returns the normalized quantity to store, or a
+ * human-readable error for the settings/deploy UI. A bare number defaults to
+ * Gi ("4" -> "4Gi"), matching the unit humans mean for a memory limit.
  */
 export function validateMemoryQuantity(value: string): QuantityValidation {
-  const normalized = value.trim();
+  const trimmed = value.trim();
+  // A bare number carries no unit; treat it as Gi — the unit humans mean when
+  // they type "4" for a memory limit — rather than 4 bytes. Anything with an
+  // explicit suffix is left as-is (so "4M" / "64Mi" still fail the floor).
+  const normalized = /^\d+(?:\.\d+)?$/.test(trimmed) ? `${trimmed}Gi` : trimmed;
   const bytes = memoryToBytes(normalized);
   if (bytes === null) {
     return {
       valid: false,
-      error: `Invalid memory quantity "${normalized}" — use a Kubernetes quantity like "512Mi" or "4Gi".`,
+      error: `Invalid memory quantity "${trimmed}" — use a Kubernetes quantity like "512Mi" or "4Gi".`,
     };
   }
   if (bytes < MIN_MEMORY_BYTES || bytes > MAX_MEMORY_BYTES) {

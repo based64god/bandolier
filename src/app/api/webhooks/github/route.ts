@@ -334,10 +334,10 @@ async function resolveWebhookRun(opts: {
 
   const kubeconfig = await resolveKubeconfig(db, linked.userId, repoFullName);
   if (!kubeconfig) {
-    console.log(
-      "[bandolier:webhook] skipped — no server or sender kubeconfig",
-      { ...logCtx, sender: sender.login },
-    );
+    console.log("[bandolier:webhook] skipped — no repo or sender kubeconfig", {
+      ...logCtx,
+      sender: sender.login,
+    });
     return null;
   }
 

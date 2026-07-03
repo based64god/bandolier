@@ -872,8 +872,7 @@ function RepoCredentialsSection({ repoFullName }: { repoFullName: string }) {
               </button>
             </div>
             <p className="text-[11px] text-white/30">
-              A server-wide kubeconfig, when set, always overrides both. The
-              other side is still used as a fallback when the preferred one
+              The other side is still used as a fallback when the preferred one
               isn&apos;t configured.
             </p>
             {setPrefer.error && (

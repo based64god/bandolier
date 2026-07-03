@@ -74,6 +74,15 @@ export function InteractiveRow({
   const [collapsed, setCollapsed] = useState(!running);
   const isDesktop = useIsDesktop();
 
+  // Anchor on the collapsed header row so we can bring the whole session to the
+  // top of the viewport when it opens: its expanded body is ~full-height
+  // (`85vh`), so aligning this row's top with the viewport top makes the session
+  // fill the screen rather than sit half-scrolled with its input off-screen.
+  const rowRef = useRef<HTMLTableRowElement>(null);
+  const revealSession = () => {
+    rowRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
   const awaiting = agent.awaitingInput;
 
   // Poll only while the conversation is open: a collapsed session's waiting
@@ -108,14 +117,27 @@ export function InteractiveRow({
     wasRunning.current = running;
   }, [running]);
 
+  // Whenever the session opens (user click, auto-expand on awaiting, or Tab),
+  // scroll it up so its full-height body fills the viewport. Fires only on the
+  // collapsed→expanded transition — not on the initial mount of an already-open
+  // running session, where `wasCollapsed` starts equal to `collapsed`.
+  const wasCollapsed = useRef(collapsed);
+  useEffect(() => {
+    if (!collapsed && wasCollapsed.current) revealSession();
+    wasCollapsed.current = collapsed;
+  }, [collapsed]);
+
   // Tab-to-cycle: when the dashboard targets this row it bumps focusSignal. We
   // expand so the composer mounts; the signal flows down to the composer, which
   // focuses its textarea once rendered. Guarded on the value *changing* (mirror
   // of the await/running effects above) so it only fires on a fresh request.
+  // Also scroll the session into view: if it was already open the expand effect
+  // above won't fire, so Tab-cycling to an on-screen session still recenters it.
   const lastFocusSignal = useRef(focusSignal);
   useEffect(() => {
     if (focusSignal && focusSignal !== lastFocusSignal.current) {
       setCollapsed(false);
+      revealSession();
     }
     lastFocusSignal.current = focusSignal;
   }, [focusSignal]);
@@ -129,6 +151,7 @@ export function InteractiveRow({
       {/* Collapsed header row — same columns as a non-interactive task. Click
           anywhere (outside links/buttons) to expand the live session. */}
       <tr
+        ref={rowRef}
         onClick={() => setCollapsed((c) => !c)}
         className={`cursor-pointer select-none ${rowTint}`}
       >

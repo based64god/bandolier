@@ -203,6 +203,32 @@ jobs:
             | kubeconform -strict -summary -ignore-missing-schemas \
                 -kubernetes-version 1.29.0 -
 
+  tofu:
+    name: OpenTofu (fmt · validate)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: deploy/terraform/digitalocean
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # No tofu_version → the action installs the latest release.
+      - name: Set up OpenTofu
+        uses: opentofu/setup-opentofu@v1
+
+      - name: Verify formatting
+        run: tofu fmt -check -diff -recursive
+
+      # -backend=false skips state configuration; init is only needed to fetch
+      # the providers (pinned by .terraform.lock.hcl) so validate can
+      # type-check resource schemas. No cloud credentials are used.
+      - name: Init
+        run: tofu init -backend=false
+
+      - name: Validate
+        run: tofu validate -no-color
+
   db-migrate:
     name: Apply migrations (drizzle)
     environment: production

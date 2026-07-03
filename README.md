@@ -167,6 +167,11 @@ its only hard dependency is Postgres. See **[`deploy/README.md`](deploy/README.m
 for the full guide — quick start, production setup with external Postgres and
 TLS, keeping secrets out of Helm values, and the config reference.
 
+Don't have a cluster yet? **[`deploy/terraform/digitalocean`](deploy/terraform/digitalocean)**
+provisions the whole stack on DigitalOcean with OpenTofu — a DOKS cluster,
+managed Postgres, a Spaces bucket for run artifacts, optional DNS + Let's
+Encrypt TLS — and installs the chart, in one `tofu apply`.
+
 ---
 
 ## GitHub App (optional)
@@ -324,6 +329,7 @@ agent-harness/
 Dockerfile                   Web-app production image (Next.js standalone + migrator stages)
 deploy/
   helm/bandolier/            Helm chart to self-host the web app on Kubernetes
+  terraform/digitalocean/    OpenTofu: DOKS + managed Postgres + Spaces + the chart
   README.md                  Self-hosting-on-Kubernetes guide
 ```
 

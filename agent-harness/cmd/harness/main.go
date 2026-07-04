@@ -350,10 +350,11 @@ func loadConfig() (config, error) {
 	// CLI then uses its own default.
 	effort := normalizeEffort(os.Getenv("CLAUDE_EFFORT"))
 
-	// Always cap turns; default if the Job didn't set MAX_TURNS.
+	// Turns are unlimited by default (JavaScript's Number.MAX_SAFE_INTEGER,
+	// matching the server's DEFAULT_MAX_TURNS); the Job's MAX_TURNS overrides.
 	maxTurns := os.Getenv("MAX_TURNS")
 	if maxTurns == "" {
-		maxTurns = "100"
+		maxTurns = "9007199254740991"
 	}
 
 	baseBranch := os.Getenv("GITHUB_BASE_BRANCH")

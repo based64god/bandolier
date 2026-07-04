@@ -48,12 +48,7 @@ import {
 import { mergeCompute, resolveCompute } from "~/server/agents/compute";
 import { resolveKubeconfig } from "~/server/agents/kubeconfig";
 import { repoToNamespace } from "~/server/agents/namespace";
-import {
-  listModelsForUser,
-  pickLatestGeminiFlash,
-  pickLatestGptMini,
-  pickLatestSonnet,
-} from "~/server/agents/models";
+import { listModelsForUser, pickPrWriterModel } from "~/server/agents/models";
 import {
   pickProvider,
   resolveModelCredentials,
@@ -1548,23 +1543,37 @@ export const agentsRouter = createTRPCRouter({
 
         // PR-producing runs (repo or issue mode) get their PR title/description
         // written out-of-band of the (possibly larger) task model by a cheap
-        // writer from the same provider: the latest Sonnet for Claude runs, the
-        // latest GPT mini for OpenAI runs. Best-effort: a lookup failure falls
-        // back to the harness's commit-based title and must not block the deploy.
+        // same-provider writer (the latest Sonnet / GPT mini / Flash), picked
+        // only from the models the run's resolved credentials serve — a
+        // subscription run must never be handed a dated API-key model id it
+        // can't invoke. Best-effort: a lookup failure falls back to the
+        // harness's commit-based title and must not block the deploy.
         let prWriterModel: string | undefined;
-        if (repoUrl ?? issue ?? issueOutput) {
+        if (provider && (repoUrl ?? issue ?? issueOutput)) {
           try {
             const { models } = await listModelsForUser(
               ctx.db,
               userId,
               input.repoFullName,
             );
-            prWriterModel =
-              provider === "openai"
-                ? pickLatestGptMini(models)
-                : provider === "gemini"
-                  ? pickLatestGeminiFlash(models)
-                  : pickLatestSonnet(models);
+            // The auth kind the run's credentials actually resolved to (the API
+            // key beats the subscription), mirroring the routing above.
+            const auth =
+              provider === "anthropic"
+                ? anthropicApiKey
+                  ? ("api_key" as const)
+                  : ("subscription" as const)
+                : provider === "openai"
+                  ? openaiApiKey
+                    ? ("api_key" as const)
+                    : ("subscription" as const)
+                  : undefined;
+            prWriterModel = pickPrWriterModel(models, {
+              id: input.model,
+              label: input.model,
+              provider,
+              auth,
+            });
           } catch (err) {
             console.warn("[bandolier:deploy] PR-writer model lookup failed", {
               error: err instanceof Error ? err.message : String(err),

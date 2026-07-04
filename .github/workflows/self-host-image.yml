@@ -32,13 +32,23 @@ on:
       # agent-harness changes are handled by the workflow_run trigger above, not
       # here, to avoid racing the harness build.
       - "self-host/**"
+      # Dependency inputs baked into the image's warm pnpm store — rebuild so the
+      # store stays in sync with the lockfile.
       - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".npmrc"
+      - "patches/**"
       - ".github/workflows/self-host-image.yml"
   pull_request:
     paths:
       - "self-host/**"
       - "agent-harness/**"
       - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".npmrc"
+      - "patches/**"
       - ".github/workflows/self-host-image.yml"
 
 # Serialize main builds so a workflow_run build (fresh harness) supersedes an
@@ -116,7 +126,9 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
-          context: ./self-host
+          # Repo root, not ./self-host: the Dockerfile warms the pnpm store from
+          # the root lockfile / pnpm config, which sit above self-host/.
+          context: .
           file: ./self-host/Dockerfile
           platforms: linux/amd64
           # Always re-pull the FROM images so the build layers on the current

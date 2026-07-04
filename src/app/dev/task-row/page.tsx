@@ -2,18 +2,23 @@
 
 import { useState } from "react";
 
-import { TaskRow } from "~/app/dashboard/_components/task-row";
+import {
+  PendingDeployRow,
+  TaskRow,
+} from "~/app/dashboard/_components/task-row";
 import type { RouterOutputs } from "~/trpc/react";
 
 type Task = RouterOutputs["agents"]["list"][number];
 
 /**
- * Dev-only harness that mounts a single TaskRow inside a table whose column
- * geometry mirrors the real dashboard (table-fixed + the same percentage
- * widths), so its Actions cell — the terminate (×) glyph vs. the confirm/cancel
- * pair — can be exercised in a real browser at a narrow (mobile) viewport. Not
- * linked from the app. A Playwright spec taps the glyph to reveal Confirm/Cancel
- * and asserts the row's height doesn't change between the two states.
+ * Dev-only harness that mounts TaskRow (plus a just-deployed PendingDeployRow)
+ * inside a table whose column geometry mirrors the real dashboard (table-fixed +
+ * the same percentage widths), so the rows can be exercised in a real browser.
+ * Not linked from the app. A Playwright spec taps the terminate (×) glyph to
+ * reveal Confirm/Cancel and asserts the row's height doesn't change between the
+ * two states (narrow viewport), and asserts a task description fills its Task
+ * column — truncating only where it meets the row's trailing element (wide
+ * viewport).
  */
 export default function TaskRowHarness() {
   const [lastOpened, setLastOpened] = useState<string | null>(null);
@@ -121,6 +126,13 @@ export default function TaskRowHarness() {
                 onOpenLogs={(name) => setLastOpened(name)}
               />
             ))}
+            {/* A just-deployed placeholder row. Its name is short enough to sit
+                well within a wide Task column, letting the task-row spec assert
+                the description fills the column — pinning the trailing
+                "propagating…" label to the column's right edge (so the name only
+                truncates where it would meet the label), matching the live rows
+                above. */}
+            <PendingDeployRow displayName="a pending deploy" />
           </tbody>
         </table>
       </div>

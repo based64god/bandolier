@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 // Emits a shields.io endpoint JSON (schemaVersion 1) for the unit-test line
 // coverage in coverage/coverage-summary.json (written by the json-summary
 // reporter during `pnpm test:coverage`). CI publishes the output to the

@@ -158,9 +158,22 @@ export function InteractiveRow({
     lastFocusSignal.current = focusSignal;
   }, [focusSignal]);
 
-  const terminate = api.agents.terminate.useMutation();
+  const utils = api.useUtils();
+  const terminate = api.agents.terminate.useMutation({
+    // Refetch the list immediately so the row reflects the deletion as soon as
+    // the cluster does; until then the optimistic "Terminating" cue fills the
+    // gap (see TaskRow for the same pattern).
+    onSuccess: () => utils.agents.list.invalidate({ namespace }),
+  });
+  // Optimistic cue held from the terminate click until this row unmounts (pod
+  // gone). The pod lingers in the list while Kubernetes winds it down.
+  const terminating = terminate.isPending || terminate.isSuccess;
 
-  const rowTint = awaiting ? "bg-amber-500/[0.06]" : "hover:bg-white/[0.04]";
+  const rowTint = terminating
+    ? "opacity-50"
+    : awaiting
+      ? "bg-amber-500/[0.06]"
+      : "hover:bg-white/[0.04]";
 
   return (
     <>
@@ -179,8 +192,12 @@ export function InteractiveRow({
             the left of the column. */}
         <td className="px-3 py-2 text-center align-middle md:px-4 md:py-3">
           <div className="flex flex-col items-center gap-1">
-            <StatusBadge status={agent.status} failure={agent.failure} />
-            {awaiting && (
+            {terminating ? (
+              <StatusBadge status="Terminating" />
+            ) : (
+              <StatusBadge status={agent.status} failure={agent.failure} />
+            )}
+            {!terminating && awaiting && (
               <span
                 title="Waiting"
                 aria-label="Waiting"
@@ -289,7 +306,11 @@ export function InteractiveRow({
           <div
             className={`flex flex-wrap items-center justify-end gap-2 lg:flex-nowrap ${ACTION_ROW_MIN_H}`}
           >
-            {confirmKill ? (
+            {terminating ? (
+              // Deletion requested — controls are gone (nothing left to
+              // confirm) and the status pill carries the "Terminating" cue.
+              <span className="text-xs text-white/25">Terminating…</span>
+            ) : confirmKill ? (
               // Two-step confirm for the destructive terminate, mirroring the
               // non-interactive TaskRow: the red × arms this state, then a
               // Confirm/Cancel pair (compact glyphs on mobile, full labels from

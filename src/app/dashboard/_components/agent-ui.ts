@@ -9,12 +9,24 @@ export const STATUS_STYLES: Record<string, string> = {
   Failed: "border-red-500/40 bg-red-500/20 text-red-300",
   Succeeded: "border-green-500/40 bg-green-500/20 text-green-300",
   Unknown: "border-gray-500/40 bg-gray-500/20 text-gray-400",
+  // Client-only, optimistic statuses shown while the user's create/delete
+  // request propagates through Kubernetes (the list only refreshes once the
+  // cluster reflects it). "Deploying" fronts a just-submitted task before its
+  // pod appears; "Terminating" marks a row whose deletion has been requested but
+  // whose pod is still winding down. Both spin (see SPINNER_STATUSES).
+  Deploying: "border-purple-500/40 bg-purple-500/20 text-purple-300",
+  Terminating: "border-orange-500/40 bg-orange-500/20 text-orange-300",
 };
 
 // Statuses that read better as motion than a static glyph. An in-flight agent
 // renders as a small spinner (the old blue "Running" pill) so the activity is
 // visible at a glance; everything else keeps its fixed icon.
-export const SPINNER_STATUSES = new Set(["Running"]);
+export const SPINNER_STATUSES = new Set([
+  "Running",
+  // Optimistic in-flight states: the request is propagating through the cluster.
+  "Deploying",
+  "Terminating",
+]);
 
 // Single-path glyphs (Heroicons mini, 20×20 viewBox, fill-rule evenodd) that
 // mirror each status. They let the status pill collapse from text to comparable

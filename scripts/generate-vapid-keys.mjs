@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 // Generates a VAPID keypair for Web Push and prints it as ready-to-paste .env
 // lines. Run with `pnpm vapid:generate`. VAPID_SUBJECT is left for you to fill
 // in with a contact URL (mailto: or https:) that push services can reach.

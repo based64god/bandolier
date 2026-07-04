@@ -29,8 +29,11 @@ import {
 /** Seconds a finished Job (and its pod) is retained before Kubernetes deletes it. */
 export const JOB_TTL_SECONDS = 7 * 24 * 3600; // one week
 
-/** Default cap on Claude agentic turns when the deploy form leaves it blank. */
-export const DEFAULT_MAX_TURNS = 100;
+/**
+ * Default cap on Claude agentic turns when the deploy form leaves it blank.
+ * Effectively unlimited — a run only stops early if the form sets a value.
+ */
+export const DEFAULT_MAX_TURNS = Number.MAX_SAFE_INTEGER;
 
 /**
  * Default agent harness image. A repo's `agentImage` config (DB) overrides it
@@ -453,7 +456,7 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
     userRef("GITHUB_TOKEN", true),
   ];
 
-  // Always cap turns so an agent can't run away; the form value overrides it.
+  // Turns are unlimited by default; the form value sets a real cap.
   envVars.push({
     name: "MAX_TURNS",
     value: String(spec.maxTurns ?? DEFAULT_MAX_TURNS),

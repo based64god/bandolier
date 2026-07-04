@@ -1253,7 +1253,12 @@ export const agentsRouter = createTRPCRouter({
           // Reasoning effort for the run (Claude providers only; ignored for
           // OpenAI/Gemini). Optional — unset uses the CLI default.
           effort: z.enum(EFFORT_LEVELS).optional(),
-          maxTurns: z.number().int().min(1).max(200).optional(),
+          maxTurns: z
+            .number()
+            .int()
+            .min(1)
+            .max(Number.MAX_SAFE_INTEGER)
+            .optional(),
           // Per-task compute (CPU / memory limit) override, as Kubernetes
           // quantities. Unset falls back to the repo/user default, then the
           // built-in limit. Validated in the handler for a readable error.

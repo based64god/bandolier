@@ -191,7 +191,6 @@ const {
   ensureServiceAccount,
   podResources,
   DEFAULT_HARNESS_IMAGE,
-  DEFAULT_MAX_TURNS,
   JOB_TTL_SECONDS,
 } = await import("~/server/agents/create-job");
 
@@ -406,9 +405,9 @@ describe("createAgentJob", () => {
   });
 
   describe("env vars", () => {
-    it("caps turns at the default when the spec leaves maxTurns blank", async () => {
+    it("defaults to unlimited turns when the spec leaves maxTurns blank", async () => {
       await createAgentJob(baseSpec());
-      expect(envVar("MAX_TURNS")?.value).toBe(String(DEFAULT_MAX_TURNS));
+      expect(envVar("MAX_TURNS")?.value).toBe(String(Number.MAX_SAFE_INTEGER));
     });
 
     it("uses the spec's maxTurns when set", async () => {

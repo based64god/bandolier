@@ -278,7 +278,7 @@ export function PendingDeployRow({ displayName }: { displayName: string }) {
         <div className="flex min-w-0 items-center gap-1.5">
           <span
             title={displayName}
-            className="min-w-0 truncate text-sm text-white/90"
+            className="min-w-0 flex-1 truncate text-sm text-white/90"
           >
             {displayName || "New task"}
           </span>

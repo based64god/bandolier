@@ -44,6 +44,9 @@ export default function StatusBadgeHarness() {
         <div data-testid="succeeded">
           <StatusBadge status="Succeeded" />
         </div>
+        <div data-testid="finalizing">
+          <StatusBadge status="Finalizing" />
+        </div>
       </div>
       {/* Mirrors the task rows' click-to-open-logs behaviour: a badge tap must
           not count as a row click. */}

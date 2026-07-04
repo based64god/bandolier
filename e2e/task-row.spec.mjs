@@ -77,6 +77,22 @@ check(
   `pending description fills the column (trailing label pinned right, gap ${rightGap.toFixed(0)}px)`,
   rightGap < 32,
 );
+
+// Regression: an ad-hoc task's stored display name is only a 60-char server
+// preview of the prompt. The cell must render the full prompt (taskNameLabel)
+// so a wide Task column truncates at its own edge, not at the preview — the
+// first harness row carries exactly that preview-plus-prompt shape.
+const firstTaskText = await wide
+  .locator("[data-testid='rows'] tr")
+  .first()
+  .locator("td")
+  .nth(2)
+  .locator("span[title]")
+  .textContent();
+check(
+  `task cell renders the full prompt, not the 60-char preview (${firstTaskText.length} chars)`,
+  firstTaskText.length > 61 && !firstTaskText.endsWith("…"),
+);
 await wide.close();
 
 await browser.close();

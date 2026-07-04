@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { groupTimeline, type TimelineItem } from "~/lib/acp/timeline";
 import { api } from "~/trpc/react";
 import type { RouterOutputs } from "~/trpc/react";
-import { expiresAtLocal, taskNameTooltip } from "./agent-ui";
+import { expiresAtLocal, taskNameLabel, taskNameTooltip } from "./agent-ui";
 import { OutputBadge, SourceBadge } from "./output-badge";
 import { SessionComposer } from "./session-composer";
 import { StatusBadge } from "./status-badge";
@@ -251,7 +251,7 @@ export function InteractiveRow({
               title={taskNameTooltip(agent)}
               className="min-w-0 flex-1 truncate text-sm text-white/90"
             >
-              {agent.displayName}
+              {taskNameLabel(agent)}
             </span>
             <TokenReadout tokens={agent.tokens} className="text-[11px]" />
           </div>

@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 
+import type { EFFORT_LEVELS } from "~/lib/effort";
 import { listModelsForUser, pickDefaultModel } from "~/server/agents/models";
 import { repoToNamespace } from "~/server/agents/namespace";
 import {
@@ -71,8 +72,14 @@ export async function POST(req: NextRequest, { params }: Params) {
     prompt?: string;
     branch?: string;
     model?: string;
+    modelProvider?: "anthropic" | "bedrock" | "openai" | "gemini";
+    modelAuth?: "api_key" | "subscription";
+    effort?: (typeof EFFORT_LEVELS)[number];
     maxTurns?: number;
+    cpu?: string;
+    memory?: string;
     issueNumber?: number;
+    outputType?: "pr" | "issue";
   };
   try {
     body = (await req.json()) as typeof body;
@@ -107,8 +114,14 @@ export async function POST(req: NextRequest, { params }: Params) {
       repoFullName: fullName,
       branch: body.branch ?? access.defaultBranch,
       model,
+      modelProvider: body.modelProvider,
+      modelAuth: body.modelAuth,
+      effort: body.effort,
       maxTurns: body.maxTurns,
+      cpu: body.cpu,
+      memory: body.memory,
       issueNumber: body.issueNumber,
+      outputType: body.outputType,
     });
     return NextResponse.json({ id: jobName, jobName }, { status: 201 });
   } catch (err) {

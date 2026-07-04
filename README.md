@@ -235,6 +235,27 @@ curl -X POST -H "Authorization: Bearer bnd_…" -H "Content-Type: application/js
   https://<your-host>/api/v1/repos/<owner>/<repo>/tasks
 ```
 
+The launch endpoint accepts everything the dashboard's deploy dialog can set,
+except interactive sessions (the REST API only starts one-shot runs). The body
+is JSON; every field except `task`/`prompt` is optional:
+
+| Field           | Type                                             | Default                         | Notes                                                                       |
+| --------------- | ------------------------------------------------ | ------------------------------- | --------------------------------------------------------------------------- |
+| `task`          | string                                           | `""`                            | The operator task, or additional context when `issueNumber` is set.         |
+| `prompt`        | string                                           | —                               | Alias for `task` (used when `task` is omitted).                             |
+| `branch`        | string                                           | the repo's default branch       | Branch to check out.                                                        |
+| `model`         | string                                           | your provider's preferred model | A model id from one of your providers.                                      |
+| `modelProvider` | `anthropic` \| `bedrock` \| `openai` \| `gemini` | primary-provider precedence     | Pins which provider serves `model` when several are configured.             |
+| `modelAuth`     | `api_key` \| `subscription`                      | api-key-beats-subscription      | Pins the credential kind for providers where both are configured.           |
+| `effort`        | `low` \| `medium` \| `high` \| `xhigh` \| `max`  | CLI default                     | Reasoning effort (Claude providers only; ignored otherwise).                |
+| `maxTurns`      | integer ≥ 1                                      | unlimited                       | Caps the number of agent turns.                                             |
+| `cpu`           | string                                           | repo/user default               | Per-task CPU limit as a Kubernetes quantity (e.g. `"2"`, `"500m"`).         |
+| `memory`        | string                                           | repo/user default               | Per-task memory limit as a Kubernetes quantity (e.g. `"2Gi"`).              |
+| `issueNumber`   | integer > 0                                      | —                               | Work on this GitHub issue; `task` becomes additional context.               |
+| `outputType`    | `pr` \| `issue`                                  | `pr`                            | What the run produces: a pull request, or a new issue from a read-only run. |
+
+You must provide a non-empty `task`/`prompt` or an `issueNumber`.
+
 ---
 
 ## Configuration reference

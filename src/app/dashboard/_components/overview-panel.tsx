@@ -111,7 +111,7 @@ export function OverviewPanel({ notify }: { notify: boolean }) {
                 { label: "Repository", width: "w-[auto]" },
                 // Dropped on narrow viewports where space is limited — the row
                 // stays readable with Status/Output/Repository alone.
-                { label: "Created by", width: "w-[22%]", optional: true },
+                { label: "Created by", width: "w-[15%]", optional: true },
               ].map((h, i) => (
                 <th
                   key={i}

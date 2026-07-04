@@ -229,7 +229,7 @@ export function DeployModal({
         className="flex max-h-full w-full max-w-lg flex-col overflow-hidden rounded-xl border border-white/20 bg-[var(--surface-panel)]"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex shrink-0 items-center justify-between border-b border-white/10 px-5 py-4">
+        <div className="flex shrink-0 items-center justify-between border-b border-white/10 px-4 py-2.5">
           <div className="flex items-center gap-3">
             <h2 className="text-sm font-semibold text-white">Deploy Agent</h2>
             {providerInfo && (
@@ -254,13 +254,13 @@ export function DeployModal({
 
         <form
           onSubmit={handleSubmit}
-          className="space-y-4 overflow-y-auto px-5 py-5"
+          className="space-y-3 overflow-y-auto px-4 py-3"
         >
           {/* No-provider warning */}
           {providerInfo?.provider === "none" && (
             <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
-              No model provider is configured. Add an Anthropic, OpenAI, or AWS
-              Bedrock credential in settings before deploying.
+              No provider configured. Add an Anthropic, OpenAI, or Bedrock
+              credential in settings first.
             </p>
           )}
 
@@ -270,15 +270,14 @@ export function DeployModal({
               <p className="font-semibold">Couldn’t load models</p>
               <p className="mt-1 text-red-400/90">{modelsError.message}</p>
               <p className="mt-1 text-red-400/70">
-                Check your provider credentials in settings — they may be
-                invalid or expired.
+                Check your provider credentials in settings.
               </p>
             </div>
           )}
 
           {/* GitHub issue (optional) */}
           {repoFullName && (
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               <div className="relative flex items-center gap-1.5">
                 <label className="block text-xs font-medium text-white/60">
                   GitHub issue{" "}
@@ -355,10 +354,10 @@ export function DeployModal({
               {hasIssue && (
                 <p className="text-xs text-white/40">
                   {issueOutput
-                    ? "The agent analyses the issue and opens a sub-task issue (Part of #" +
+                    ? "Opens a sub-task issue (Part of #" +
                       selectedIssue?.number +
-                      ") from its findings. The task below is optional extra context."
-                    : "The agent gets the issue details as context and opens a PR that closes it. The task below is optional extra context."}
+                      ") from its findings."
+                    : "Opens a PR that closes this issue."}
                 </p>
               )}
             </div>
@@ -366,7 +365,7 @@ export function DeployModal({
 
           {/* Output type — what the run produces (needs a repository) */}
           {repoFullName && (
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               <label className="block text-xs font-medium text-white/60">
                 Output
               </label>
@@ -381,7 +380,7 @@ export function DeployModal({
                     key={opt.value}
                     type="button"
                     onClick={() => setOutputType(opt.value)}
-                    className={`flex-1 rounded-lg border px-3 py-2 text-sm transition ${
+                    className={`flex-1 rounded-lg border px-3 py-1.5 text-sm transition ${
                       outputType === opt.value
                         ? "border-purple-500/50 bg-purple-500/15 text-white"
                         : "border-white/10 bg-white/5 text-white/60 hover:bg-white/10"
@@ -393,14 +392,14 @@ export function DeployModal({
               </div>
               <p className="text-xs text-white/40">
                 {issueOutput
-                  ? "The agent explores read-only and opens a GitHub issue describing the work — no code changes."
-                  : "The agent implements the task and opens a pull request."}
+                  ? "Explores read-only and opens an issue — no code changes."
+                  : "Implements the task and opens a pull request."}
               </p>
             </div>
           )}
 
           {/* Task */}
-          <div className="space-y-1.5">
+          <div className="space-y-1">
             <label className="block text-xs font-medium text-white/60">
               {hasIssue ? (
                 <>
@@ -415,7 +414,7 @@ export function DeployModal({
             </label>
             <textarea
               required={!hasIssue}
-              rows={5}
+              rows={3}
               value={task}
               onChange={(e) => setTask(e.target.value)}
               placeholder={
@@ -423,12 +422,12 @@ export function DeployModal({
                   ? "Extra guidance for the agent (optional)…"
                   : "Describe what you want Claude to do…"
               }
-              className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/30 focus:outline-none"
+              className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-white placeholder-white/30 focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/30 focus:outline-none"
             />
           </div>
 
           {/* Model */}
-          <div className="space-y-1.5">
+          <div className="space-y-1">
             <label className="block text-xs font-medium text-white/60">
               Model
             </label>
@@ -460,7 +459,7 @@ export function DeployModal({
                 />
               </div>
               <label
-                className={`flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 py-2 text-xs transition ${
+                className={`flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs transition ${
                   isPreferred
                     ? "border-purple-500/50 bg-purple-500/15 text-white"
                     : "border-white/10 bg-white/5 text-white/60 hover:bg-white/10"
@@ -480,8 +479,8 @@ export function DeployModal({
               </label>
             </div>
             <p className="text-xs text-white/40">
-              Your preferred model is the default for dashboard deploys.
-              Webhook-triggered tasks aren&rsquo;t affected.
+              Preferred model is the dashboard default; webhooks aren&rsquo;t
+              affected.
             </p>
           </div>
 
@@ -501,7 +500,7 @@ export function DeployModal({
 
           {/* Repo + Branch */}
           <div className="grid grid-cols-3 gap-3">
-            <div className="col-span-2 space-y-1.5">
+            <div className="col-span-2 space-y-1">
               <label className="block text-xs font-medium text-white/60">
                 Repository URL
               </label>
@@ -510,10 +509,10 @@ export function DeployModal({
                 value={repoUrl}
                 onChange={(e) => setRepoUrl(e.target.value)}
                 placeholder="https://github.com/org/repo"
-                className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/30 focus:outline-none"
+                className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-white placeholder-white/30 focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/30 focus:outline-none"
               />
             </div>
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               <label className="block text-xs font-medium text-white/60">
                 Branch
               </label>
@@ -522,14 +521,14 @@ export function DeployModal({
                 value={branch}
                 onChange={(e) => setBranch(e.target.value)}
                 placeholder="main"
-                className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/30 focus:outline-none"
+                className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-white placeholder-white/30 focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/30 focus:outline-none"
               />
             </div>
           </div>
 
           {/* Max turns + compute (CPU / memory limit) overrides */}
           <div className="grid grid-cols-3 gap-3">
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               <label className="block text-xs font-medium text-white/60">
                 Max turns
               </label>
@@ -546,10 +545,10 @@ export function DeployModal({
                       ? "unlimited"
                       : String(defaultMaxTurns)
                 }
-                className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/30 focus:outline-none disabled:opacity-40"
+                className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-white placeholder-white/30 focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/30 focus:outline-none disabled:opacity-40"
               />
             </div>
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               <label className="block text-xs font-medium text-white/60">
                 CPU
               </label>
@@ -558,10 +557,10 @@ export function DeployModal({
                 value={cpu}
                 onChange={(e) => setCpu(e.target.value)}
                 placeholder={defaultCompute?.cpu ?? ""}
-                className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/30 focus:outline-none"
+                className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-white placeholder-white/30 focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/30 focus:outline-none"
               />
             </div>
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               <label className="block text-xs font-medium text-white/60">
                 Memory
               </label>
@@ -570,14 +569,13 @@ export function DeployModal({
                 value={memory}
                 onChange={(e) => setMemory(e.target.value)}
                 placeholder={defaultCompute?.memory ?? ""}
-                className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/30 focus:outline-none"
+                className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-white placeholder-white/30 focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/30 focus:outline-none"
               />
             </div>
           </div>
-          <p className="-mt-2 text-xs text-white/40">
-            Placeholders are the defaults (max turns from the server; CPU /
-            memory from your or the repo&rsquo;s configured compute). Quantities
-            like <code className="text-white/50">4</code> and{" "}
+          <p className="-mt-1 text-xs text-white/40">
+            Placeholders show the defaults. Quantities like{" "}
+            <code className="text-white/50">4</code> and{" "}
             <code className="text-white/50">8Gi</code>.
           </p>
 
@@ -594,9 +592,8 @@ export function DeployModal({
                 Interactive session
               </span>
               <span className="mt-0.5 block text-white/40">
-                Keep the agent running and chat with it — it pauses for your
-                input between turns and alerts you when it&rsquo;s waiting. Turn
-                cap doesn&rsquo;t apply.
+                Keep the agent running and chat with it between turns. Turn cap
+                doesn&rsquo;t apply.
               </span>
             </span>
           </label>
@@ -613,7 +610,7 @@ export function DeployModal({
             <button
               type="button"
               onClick={onClose}
-              className="rounded-lg bg-white/10 px-4 py-2 text-sm hover:bg-white/20"
+              className="rounded-lg bg-white/10 px-4 py-1.5 text-sm hover:bg-white/20"
             >
               Cancel
             </button>
@@ -624,7 +621,7 @@ export function DeployModal({
                 !effectiveModel ||
                 (!hasIssue && !task.trim())
               }
-              className="rounded-lg bg-purple-600 px-4 py-2 text-sm font-medium text-black hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-lg bg-purple-600 px-4 py-1.5 text-sm font-medium text-black hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {deploy.isPending ? "Deploying…" : "Deploy"}
             </button>

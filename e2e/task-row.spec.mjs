@@ -55,6 +55,30 @@ check(
   Math.abs(confirmHeight - glyphHeight) < 1,
 );
 
+// Regression: a task description must fill its Task column so it only truncates
+// where it would meet the trailing element on its right (the token counter on a
+// live row, the "propagating…" label on a just-deployed row) — not at its own
+// content width, which left the trailing element hugging a short name with the
+// rest of the wide column empty. Checked on the pending row, whose short name
+// sits well inside a wide Task column: filling pins "propagating…" to the
+// column's right edge.
+const wide = await browser.newPage({ viewport: { width: 1600, height: 720 } });
+await wide.goto(`${BASE}/dev/task-row`);
+const pendingCell = wide
+  .locator("[data-testid='rows'] tr", { hasText: "propagating…" })
+  .locator("td")
+  .nth(2);
+const cellBox = await pendingCell.boundingBox();
+const labelBox = await pendingCell.getByText("propagating…").boundingBox();
+// Distance from the label's right edge to the cell's right edge — only the
+// cell's right padding when the description fills the column.
+const rightGap = cellBox.x + cellBox.width - (labelBox.x + labelBox.width);
+check(
+  `pending description fills the column (trailing label pinned right, gap ${rightGap.toFixed(0)}px)`,
+  rightGap < 32,
+);
+await wide.close();
+
 await browser.close();
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);

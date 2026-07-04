@@ -29,7 +29,7 @@ import { recordRecentRepo, useRecentRepos } from "./recent-repos";
 import { RepoConfigModal } from "./repo-config-modal";
 import { SearchableSelect, type SelectOption } from "./searchable-select";
 import { SettingsModal } from "./settings-modal";
-import { TaskRow } from "./task-row";
+import { PendingDeployRow, TaskRow } from "./task-row";
 
 type Repo = {
   fullName: string;
@@ -166,6 +166,32 @@ export function AgentDashboard({
     },
   );
 
+  // Optimistic placeholders for tasks the user just deployed. Kubernetes creates
+  // the Job immediately, but its pod only shows up in the list query on a later
+  // poll — so without these the dashboard looks unchanged for several seconds
+  // after a deploy. The raw list only grows here (plus a timeout backstop); which
+  // ones are actually shown is derived below, so a placeholder disappears the
+  // instant its real task lands without any effect-driven state juggling.
+  const [pendingDeploys, setPendingDeploys] = useState<
+    { jobName: string; displayName: string; namespace: string }[]
+  >([]);
+
+  function handleDeployed(task: { jobName: string; displayName: string }) {
+    if (!namespace) return;
+    const entry = { ...task, namespace };
+    setPendingDeploys((prev) => [
+      entry,
+      ...prev.filter((p) => p.jobName !== task.jobName),
+    ]);
+    // Backstop: drop the placeholder if the pod never surfaces (e.g. the Job was
+    // created but scheduling failed), so it can't linger forever.
+    window.setTimeout(() => {
+      setPendingDeploys((prev) =>
+        prev.filter((p) => p.jobName !== task.jobName),
+      );
+    }, 90_000);
+  }
+
   // View filters persist in cookies so they survive refreshes, apply across
   // repos, and are not carried into shared links (a shared URL shows the
   // recipient their own preference, not the sender's filtered view).
@@ -191,6 +217,14 @@ export function AgentDashboard({
     (a) =>
       (!hideResolved || !isAgentOutputResolved(a)) &&
       (!onlyMine || a.ownedByViewer),
+  );
+
+  // The placeholders to actually render: only for the repo currently in view,
+  // and only while the real pod hasn't yet surfaced in the list (matched by job
+  // name). Derived rather than stored, so it self-corrects on every poll.
+  const liveJobNames = new Set(agents.map((a) => a.jobName));
+  const visiblePending = pendingDeploys.filter(
+    (p) => p.namespace === namespace && !liveJobNames.has(p.jobName),
   );
 
   // The viewer's own tasks. Repo views also list collaborators' tasks
@@ -594,18 +628,21 @@ export function AgentDashboard({
 
             {/* Single contiguous task list — newest first. Interactive tasks
                 expand in place; the rest open their logs on click. */}
-            {!error && agents.length === 0 && !agentsLoading ? (
+            {!error &&
+            agents.length === 0 &&
+            visiblePending.length === 0 &&
+            !agentsLoading ? (
               <div className="rounded-xl border border-white/10 bg-white/5 py-16 text-center text-white/40">
                 No agents running in{" "}
                 <code className="text-white/60">{namespace}</code>
               </div>
-            ) : agents.length === 0 ? null : (
+            ) : agents.length === 0 && visiblePending.length === 0 ? null : (
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <h2 className="flex items-center gap-2 text-xs font-medium tracking-wider text-white/40 uppercase">
                     Tasks
                     <span className="rounded-full bg-white/10 px-1.5 text-[10px] text-white/50">
-                      {visibleAgents.length}
+                      {visibleAgents.length + visiblePending.length}
                     </span>
                   </h2>
                   <div className="flex items-center gap-4">
@@ -630,7 +667,7 @@ export function AgentDashboard({
                   </div>
                 </div>
 
-                {visibleAgents.length === 0 ? (
+                {visibleAgents.length === 0 && visiblePending.length === 0 ? (
                   <div className="rounded-xl border border-white/10 bg-white/5 py-12 text-center text-sm text-white/40">
                     No tasks match the current filters.{" "}
                     <button
@@ -752,6 +789,14 @@ export function AgentDashboard({
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-white/5">
+                        {/* Just-deployed tasks sit at the very top until their
+                            real pod appears in the list (then they're pruned). */}
+                        {visiblePending.map((p) => (
+                          <PendingDeployRow
+                            key={p.jobName}
+                            displayName={p.displayName}
+                          />
+                        ))}
                         {visibleAgents.map((agent) =>
                           agent.interactive && agent.ownedByViewer ? (
                             // Interactive sessions are rows too, expanding in
@@ -827,6 +872,7 @@ export function AgentDashboard({
       {showDeploy && namespace && selectedRepo && (
         <DeployModal
           onClose={() => setShowDeploy(false)}
+          onDeployed={handleDeployed}
           namespace={namespace}
           repoFullName={selectedRepo.fullName}
           defaultRepoUrl={selectedRepo.cloneUrl}

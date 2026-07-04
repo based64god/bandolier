@@ -59,19 +59,37 @@ export function TaskRow({
   onOpenLogs: (podName: string) => void;
 }) {
   const [confirmKill, setConfirmKill] = useState(false);
-  const terminate = api.agents.terminate.useMutation();
+  const utils = api.useUtils();
+  const terminate = api.agents.terminate.useMutation({
+    // Refetch the list immediately so the row reflects the deletion as soon as
+    // the cluster does; until then the optimistic "Terminating" cue below fills
+    // the gap.
+    onSuccess: () => utils.agents.list.invalidate({ namespace }),
+  });
+  // Once terminate is requested the pod lingers in the list (phase Running, now
+  // with a deletion timestamp) until Kubernetes actually removes it. Keep the
+  // optimistic cue for the whole window — from the click until this row unmounts
+  // because the pod is gone — so the user sees their request took effect.
+  const terminating = terminate.isPending || terminate.isSuccess;
 
   return (
     <tr
       onClick={() => onOpenLogs(agent.name)}
-      className="cursor-pointer hover:bg-white/[0.04]"
+      aria-busy={terminating}
+      className={`cursor-pointer hover:bg-white/[0.04] ${
+        terminating ? "opacity-50" : ""
+      }`}
     >
       <td className="px-3 py-2 text-center align-middle md:px-4 md:py-3">
         {/* Centered to match the centered "Status" header — a flex wrapper
             keeps the pill centered regardless of its (status-dependent) width,
             mirroring the InteractiveRow's status cell. */}
         <div className="flex justify-center">
-          <StatusBadge status={agent.status} failure={agent.failure} />
+          {terminating ? (
+            <StatusBadge status="Terminating" />
+          ) : (
+            <StatusBadge status={agent.status} failure={agent.failure} />
+          )}
         </div>
       </td>
 
@@ -159,7 +177,11 @@ export function TaskRow({
         <div
           className={`flex flex-nowrap items-center justify-end gap-1 whitespace-nowrap ${ACTION_ROW_MIN_H}`}
         >
-          {!agent.ownedByViewer ? (
+          {terminating ? (
+            // Deletion requested — the controls are gone (there's nothing left
+            // to confirm) and the status pill carries the "Terminating" cue.
+            <span className="text-xs text-white/25">Terminating…</span>
+          ) : !agent.ownedByViewer ? (
             // A collaborator's task: viewable (the row opens its logs) but not
             // controllable — terminate stays with the owner, and the server
             // enforces the same.
@@ -228,6 +250,57 @@ export function TaskRow({
           )}
         </div>
       </td>
+    </tr>
+  );
+}
+
+/**
+ * A placeholder row for a task the user just deployed, shown at the top of the
+ * table until the real pod surfaces in the cluster's pod list (which the list
+ * query only picks up on its next poll). It mirrors TaskRow's column geometry so
+ * the columns stay aligned, and carries a spinning "Deploying" pill so the user
+ * sees their create request is propagating rather than being lost.
+ */
+export function PendingDeployRow({ displayName }: { displayName: string }) {
+  return (
+    <tr aria-busy className="opacity-70">
+      <td className="px-3 py-2 text-center align-middle md:px-4 md:py-3">
+        <div className="flex justify-center">
+          <StatusBadge status="Deploying" />
+        </div>
+      </td>
+
+      <td className="px-4 py-2 text-center align-middle text-white/30 md:px-5 md:py-3">
+        —
+      </td>
+
+      <td className="px-3 py-2 align-middle md:px-4 md:py-3">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <span
+            title={displayName}
+            className="min-w-0 truncate text-sm text-white/90"
+          >
+            {displayName || "New task"}
+          </span>
+          <span className="shrink-0 text-[11px] text-white/30 italic">
+            propagating…
+          </span>
+        </div>
+      </td>
+
+      <td className="hidden px-3 py-2 align-middle text-white/30 md:px-4 md:py-3 lg:table-cell">
+        —
+      </td>
+
+      <td className="hidden px-3 py-2 align-middle text-white/30 md:px-4 md:py-3 xl:table-cell">
+        —
+      </td>
+
+      <td className="hidden px-3 py-2 align-middle text-white/30 tabular-nums md:px-4 md:py-3 lg:table-cell">
+        —
+      </td>
+
+      <td className="px-3 py-2 text-right align-middle md:px-4 md:py-3" />
     </tr>
   );
 }

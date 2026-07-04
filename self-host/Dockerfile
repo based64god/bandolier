@@ -41,6 +41,30 @@ RUN ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
 # Fail the build loudly if either toolchain can't run on the base image.
 RUN go version && node --version && npm --version
 
+# ── Warm the pnpm store ───────────────────────────────────────────────────────
+# Prefetch this repo's dependencies into pnpm's content-addressable store so a
+# downstream `pnpm install` in the mounted checkout links from the store instead
+# of downloading from the network — the slow (and, in a network-restricted pod,
+# sometimes impossible) part of a cold install. Only the lockfile + pnpm config
+# are needed: `pnpm fetch` resolves purely from pnpm-lock.yaml (the manifest is
+# ignored), package.json is copied so corepack selects the pinned pnpm, and
+# pnpm-workspace.yaml carries patchedDependencies / onlyBuiltDependencies.
+#
+# PNPM_HOME fixes the store at /root/.local/share/pnpm/store so this warm and the
+# downstream install (same root HOME) resolve to the *same* store — pnpm has no
+# env var for store-dir, but it derives the default store from PNPM_HOME. It also
+# puts pnpm's global bin dir on PATH. CI=1 lets pnpm run non-interactively.
+#
+# Requires the build context to be the repo root (see self-host-image.yml), since
+# these files live above self-host/.
+ENV PNPM_HOME=/root/.local/share/pnpm
+ENV PATH="${PNPM_HOME}:${PATH}"
+WORKDIR /opt/pnpm-warm
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+COPY patches ./patches
+RUN CI=1 pnpm fetch && rm -rf node_modules
+WORKDIR /workspace
+
 # ── Chromium + Playwright ─────────────────────────────────────────────────────
 # So agents can drive a headless browser to inspect site visuals (screenshots,
 # rendered DOM, layout). We install Playwright globally and let it manage its own

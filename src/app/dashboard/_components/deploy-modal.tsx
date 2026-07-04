@@ -47,12 +47,17 @@ function modelKey(m: { id: string; auth?: string }): string {
 
 export function DeployModal({
   onClose,
+  onDeployed,
   namespace,
   repoFullName,
   defaultRepoUrl,
   defaultBranch,
 }: {
   onClose: () => void;
+  // Fired once the deploy succeeds, with the created job's name and a display
+  // label, so the dashboard can show an optimistic "Deploying" row until the
+  // pod actually surfaces in the cluster's pod list.
+  onDeployed?: (task: { jobName: string; displayName: string }) => void;
   namespace: string;
   repoFullName?: string;
   defaultRepoUrl?: string;
@@ -154,8 +159,16 @@ export function DeployModal({
 
   const utils = api.useUtils();
   const deploy = api.agents.deploy.useMutation({
-    onSuccess: () => {
+    onSuccess: (data) => {
       void utils.agents.list.invalidate({ namespace });
+      // Mirror the server's display-name (see the deploy mutation): the issue
+      // label, else a 60-char preview of the task text. Lets the dashboard's
+      // optimistic row read like the real one that replaces it.
+      const taskPreview = task.length > 60 ? `${task.slice(0, 60)}…` : task;
+      const displayName = selectedIssue
+        ? `#${selectedIssue.number}: ${selectedIssue.title}`
+        : taskPreview;
+      onDeployed?.({ jobName: data.jobName, displayName });
       onClose();
     },
   });

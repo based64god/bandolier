@@ -698,7 +698,7 @@ export function AgentDashboard({
                             // "Issue #N" source spilled into Currently.)
                             {
                               label: "Created by",
-                              width: "w-[16%]",
+                              width: "w-[13%]",
                               optional: true,
                             },
                             {
@@ -708,7 +708,7 @@ export function AgentDashboard({
                             },
                             {
                               label: "Expires",
-                              width: "w-[12%]",
+                              width: "w-[10%]",
                               optional: true,
                             },
                             // Holds the "End session" control (on running

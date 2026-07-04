@@ -22,7 +22,9 @@ FROM ${NODE_IMAGE} AS deps
 WORKDIR /app
 RUN corepack enable
 # Lockfile + manifest + patches first, so this layer caches unless deps change.
-COPY package.json pnpm-lock.yaml .npmrc ./
+# pnpm-workspace.yaml carries the pnpm settings (patchedDependencies,
+# allowBuilds) that pnpm 11 no longer reads from package.json.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 COPY patches ./patches
 RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
     pnpm install --frozen-lockfile

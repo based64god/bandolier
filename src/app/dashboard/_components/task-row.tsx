@@ -126,7 +126,11 @@ export function TaskRow({
           >
             {taskNameLabel(agent)}
           </span>
-          <TokenReadout tokens={agent.tokens} className="text-[11px]" />
+          <TokenReadout
+            tokens={agent.tokens}
+            model={agent.model}
+            className="text-[11px]"
+          />
         </div>
       </td>
 

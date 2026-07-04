@@ -14,8 +14,9 @@
 //   E2E_BASE_URL=… node e2e/run.mjs  # reuse an already-running server
 //
 // The specs read COMPOSER_BASE_URL / EFFORT_BASE_URL / SELECT_BASE_URL /
-// STATUS_BADGE_BASE_URL / TASK_ROW_BASE_URL; this runner points them all at the
-// same origin so a single base URL configures the whole suite.
+// STATUS_BADGE_BASE_URL / TASK_ROW_BASE_URL / TOKENS_BASE_URL; this runner
+// points them all at the same origin so a single base URL configures the whole
+// suite.
 import { spawn } from "node:child_process";
 import { readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -34,6 +35,7 @@ const ROUTES = [
   "/dev/searchable-select",
   "/dev/status-badge",
   "/dev/task-row",
+  "/dev/tokens",
 ];
 
 // Inert placeholders for the handful of vars env.js validates at import time.
@@ -83,6 +85,7 @@ function runNode(file) {
         SELECT_BASE_URL: base,
         STATUS_BADGE_BASE_URL: base,
         TASK_ROW_BASE_URL: base,
+        TOKENS_BASE_URL: base,
       },
     });
     child.on("exit", (code) => resolve(code ?? 1));

@@ -16,6 +16,7 @@ export default function TokensHarness() {
   const cases: {
     label: string;
     tokens: Parameters<typeof TokenReadout>[0]["tokens"];
+    model?: string;
   }[] = [
     { label: "null (renders nothing)", tokens: null },
     {
@@ -54,6 +55,36 @@ export default function TokensHarness() {
         cacheCreationInputTokens: 20_000,
       },
     },
+    {
+      label: "opus (priced)",
+      model: "claude-opus-4-8",
+      tokens: {
+        inputTokens: 1_200_000,
+        outputTokens: 450_000,
+        cacheReadInputTokens: 80_000,
+        cacheCreationInputTokens: 20_000,
+      },
+    },
+    {
+      label: "haiku (bedrock, priced)",
+      model: "us.anthropic.claude-haiku-4-5",
+      tokens: {
+        inputTokens: 4200,
+        outputTokens: 1800,
+        cacheReadInputTokens: 500,
+        cacheCreationInputTokens: 300,
+      },
+    },
+    {
+      label: "unknown (unpriced)",
+      model: "gpt-5.5",
+      tokens: {
+        inputTokens: 4200,
+        outputTokens: 1800,
+        cacheReadInputTokens: 500,
+        cacheCreationInputTokens: 300,
+      },
+    },
   ];
 
   return (
@@ -64,7 +95,7 @@ export default function TokensHarness() {
           <li key={c.label} className="flex items-center gap-4">
             <span className="w-56 text-sm text-white/50">{c.label}</span>
             <span data-testid={`readout-${c.label.split(" ")[0]}`}>
-              <TokenReadout tokens={c.tokens} />
+              <TokenReadout tokens={c.tokens} model={c.model} />
             </span>
           </li>
         ))}

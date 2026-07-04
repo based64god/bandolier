@@ -521,6 +521,8 @@ async function podToTask(
   const containerEnv = pod.spec?.containers?.[0]?.env ?? [];
   const prompt =
     containerEnv.find((e) => e.name === "CLAUDE_TASK")?.value ?? null;
+  const model =
+    containerEnv.find((e) => e.name === "CLAUDE_MODEL")?.value ?? null;
   const interactive = pod.metadata?.labels?.[INTERACTIVE_LABEL] === "true";
 
   const creationTimestamp = pod.metadata?.creationTimestamp;
@@ -550,6 +552,8 @@ async function podToTask(
       ? new Date(creationTimestamp).toISOString()
       : null,
     prompt,
+    // The run's model id (from the harness env), used to price its token usage.
+    model,
     source: pod.metadata?.labels?.["bandolier.io/source"] ?? "dashboard",
     issueNumber: annotations["bandolier.io/github-issue"] ?? null,
     issueUrl,

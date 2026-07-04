@@ -1,17 +1,23 @@
+import { estimateCost, formatCost, pricingForModel } from "~/lib/model-pricing";
 import { formatTokens, totalTokens, type TokenUsage } from "~/lib/tokens";
 
 /**
  * Compact token-usage readout shared by the task row, the log modal header, and
  * the interactive session card. Shows the run's total token count (abbreviated,
  * e.g. "1.2K") behind a small glyph, with the full per-category breakdown on
- * hover. Renders nothing when the run hasn't reported usage yet (or the provider
- * doesn't report tokens), so a surface without a count stays unchanged.
+ * hover — plus the run's estimated cost when the model is known and priced
+ * (input/output/cache each bill at their own rate). Renders nothing when the run
+ * hasn't reported usage yet (or the provider doesn't report tokens), so a
+ * surface without a count stays unchanged.
  */
 export function TokenReadout({
   tokens,
+  model,
   className = "",
 }: {
   tokens: TokenUsage | null | undefined;
+  /** The run's model id, used to price the usage. Omit when unknown. */
+  model?: string | null;
   className?: string;
 }) {
   if (!tokens) return null;
@@ -19,6 +25,7 @@ export function TokenReadout({
   if (total <= 0) return null;
 
   const fmt = (n: number) => n.toLocaleString();
+  const pricing = pricingForModel(model);
   const title =
     `${fmt(total)} tokens\n` +
     `input ${fmt(tokens.inputTokens)} · output ${fmt(tokens.outputTokens)}` +
@@ -27,7 +34,8 @@ export function TokenReadout({
       : "") +
     (tokens.cacheCreationInputTokens > 0
       ? ` · cache write ${fmt(tokens.cacheCreationInputTokens)}`
-      : "");
+      : "") +
+    (pricing ? `\nest. cost ${formatCost(estimateCost(tokens, pricing))}` : "");
 
   return (
     <span

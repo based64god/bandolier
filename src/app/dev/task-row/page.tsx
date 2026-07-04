@@ -28,9 +28,15 @@ export default function TaskRowHarness() {
     return <p className="p-8 text-white">Not available.</p>;
   }
 
+  // An ad-hoc task whose stored display name is the server's 60-char preview of
+  // the prompt. The cell must render the full prompt (see taskNameLabel) so the
+  // description fills a wide Task column instead of stopping at the preview.
+  const prompt =
+    "fix the confirmation button height on mobile so the row keeps a constant height when the confirm and cancel pair replaces the terminate glyph";
   const agent = {
     name: "task-abc123",
-    displayName: "fix the confirmation button height on mobile",
+    displayName: `${prompt.slice(0, 60)}…`,
+    prompt,
     status: "Running",
     ownedByViewer: true,
     tokens: null,

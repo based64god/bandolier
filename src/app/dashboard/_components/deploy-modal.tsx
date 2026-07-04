@@ -161,13 +161,13 @@ export function DeployModal({
   const deploy = api.agents.deploy.useMutation({
     onSuccess: (data) => {
       void utils.agents.list.invalidate({ namespace });
-      // Mirror the server's display-name (see the deploy mutation): the issue
-      // label, else a 60-char preview of the task text. Lets the dashboard's
-      // optimistic row read like the real one that replaces it.
-      const taskPreview = task.length > 60 ? `${task.slice(0, 60)}…` : task;
+      // Mirror what the task cell will render for the real row (see
+      // taskNameLabel): the issue label, else the full task text — the row's
+      // CSS truncates it to the column width. Lets the dashboard's optimistic
+      // row read like the real one that replaces it.
       const displayName = selectedIssue
         ? `#${selectedIssue.number}: ${selectedIssue.title}`
-        : taskPreview;
+        : task;
       onDeployed?.({ jobName: data.jobName, displayName });
       onClose();
     },

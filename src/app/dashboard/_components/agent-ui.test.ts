@@ -8,6 +8,7 @@ import {
   SPINNER_STATUSES,
   STATUS_ICON_PATHS,
   STATUS_STYLES,
+  taskNameLabel,
   taskNameTooltip,
 } from "~/app/dashboard/_components/agent-ui";
 
@@ -146,6 +147,59 @@ describe("taskNameTooltip", () => {
   it("falls back to the label when no prompt is available", () => {
     expect(
       taskNameTooltip({
+        displayName: "some-pod-name",
+        prompt: null,
+        issueNumber: null,
+      }),
+    ).toBe("some-pod-name");
+  });
+});
+
+describe("taskNameLabel", () => {
+  it("expands a server-truncated preview to the full prompt, so the cell fills its column", () => {
+    const prompt = "a".repeat(80);
+    expect(
+      taskNameLabel({
+        displayName: `${prompt.slice(0, 60)}…`,
+        prompt,
+        issueNumber: null,
+      }),
+    ).toBe(prompt);
+  });
+
+  it("keeps a short ad-hoc label that was never truncated", () => {
+    expect(
+      taskNameLabel({
+        displayName: "fix the login bug",
+        prompt: "fix the login bug",
+        issueNumber: null,
+      }),
+    ).toBe("fix the login bug");
+  });
+
+  it("keeps a label renamed via the API, which no longer prefixes the prompt", () => {
+    expect(
+      taskNameLabel({
+        displayName: "hotfix — do not touch…",
+        prompt: "a".repeat(80),
+        issueNumber: null,
+      }),
+    ).toBe("hotfix — do not touch…");
+  });
+
+  it("keeps the issue label for an issue task", () => {
+    expect(
+      taskNameLabel({
+        displayName: "#42: Fix the thing",
+        prompt: "## Issue #42: Fix the thing\n\nLong body…",
+        issueNumber: "42",
+      }),
+    ).toBe("#42: Fix the thing");
+  });
+
+  it("falls back to the label when no prompt is available", () => {
+    expect(
+      taskNameLabel({
         displayName: "some-pod-name",
         prompt: null,
         issueNumber: null,

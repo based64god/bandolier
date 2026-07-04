@@ -4,7 +4,7 @@ import { useState } from "react";
 
 import { api } from "~/trpc/react";
 import type { RouterOutputs } from "~/trpc/react";
-import { expiresAtLocal, taskNameTooltip } from "./agent-ui";
+import { expiresAtLocal, taskNameLabel, taskNameTooltip } from "./agent-ui";
 import { OutputBadge, ResumedBadge, SourceBadge } from "./output-badge";
 import { StatusBadge } from "./status-badge";
 import { TokenReadout } from "./token-readout";
@@ -124,7 +124,7 @@ export function TaskRow({
             title={taskNameTooltip(agent)}
             className="min-w-0 flex-1 truncate text-sm text-white/90"
           >
-            {agent.displayName}
+            {taskNameLabel(agent)}
           </span>
           <TokenReadout tokens={agent.tokens} className="text-[11px]" />
         </div>

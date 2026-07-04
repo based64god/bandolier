@@ -99,6 +99,32 @@ export function taskNameTooltip(agent: {
 }
 
 /**
+ * The text to render in a task's name cell. An ad-hoc task's `displayName` is
+ * only a 60-char preview of the prompt (server-truncated with an ellipsis), so
+ * rendered as-is it stops well short of a wide Task column's edge. When the
+ * label is exactly that preview, render the full prompt instead and let the
+ * cell's own CSS truncation fit it to the actual column width. The prefix check
+ * keeps deliberate labels intact: issue tasks (`#N: title`) and tasks renamed
+ * via the API don't match the preview shape, so they keep their `displayName`.
+ */
+export function taskNameLabel(agent: {
+  displayName: string;
+  prompt: string | null;
+  issueNumber: string | null;
+}): string {
+  const { displayName, prompt, issueNumber } = agent;
+  if (
+    !issueNumber &&
+    prompt &&
+    displayName.endsWith("…") &&
+    prompt.startsWith(displayName.slice(0, -1))
+  ) {
+    return prompt;
+  }
+  return displayName;
+}
+
+/**
  * Picks the next session for Tab to jump to when cycling through the tasks
  * awaiting input. `names` is the awaiting sessions in table order; `current` is
  * the one Tab last landed on (or null/unknown). `direction` is +1 for Tab

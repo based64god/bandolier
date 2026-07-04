@@ -238,9 +238,13 @@ export function SourceBadge({
       />
     );
   }
+  // Truncates against the fixed "Created by" column: GitHub usernames run up
+  // to 39 characters (~260px), far wider than the badge-sized column, and an
+  // untruncated nowrap span would bleed across its neighbours.
+  const label = createdBy ?? "Dashboard";
   return (
-    <span className="text-xs whitespace-nowrap text-white/50">
-      {createdBy ?? "Dashboard"}
+    <span title={label} className="block truncate text-xs text-white/50">
+      {label}
     </span>
   );
 }

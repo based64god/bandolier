@@ -33,18 +33,60 @@ export default function TaskRowHarness() {
     source: "manual",
   } as unknown as Task;
 
+  // Worst-case column content, for measuring the layout: the widest realistic
+  // "Created by" values (an Issue #NNNNN badge; a maximum-length 39-char GitHub
+  // username), the widest "Expires" form (a not-today date with 2-digit day +
+  // 2-digit hour), the widest status pill, and an Output badge.
+  const wideExpiry = new Date(
+    new Date().getFullYear() + 1,
+    11,
+    28,
+    12,
+    59,
+  ).toISOString();
+  const wideAgents = [
+    {
+      name: "task-issue-wide",
+      displayName: "a task created from a github issue with a long name",
+      status: "Terminating",
+      ownedByViewer: true,
+      tokens: null,
+      currently: "summarizing results into the linked issue thread",
+      source: "github-issue",
+      issueUrl: "https://github.com/acme/widgets/issues/12345",
+      issueNumber: "12345",
+      issueState: "open",
+      pullRequestUrl: "https://github.com/acme/widgets/pull/67890",
+      pullRequestState: "merged",
+      expiresAt: wideExpiry,
+    },
+    {
+      name: "task-user-wide",
+      displayName: "a task created by hand from the dashboard composer",
+      status: "Succeeded",
+      ownedByViewer: true,
+      tokens: null,
+      currently: "editing task-row.tsx",
+      source: "manual",
+      createdBy: "a-maximum-length-github-username-39-chr",
+      createdIssueUrl: "https://github.com/acme/widgets/issues/24680",
+      createdIssueState: "completed",
+      expiresAt: wideExpiry,
+    },
+  ] as unknown as Task[];
+
   // Columns copied from the real task table's <thead> (agent-dashboard): the
   // same percentage widths and the same labels, so the header row can be
   // measured here (does a label wrap at `lg`?) without the real dashboard's
   // auth/data.
   const cols = [
-    { width: "w-[18%] lg:w-[10%]", label: "Status" },
-    { width: "w-[23%] lg:w-[11%]", label: "Output" },
+    { width: "w-[18%] md:w-[7.5rem]", label: "Status" },
+    { width: "w-[23%] md:w-[7rem]", label: "Output" },
     { width: "w-auto", label: "Task" },
-    { width: "w-[13%] hidden lg:table-cell", label: "Created by" },
-    { width: "w-[15%] hidden lg:table-cell", label: "Currently" },
-    { width: "w-[10%] hidden lg:table-cell", label: "Expires" },
-    { width: "w-[30%] lg:w-[16%]", label: "" },
+    { width: "w-36 hidden lg:table-cell", label: "Created by" },
+    { width: "w-[13%] hidden xl:table-cell", label: "Currently" },
+    { width: "w-[9.5rem] hidden lg:table-cell", label: "Expires" },
+    { width: "w-[30%] md:w-40", label: "" },
   ];
 
   return (
@@ -71,6 +113,14 @@ export default function TaskRowHarness() {
               namespace="default"
               onOpenLogs={(name) => setLastOpened(name)}
             />
+            {wideAgents.map((a) => (
+              <TaskRow
+                key={a.name}
+                agent={a}
+                namespace="default"
+                onOpenLogs={(name) => setLastOpened(name)}
+              />
+            ))}
           </tbody>
         </table>
       </div>

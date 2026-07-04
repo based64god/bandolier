@@ -660,23 +660,32 @@ export function AgentDashboard({
                       <thead>
                         <tr className="border-b border-white/10 bg-white/5 text-left text-xs font-medium tracking-wider text-white/50 uppercase">
                           {[
-                            // Status/Output carry pills with hard minimum
-                            // widths (e.g. the "Succeeded" status pill, the
-                            // "Issue #1234" source link). The compact (narrow)
-                            // layout shows only Status/Output/Task/Actions, so
-                            // these get a generous share there; in the full
-                            // layout (lg+, see below) they shrink once the wide
-                            // viewport gives every column room.
+                            // Columns whose content is constant-width — status
+                            // pills, output badges, the "Issue #N" source link,
+                            // the expiry clock time, the action controls — get
+                            // fixed rem widths from `md` up, sized to their
+                            // widest real content (measured in the /dev/task-row
+                            // harness: "Terminating" pill 87px, "Issue ⏺" badge
+                            // 68px, "Issue #12345" link 109px, "Dec 28, 12:59 PM"
+                            // 118px, Confirm/Cancel pair 123px, + cell padding).
+                            // A percentage share here grows with the viewport
+                            // while the content doesn't: it starved these columns
+                            // at 1024px (the Expires time and Status pill bled
+                            // into their neighbours) and wasted ~100px per column
+                            // at 1920px that belongs to the Task column. Below
+                            // `md` the percentage shares remain: those are
+                            // header-bound ("STATUS" must fit its cell at 360px),
+                            // and the compact layout has only four columns.
                             // Status/Output share the same widths as the
                             // overview panel so the two tables line up.
                             {
                               label: "Status",
-                              width: "w-[18%] lg:w-[10%]",
+                              width: "w-[18%] md:w-[7.5rem]",
                               center: true,
                             },
                             {
                               label: "Output",
-                              width: "w-[23%] lg:w-[11%]",
+                              width: "w-[23%] md:w-[7rem]",
                               center: true,
                             },
                             // The primary column: `w-auto` so it absorbs all the
@@ -696,20 +705,29 @@ export function AgentDashboard({
                             // pill wider than its cell overflowed symmetrically
                             // and bled out past the table's edge, and the
                             // "Issue #N" source spilled into Currently.)
+                            // Sized to the "Issue #12345" source badge; a long
+                            // creator username truncates (see SourceBadge).
                             {
                               label: "Created by",
-                              width: "w-[13%]",
-                              optional: true,
+                              width: "w-36",
+                              optional: "lg",
                             },
+                            // Truncating free text — the one secondary column
+                            // that can use extra width, so it keeps a percentage
+                            // share (its content caps at max-w-[16rem] anyway).
+                            // Deferred to `xl`: in the 1024–1279 band the fixed
+                            // columns leave the Task column ~150px if Currently
+                            // also takes a share, so the least-dense column sits
+                            // out until the viewport can afford it.
                             {
                               label: "Currently",
-                              width: "w-[15%]",
-                              optional: true,
+                              width: "w-[13%]",
+                              optional: "xl",
                             },
                             {
                               label: "Expires",
-                              width: "w-[10%]",
-                              optional: true,
+                              width: "w-[9.5rem]",
+                              optional: "lg",
                             },
                             // Holds the "End session" control (on running
                             // interactive rows) alongside the terminate control.
@@ -719,14 +737,14 @@ export function AgentDashboard({
                             // icon + glyph pair without wrapping, because a
                             // wrapped second line would make a running row taller
                             // than its single-line neighbours. The full-text
-                            // "End session" button only appears from `lg` up,
-                            // where the narrower `lg:w-[16%]` share still holds it
-                            // and the terminate glyph on one line.
-                            { label: "", width: "w-[30%] lg:w-[16%]" },
+                            // buttons ("End session", Confirm/Cancel) appear from
+                            // `lg` up; the fixed `md:w-40` holds the widest pair
+                            // (123px) and the terminate glyph on one line.
+                            { label: "", width: "w-[30%] md:w-40" },
                           ].map((h, i) => (
                             <th
                               key={i}
-                              className={`px-3 py-2 align-middle md:px-4 md:py-3 ${h.width} ${h.center ? "text-center" : ""} ${h.optional ? "hidden lg:table-cell" : ""}`}
+                              className={`px-3 py-2 align-middle md:px-4 md:py-3 ${h.width} ${h.center ? "text-center" : ""} ${h.optional === "lg" ? "hidden lg:table-cell" : ""} ${h.optional === "xl" ? "hidden xl:table-cell" : ""}`}
                             >
                               {h.label}
                             </th>

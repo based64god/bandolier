@@ -35,16 +35,18 @@ const page = await browser.newPage({ viewport: { width: 360, height: 720 } });
 
 await page.goto(`${BASE}/dev/task-row`);
 
-const row = page.locator("[data-testid='rows'] tr");
+// The harness renders extra worst-case rows for layout measurement; this spec
+// exercises only the first (the original running manual task).
+const row = page.locator("[data-testid='rows'] tr").first();
 const rowHeight = async () => (await row.boundingBox()).height;
 
 const glyphHeight = await rowHeight();
 
-await page.getByRole("button", { name: "Terminate agent" }).click();
+await row.getByRole("button", { name: "Terminate agent" }).click();
 check(
   "confirm/cancel pair is revealed",
-  (await page.getByRole("button", { name: "Confirm" }).count()) === 1 &&
-    (await page.getByRole("button", { name: "Cancel" }).count()) === 1,
+  (await row.getByRole("button", { name: "Confirm" }).count()) === 1 &&
+    (await row.getByRole("button", { name: "Cancel" }).count()) === 1,
 );
 
 const confirmHeight = await rowHeight();

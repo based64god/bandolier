@@ -133,7 +133,7 @@ export function TaskRow({
       <td className="hidden px-3 py-2 align-middle md:px-4 md:py-3 xl:table-cell">
         <span
           title={agent.currently ?? undefined}
-          className="block max-w-[16rem] truncate text-xs text-white/40 italic"
+          className="block truncate text-xs text-white/40 italic"
         >
           {agent.currently ?? "—"}
         </span>

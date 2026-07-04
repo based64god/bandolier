@@ -714,8 +714,9 @@ export function AgentDashboard({
                             },
                             // Truncating free text — the one secondary column
                             // that can use extra width, so it keeps a percentage
-                            // share (its content caps at max-w-[16rem] anyway).
-                            // Deferred to `xl`: in the 1024–1279 band the fixed
+                            // share and its text fills that share (grows/shrinks
+                            // with the viewport) rather than stopping at a fixed
+                            // cap. Deferred to `xl`: in the 1024–1279 band the fixed
                             // columns leave the Task column ~150px if Currently
                             // also takes a share, so the least-dense column sits
                             // out until the viewport can afford it.

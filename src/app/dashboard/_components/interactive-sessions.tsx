@@ -12,6 +12,7 @@ import { StatusBadge } from "./status-badge";
 import { TokenReadout } from "./token-readout";
 import {
   ACTION_ROW_MIN_H,
+  LG_TASK_COLUMNS,
   MOBILE_TASK_COLUMNS,
   TASK_COLUMNS,
 } from "./task-row";
@@ -19,26 +20,40 @@ import { useAcpSession } from "./use-acp-session";
 
 type Task = RouterOutputs["agents"]["list"][number];
 
-// Mirrors Tailwind's `lg` breakpoint (64rem / 1024px), which is where the table
-// shows or hides its three secondary columns.
+// Mirror Tailwind's `lg` (64rem / 1024px) and `xl` (80rem / 1280px)
+// breakpoints: "Created by"/"Expires" join the table at `lg`, "Currently" at
+// `xl`.
 const LG_QUERY = "(min-width: 64rem)";
+const XL_QUERY = "(min-width: 80rem)";
 
 /**
- * Tracks whether the viewport is at or above the `lg` breakpoint, so the
- * expanded row can span exactly the columns that are actually rendered. Starts
- * `true` to match SSR (where the optional columns are present) and corrects on
+ * The number of task-table columns rendered at the current viewport, so the
+ * expanded row can span exactly the columns that actually exist. Starts at the
+ * full count to match SSR (where every column is present) and corrects on
  * mount, avoiding a hydration mismatch.
  */
-function useIsDesktop() {
-  const [isDesktop, setIsDesktop] = useState(true);
+function useTaskColumnCount() {
+  const [count, setCount] = useState(TASK_COLUMNS);
   useEffect(() => {
-    const mql = window.matchMedia(LG_QUERY);
-    const update = () => setIsDesktop(mql.matches);
+    const lg = window.matchMedia(LG_QUERY);
+    const xl = window.matchMedia(XL_QUERY);
+    const update = () =>
+      setCount(
+        xl.matches
+          ? TASK_COLUMNS
+          : lg.matches
+            ? LG_TASK_COLUMNS
+            : MOBILE_TASK_COLUMNS,
+      );
     update();
-    mql.addEventListener("change", update);
-    return () => mql.removeEventListener("change", update);
+    lg.addEventListener("change", update);
+    xl.addEventListener("change", update);
+    return () => {
+      lg.removeEventListener("change", update);
+      xl.removeEventListener("change", update);
+    };
   }, []);
-  return isDesktop;
+  return count;
 }
 
 /**
@@ -73,7 +88,7 @@ export function InteractiveRow({
   // there's nothing to interact with, so keep them out of the way. Live
   // sessions start open. The effects below handle later status transitions.
   const [collapsed, setCollapsed] = useState(!running);
-  const isDesktop = useIsDesktop();
+  const columnCount = useTaskColumnCount();
 
   // Anchor on the collapsed header row so we can bring the whole session to the
   // top of the viewport when it opens: its expanded body is ~full-height
@@ -239,9 +254,10 @@ export function InteractiveRow({
           />
         </td>
 
-        {/* Currently — clamped to one line, full text on hover. Shown only in
-            the full layout (lg+). */}
-        <td className="hidden px-3 py-2 align-middle md:px-4 md:py-3 lg:table-cell">
+        {/* Currently — clamped to one line, full text on hover. Shown only
+            from `xl` up, where the table can afford it alongside the fixed
+            columns (matches TaskRow). */}
+        <td className="hidden px-3 py-2 align-middle md:px-4 md:py-3 xl:table-cell">
           <span
             title={agent.currently ?? undefined}
             className="block max-w-[16rem] truncate text-xs text-white/40 italic"
@@ -372,14 +388,11 @@ export function InteractiveRow({
           width. */}
       {!collapsed && (
         <tr className={awaiting ? "bg-amber-500/[0.06]" : undefined}>
-          {/* Span only the columns that exist at the current breakpoint. The
-              three secondary columns are dropped below `lg`, so spanning all
-              seven there would conjure phantom columns and re-balance the
-              table, shifting every row sideways as it expands. */}
-          <td
-            colSpan={isDesktop ? TASK_COLUMNS : MOBILE_TASK_COLUMNS}
-            className="p-0"
-          >
+          {/* Span only the columns that exist at the current breakpoint —
+              secondary columns join at `lg` and `xl` — so the expanded body
+              never conjures phantom columns that would re-balance the table
+              and shift every row sideways as it expands. */}
+          <td colSpan={columnCount} className="p-0">
             {/* Fill the viewport (`85vh`) so an expanded session dominates the
                 screen: the header and composer take their natural height while
                 the conversation flexes to fill the rest and scrolls. Because a

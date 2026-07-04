@@ -101,17 +101,28 @@ export function OverviewPanel({ notify }: { notify: boolean }) {
                 // can't shrink the unbreakable word, so it overflows to the
                 // right and the centered badges read as left-of-header; the
                 // extra width lets text-center actually center the label over
-                // the badges. Back to the compact 14% once md gives it room.
-                { label: "Status", width: "w-[18%] md:w-[10%]", center: true },
+                // the badges. From `md` up the column is fixed to its widest
+                // pill ("Terminating" + padding) — the pill doesn't grow with
+                // the viewport, so a percentage share both starved it at 768px
+                // and wasted width at 1920px that belongs to Repository.
+                // Shares the same widths as the task table (agent-dashboard).
+                {
+                  label: "Status",
+                  width: "w-[18%] md:w-[7.5rem]",
+                  center: true,
+                },
                 // Wider on mobile so the output pill (Issue/PR + state glyph)
                 // fits its cell; without the extra room the fixed layout
                 // starves this column and the badge spills into Repository.
-                // Shares the same widths as the task table (agent-dashboard).
-                { label: "Output", width: "w-[23%] md:w-[11%]", center: true },
+                // Fixed to the widest badge ("Issue ⏺") from `md` up, like
+                // Status. Shares the same widths as the task table.
+                { label: "Output", width: "w-[23%] md:w-[7rem]", center: true },
                 { label: "Repository", width: "w-[auto]" },
                 // Dropped on narrow viewports where space is limited — the row
-                // stays readable with Status/Output/Repository alone.
-                { label: "Created by", width: "w-[15%]", optional: true },
+                // stays readable with Status/Output/Repository alone. Fixed to
+                // the "Issue #12345" source badge; long usernames truncate
+                // (see SourceBadge).
+                { label: "Created by", width: "w-36", optional: true },
               ].map((h, i) => (
                 <th
                   key={i}

@@ -11,16 +11,21 @@ import { TokenReadout } from "./token-readout";
 
 type Task = RouterOutputs["agents"]["list"][number];
 
-/** Column count of the task table — interactive rows span all of them. */
+/** Column count of the full (xl+) task table — interactive rows span all of them. */
 export const TASK_COLUMNS = 7;
 
 /**
- * Columns that remain in the compact layout — the three secondary columns
- * ("Created by", "Currently", "Expires") are dropped below the `lg` breakpoint
- * via `hidden lg:table-cell`. An interactive row's expanded body must span only
- * the columns that actually exist at the current breakpoint: a `colSpan` larger
- * than the live column count would conjure phantom columns and re-balance the
- * whole table, shifting every row horizontally when it expands.
+ * Column count in the 1024–1279 band, where "Currently" (hidden xl:table-cell)
+ * hasn't joined yet but "Created by"/"Expires" (hidden lg:table-cell) have.
+ */
+export const LG_TASK_COLUMNS = 6;
+
+/**
+ * Columns that remain in the compact layout below `lg`. An interactive row's
+ * expanded body must span only the columns that actually exist at the current
+ * breakpoint: a `colSpan` larger than the live column count would conjure
+ * phantom columns and re-balance the whole table, shifting every row
+ * horizontally when it expands.
  */
 export const MOBILE_TASK_COLUMNS = 4;
 
@@ -122,8 +127,10 @@ export function TaskRow({
 
       {/* Live "currently" line — clamped to one line so a long output can't
           grow the row height; the full text is available on hover. Shown only
-          in the full layout (lg+). */}
-      <td className="hidden px-3 py-2 align-middle md:px-4 md:py-3 lg:table-cell">
+          from `xl` up: between lg and xl the fixed-width columns leave the Task
+          column too little room if this one also takes a share (see the header
+          in agent-dashboard). */}
+      <td className="hidden px-3 py-2 align-middle md:px-4 md:py-3 xl:table-cell">
         <span
           title={agent.currently ?? undefined}
           className="block max-w-[16rem] truncate text-xs text-white/40 italic"

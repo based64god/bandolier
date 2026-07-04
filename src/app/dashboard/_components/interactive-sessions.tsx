@@ -82,6 +82,7 @@ export function InteractiveRow({
   focusSignal?: number | null;
 }) {
   const [ending, setEnding] = useState(false);
+  const [confirmEnd, setConfirmEnd] = useState(false);
   const [confirmKill, setConfirmKill] = useState(false);
   const running = agent.status === "Running" || agent.status === "Pending";
   // Default closed for sessions that are already done when first mounted —
@@ -169,6 +170,13 @@ export function InteractiveRow({
   // gone). The pod lingers in the list while Kubernetes winds it down.
   const terminating = terminate.isPending || terminate.isSuccess;
 
+  // Optimistic cue held from the confirmed end-session click until the pod
+  // actually stops running: the frame is in flight and the agent is committing
+  // and opening its PR while still Running, so front a "Finalizing" state until
+  // the real terminal status (Succeeded/Failed) lands. Bounded by `running` so
+  // the cue clears the moment the session resolves rather than lingering.
+  const finalizing = ending && running;
+
   const rowTint = terminating
     ? "opacity-50"
     : awaiting
@@ -194,10 +202,12 @@ export function InteractiveRow({
           <div className="flex flex-col items-center gap-1">
             {terminating ? (
               <StatusBadge status="Terminating" />
+            ) : finalizing ? (
+              <StatusBadge status="Finalizing" />
             ) : (
               <StatusBadge status={agent.status} failure={agent.failure} />
             )}
-            {!terminating && awaiting && (
+            {!terminating && !finalizing && awaiting && (
               <span
                 title="Waiting"
                 aria-label="Waiting"
@@ -310,6 +320,11 @@ export function InteractiveRow({
               // Deletion requested — controls are gone (nothing left to
               // confirm) and the status pill carries the "Terminating" cue.
               <span className="text-xs text-white/25">Terminating…</span>
+            ) : finalizing ? (
+              // End-session confirmed — the frame is in flight and the agent is
+              // wrapping up (commit + PR). Controls are gone; the status pill
+              // carries the "Finalizing" cue.
+              <span className="text-xs text-white/25">Finalizing…</span>
             ) : confirmKill ? (
               // Two-step confirm for the destructive terminate, mirroring the
               // non-interactive TaskRow: the red × arms this state, then a
@@ -357,15 +372,53 @@ export function InteractiveRow({
                   </svg>
                 </button>
               </>
+            ) : confirmEnd ? (
+              // Two-step confirm for ending the session, mirroring the terminate
+              // flow's footprint (compact glyphs on mobile, full labels from
+              // `lg` up). Ending isn't destructive — it commits and opens a PR —
+              // so the confirm reads neutral rather than red. Confirming arms the
+              // optimistic "Finalizing" cue and dispatches the end-session frame.
+              <>
+                <button
+                  onClick={() => {
+                    setConfirmEnd(false);
+                    setEnding(true);
+                    session.endSession();
+                  }}
+                  aria-label="Confirm end session"
+                  className="flex items-center justify-center rounded border border-white/10 bg-white/10 p-1 text-xs whitespace-nowrap hover:bg-white/20 lg:px-2 lg:py-1"
+                >
+                  <span className="hidden lg:inline">Confirm</span>
+                  <svg
+                    viewBox="0 0 16 16"
+                    fill="currentColor"
+                    aria-hidden="true"
+                    className="h-5 w-5 lg:hidden"
+                  >
+                    <path d="M6.5 10.086 3.707 7.293a1 1 0 0 0-1.414 1.414l3.5 3.5a1 1 0 0 0 1.414 0l7-7a1 1 0 0 0-1.414-1.414L6.5 10.086Z" />
+                  </svg>
+                </button>
+                <button
+                  onClick={() => setConfirmEnd(false)}
+                  aria-label="Cancel"
+                  className="flex items-center justify-center rounded bg-white/10 p-1 text-xs hover:bg-white/20 lg:px-2 lg:py-1"
+                >
+                  <span className="hidden lg:inline">Cancel</span>
+                  <svg
+                    viewBox="0 0 16 16"
+                    fill="currentColor"
+                    aria-hidden="true"
+                    className="h-5 w-5 lg:hidden"
+                  >
+                    <path d="M6.53 3.47a.75.75 0 0 1 0 1.06L4.81 6.25H10a3.75 3.75 0 0 1 0 7.5H8a.75.75 0 0 1 0-1.5h2a2.25 2.25 0 0 0 0-4.5H4.81l1.72 1.72a.75.75 0 1 1-1.06 1.06l-3-3a.75.75 0 0 1 0-1.06l3-3a.75.75 0 0 1 1.06 0Z" />
+                  </svg>
+                </button>
+              </>
             ) : (
               <>
                 {running && (
                   <button
-                    onClick={() => {
-                      setEnding(true);
-                      session.endSession();
-                    }}
-                    disabled={ending}
+                    onClick={() => setConfirmEnd(true)}
                     className="flex items-center justify-center rounded-md border border-white/10 p-1 text-xs whitespace-nowrap text-white/60 hover:bg-white/10 disabled:opacity-40 lg:px-3 lg:py-1.5"
                     title="Close the session and open a PR if there are commits"
                     aria-label="End session"
@@ -373,9 +426,7 @@ export function InteractiveRow({
                     {/* Full label from `lg` up; a compact "stop" glyph on mobile
                         so the control keeps the terminate glyph's footprint and
                         the two stay on one line within the slim Actions column. */}
-                    <span className="hidden lg:inline">
-                      {ending ? "Ending…" : "End session"}
-                    </span>
+                    <span className="hidden lg:inline">End session</span>
                     <svg
                       viewBox="0 0 16 16"
                       fill="currentColor"

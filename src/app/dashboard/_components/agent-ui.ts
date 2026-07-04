@@ -13,9 +13,12 @@ export const STATUS_STYLES: Record<string, string> = {
   // request propagates through Kubernetes (the list only refreshes once the
   // cluster reflects it). "Deploying" fronts a just-submitted task before its
   // pod appears; "Terminating" marks a row whose deletion has been requested but
-  // whose pod is still winding down. Both spin (see SPINNER_STATUSES).
+  // whose pod is still winding down; "Finalizing" marks an interactive session
+  // whose end-session request is being processed (committing, opening a PR)
+  // while the pod is still Running. All spin (see SPINNER_STATUSES).
   Deploying: "border-purple-500/40 bg-purple-500/20 text-purple-300",
   Terminating: "border-orange-500/40 bg-orange-500/20 text-orange-300",
+  Finalizing: "border-sky-500/40 bg-sky-500/20 text-sky-300",
 };
 
 // Statuses that read better as motion than a static glyph. An in-flight agent
@@ -26,6 +29,7 @@ export const SPINNER_STATUSES = new Set([
   // Optimistic in-flight states: the request is propagating through the cluster.
   "Deploying",
   "Terminating",
+  "Finalizing",
 ]);
 
 // Single-path glyphs (Heroicons mini, 20×20 viewBox, fill-rule evenodd) that

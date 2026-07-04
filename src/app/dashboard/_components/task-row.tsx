@@ -104,7 +104,7 @@ export function TaskRow({
           />
           <span
             title={taskNameTooltip(agent)}
-            className="min-w-0 truncate text-sm text-white/90"
+            className="min-w-0 flex-1 truncate text-sm text-white/90"
           >
             {agent.displayName}
           </span>

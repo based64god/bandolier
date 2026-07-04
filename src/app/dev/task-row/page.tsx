@@ -33,15 +33,18 @@ export default function TaskRowHarness() {
     source: "manual",
   } as unknown as Task;
 
-  // Column widths copied from the real task table's <thead> (agent-dashboard).
+  // Columns copied from the real task table's <thead> (agent-dashboard): the
+  // same percentage widths and the same labels, so the header row can be
+  // measured here (does a label wrap at `lg`?) without the real dashboard's
+  // auth/data.
   const cols = [
-    "w-[18%] lg:w-[10%]",
-    "w-[23%] lg:w-[11%]",
-    "w-auto",
-    "w-[16%] hidden lg:table-cell",
-    "w-[15%] hidden lg:table-cell",
-    "w-[12%] hidden lg:table-cell",
-    "w-[30%] lg:w-[16%]",
+    { width: "w-[18%] lg:w-[10%]", label: "Status" },
+    { width: "w-[23%] lg:w-[11%]", label: "Output" },
+    { width: "w-auto", label: "Task" },
+    { width: "w-[13%] hidden lg:table-cell", label: "Created by" },
+    { width: "w-[15%] hidden lg:table-cell", label: "Currently" },
+    { width: "w-[10%] hidden lg:table-cell", label: "Expires" },
+    { width: "w-[30%] lg:w-[16%]", label: "" },
   ];
 
   return (
@@ -50,9 +53,15 @@ export default function TaskRowHarness() {
       <div className="overflow-hidden rounded-xl border border-white/10">
         <table className="w-full table-fixed text-sm">
           <thead>
-            <tr className="border-b border-white/10 text-left text-xs text-white/50">
-              {cols.map((w, i) => (
-                <th key={i} className={`px-3 py-2 ${w}`} />
+            <tr className="border-b border-white/10 text-left text-xs font-medium tracking-wider text-white/50 uppercase">
+              {cols.map((c, i) => (
+                <th
+                  key={i}
+                  data-testid={`header-${i}`}
+                  className={`px-3 py-2 align-middle md:px-4 md:py-3 ${c.width}`}
+                >
+                  {c.label}
+                </th>
               ))}
             </tr>
           </thead>

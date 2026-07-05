@@ -443,6 +443,15 @@ All three suites run in CI on every push and pull request (see
 
 ---
 
+## Contributing
+
+Before pushing, run the full verification loop — `pnpm check`, `pnpm test`,
+`pnpm test:e2e`, and `go test ./...` (from `agent-harness/`). See
+[CONTRIBUTING.md](CONTRIBUTING.md) for the details, plus the cross-language
+wire-contract rule and notes on `patches/` and `skills-lock.json`.
+
+---
+
 ## Security notes
 
 - **Per-user credentials.** Agents only ever run with the deploying (or issue-opening) user's own GitHub, model-provider, and cluster credentials. There is no server-side provider identity to fall back on.

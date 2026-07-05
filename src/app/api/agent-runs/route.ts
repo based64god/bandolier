@@ -10,9 +10,6 @@ import {
   resolveArtifactStore,
   transcriptKey,
 } from "~/server/agents/artifacts";
-import { getRepoBotToken } from "~/server/agents/github-app";
-import { enablePullRequestAutoMerge } from "~/server/agents/github-issues";
-import { getRepoWebhookConfig } from "~/server/agents/webhook-config";
 import { db } from "~/server/db";
 import { taskRun } from "~/server/db/schema";
 import { sendPushToUser } from "~/server/push";
@@ -168,41 +165,6 @@ export async function POST(req: NextRequest) {
       updatedAt: new Date(),
     })
     .where(eq(taskRun.jobName, jobName));
-
-  // Auto-merge: this callback is the moment we learn a Bandolier run produced a
-  // PR, so a repo that opted in has GitHub's native auto-merge enabled on it now
-  // (it then lands once its required checks pass). Best-effort and gated behind
-  // the config read so it only runs for opted-in repos; enablePullRequestAutoMerge
-  // never throws and merely returns a reason on failure (e.g. no branch
-  // protection, method not allowed). Uses the app-installation bot token, like
-  // the webhook handlers' PR writes.
-  const prNumber = pullRequestUrl?.match(/\/pull\/(\d+)/)?.[1];
-  if (run?.repoFullName && prNumber) {
-    const repoConfig = await getRepoWebhookConfig(db, run.repoFullName);
-    if (repoConfig?.autoMergeBandolierPrs) {
-      const botToken = await getRepoBotToken(db, run.repoFullName, Date.now());
-      if (botToken) {
-        const result = await enablePullRequestAutoMerge(
-          botToken,
-          run.repoFullName,
-          Number(prNumber),
-        );
-        console.log("[bandolier:ingest] auto-merge", {
-          job: jobName,
-          repo: run.repoFullName,
-          pr: prNumber,
-          ok: result.ok,
-          ...(result.error && { error: result.error }),
-        });
-      } else {
-        console.log("[bandolier:ingest] auto-merge — no bot token", {
-          job: jobName,
-          repo: run.repoFullName,
-          pr: prNumber,
-        });
-      }
-    }
-  }
 
   // Background push: this callback is the server-side "run finished" signal, so
   // alert the owner's subscribed browsers even if the app is closed. Best-effort

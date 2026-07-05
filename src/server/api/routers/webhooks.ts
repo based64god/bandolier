@@ -208,7 +208,6 @@ export const webhooksRouter = createTRPCRouter({
           computeMemory: repoWebhookConfig.computeMemory,
           systemPrompt: repoWebhookConfig.systemPrompt,
           resumeOnCiFailure: repoWebhookConfig.resumeOnCiFailure,
-          autoMergeBandolierPrs: repoWebhookConfig.autoMergeBandolierPrs,
           allowPrivateEgress: repoWebhookConfig.allowPrivateEgress,
           allowAllPortsEgress: repoWebhookConfig.allowAllPortsEgress,
           networkPolicyYaml: repoWebhookConfig.networkPolicyYaml,
@@ -234,9 +233,6 @@ export const webhooksRouter = createTRPCRouter({
         // Whether a failing CI pipeline auto-resumes the run that produced the
         // PR (off unless a row turns it on).
         resumeOnCiFailure: row?.resumeOnCiFailure ?? false,
-        // Whether Bandolier-produced PRs get GitHub auto-merge enabled (off
-        // unless a row turns it on).
-        autoMergeBandolierPrs: row?.autoMergeBandolierPrs ?? false,
         // Network-policy egress toggles (both off unless a row turns them on).
         allowPrivateEgress,
         allowAllPortsEgress,
@@ -406,26 +402,6 @@ export const webhooksRouter = createTRPCRouter({
       await requireRepoAdmin(ctx, input.repoFullName);
       await upsertRepoConfig(ctx.db, input.repoFullName, ctx.session.user.id, {
         resumeOnCiFailure: input.enabled,
-      });
-      return { success: true };
-    }),
-
-  // Toggle whether every pull request a Bandolier run reports as its output gets
-  // GitHub's native auto-merge enabled when the run finishes, so it lands once
-  // its required checks pass. Admin-only; off by default since it lets an agent's
-  // work merge without a human pressing the button. Partial upsert so it doesn't
-  // clobber other config.
-  setAutoMergeBandolierPrs: protectedProcedure
-    .input(
-      z.object({
-        repoFullName: z.string().min(1),
-        enabled: z.boolean(),
-      }),
-    )
-    .mutation(async ({ ctx, input }) => {
-      await requireRepoAdmin(ctx, input.repoFullName);
-      await upsertRepoConfig(ctx.db, input.repoFullName, ctx.session.user.id, {
-        autoMergeBandolierPrs: input.enabled,
       });
       return { success: true };
     }),

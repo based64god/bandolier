@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useState, useSyncExternalStore } from "react";
 
 import { api } from "~/trpc/react";
 import {
@@ -9,6 +9,7 @@ import {
   SecretForm,
   useCredentialMutations,
 } from "./credential-ui";
+import { Modal } from "./modal";
 import { parseAwsCredentials } from "./parse-aws";
 
 function AnthropicSection() {
@@ -835,54 +836,32 @@ function ApiKeysSection() {
 }
 
 export function SettingsModal({ onClose }: { onClose: () => void }) {
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [onClose]);
-
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
-      onClick={onClose}
+    <Modal
+      onClose={onClose}
+      title="Settings"
+      headerClassName="flex shrink-0 items-center justify-between border-b border-white/10 px-5 py-4"
+      panelClassName="flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-xl border border-white/20 bg-[var(--surface-panel)]"
     >
-      <div
-        className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-xl border border-white/20 bg-[var(--surface-panel)]"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
-          <h2 className="text-sm font-semibold text-white">Settings</h2>
-          <button
-            onClick={onClose}
-            className="text-white/40 hover:text-white"
-            aria-label="Close"
-          >
-            ✕
-          </button>
-        </div>
-
-        <div className="space-y-6 px-5 py-5">
-          <p className="text-xs text-white/40">
-            Configure how your agents reach their model. For Claude, AWS Bedrock
-            takes precedence when both are set; otherwise your Anthropic key is
-            used. OpenAI keys and Gemini project credentials add their models to
-            the picker alongside Claude — you choose per deploy. Credentials are
-            verified before they&apos;re saved and again before each deploy.
-          </p>
-          <AnthropicSection />
-          <div className="border-t border-white/10" />
-          <OpenAISection />
-          <div className="border-t border-white/10" />
-          <GeminiSection />
-          <div className="border-t border-white/10" />
-          <AwsSection />
-          <KubeconfigSection />
-          <ComputeSection />
-          <ApiKeysSection />
-        </div>
+      <div className="space-y-6 overflow-y-auto px-5 py-5">
+        <p className="text-xs text-white/40">
+          Configure how your agents reach their model. For Claude, AWS Bedrock
+          takes precedence when both are set; otherwise your Anthropic key is
+          used. OpenAI keys and Gemini project credentials add their models to
+          the picker alongside Claude — you choose per deploy. Credentials are
+          verified before they&apos;re saved and again before each deploy.
+        </p>
+        <AnthropicSection />
+        <div className="border-t border-white/10" />
+        <OpenAISection />
+        <div className="border-t border-white/10" />
+        <GeminiSection />
+        <div className="border-t border-white/10" />
+        <AwsSection />
+        <KubeconfigSection />
+        <ComputeSection />
+        <ApiKeysSection />
       </div>
-    </div>
+    </Modal>
   );
 }

@@ -354,6 +354,19 @@ configuration modal (Network policy egress). Both toggles are **off by default**
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `APP_PASSWORD` | When set, a shared password is required before reaching any page or API (webhooks and the REST API are exempt — they authenticate on their own). |
 
+### Web Push (optional)
+
+Push notifications alert a user when their agent finishes even with the app
+closed. Generate a keypair with `pnpm vapid:generate` and set all three
+variables; leave them unset to disable push (in-tab foreground alerts still
+work regardless). The public and private keys must be from the same pair.
+
+| Variable                       | Description                                                        |
+| ------------------------------ | ------------------------------------------------------------------ |
+| `VAPID_SUBJECT`                | A `mailto:` or `https:` URL identifying the sender to push services. |
+| `VAPID_PRIVATE_KEY`            | The private key from `pnpm vapid:generate`. Server-side only.       |
+| `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | The public key from `pnpm vapid:generate`. Exposed to the browser as the subscription's `applicationServerKey`. |
+
 ### Run artifacts (optional)
 
 Each run's full transcript can be uploaded to S3 so it survives the Job's one-week TTL. Storage is configured **per repository** in the repo-config modal (admin-only, under Shared credentials → Run artifact storage): the repo names an S3 bucket it owns (AWS or any S3-compatible endpoint such as MinIO) plus credentials scoped to it. There is deliberately no server-wide bucket — run data belongs to the repo, never the Bandolier operator — so runs for repos without a configured bucket (and runs with no repo) simply aren't persisted. The credentials stay server-side; they are never injected into agent pods.
@@ -414,6 +427,7 @@ deploy/
 | `pnpm test:watch`                         | Run Vitest in watch mode.                                                  |
 | `pnpm test:coverage`                      | Run the suite and emit a coverage report under `coverage/`.                |
 | `pnpm test:e2e`                           | Run the Playwright browser smoke tests against the `/dev/*` harness routes. |
+| `pnpm vapid:generate`                     | Generate a Web Push (VAPID) keypair for the push env vars.                 |
 
 ---
 

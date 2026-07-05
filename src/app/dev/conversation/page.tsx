@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import { Conversation } from "~/app/dashboard/_components/interactive-sessions";
+import { Conversation } from "~/app/dashboard/_components/conversation";
 import type { TimelineItem } from "~/lib/acp/timeline";
 
 /**

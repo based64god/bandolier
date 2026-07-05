@@ -32,6 +32,7 @@ const base = externalBase ?? `http://localhost:${port}`;
 const ROUTES = [
   "/dev/composer",
   "/dev/conversation",
+  "/dev/credential-ui",
   "/dev/effort-picker",
   "/dev/searchable-select",
   "/dev/status-badge",
@@ -82,6 +83,7 @@ function runNode(file) {
         ...process.env,
         COMPOSER_BASE_URL: base,
         CONVERSATION_BASE_URL: base,
+        CREDENTIAL_UI_BASE_URL: base,
         EFFORT_BASE_URL: base,
         SELECT_BASE_URL: base,
         STATUS_BADGE_BASE_URL: base,

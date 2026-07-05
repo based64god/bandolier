@@ -2,18 +2,16 @@
 
 import { useEffect, useState } from "react";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 
-import { BandolierIcon } from "~/app/_components/bandolier-icon";
 import { InstallButton } from "~/app/_components/install-button";
 import { repoToNamespace } from "~/server/agents/namespace";
 import { authClient } from "~/server/better-auth/client";
 import { api } from "~/trpc/react";
 import { isAgentOutputResolved, nextAwaitingTarget } from "./agent-ui";
+import { DashboardHeader } from "./dashboard-header";
 import { DeployModal } from "./deploy-modal";
 import { useHideResolved, useOnlyMine } from "./view-prefs";
-import { InteractiveRow } from "./interactive-sessions";
 import { LogModal } from "./log-modal";
 import {
   primeAudio,
@@ -25,88 +23,10 @@ import {
   useNotifyPref,
 } from "./notifications";
 import { OverviewPanel } from "./overview-panel";
-import { recordRecentRepo, useRecentRepos } from "./recent-repos";
+import { recordRecentRepo } from "./recent-repos";
 import { RepoConfigModal } from "./repo-config-modal";
-import { SearchableSelect, type SelectOption } from "./searchable-select";
 import { SettingsModal } from "./settings-modal";
-import { PendingDeployRow, TaskRow } from "./task-row";
-
-type Repo = {
-  fullName: string;
-  cloneUrl: string;
-  defaultBranch: string;
-  namespace: string;
-  private: boolean;
-  isAdmin: boolean;
-};
-
-function VisibilityBadge({ isPrivate }: { isPrivate: boolean }) {
-  return (
-    <span
-      className={`inline-flex shrink-0 items-center rounded-full border px-1.5 py-0.5 text-[10px] leading-none font-medium tracking-wide uppercase ${
-        isPrivate
-          ? "border-amber-500/30 bg-amber-500/10 text-amber-300/80"
-          : "border-green-500/30 bg-green-500/10 text-green-300/80"
-      }`}
-    >
-      {isPrivate ? "Private" : "Public"}
-    </span>
-  );
-}
-
-function RepoSelector({
-  repos,
-  selected,
-  onChange,
-  loading,
-}: {
-  repos: Repo[];
-  selected: Repo | null;
-  onChange: (fullName: string) => void;
-  loading: boolean;
-}) {
-  const sorted = [...repos].sort((a, b) =>
-    a.fullName.toLowerCase().localeCompare(b.fullName.toLowerCase()),
-  );
-  const recentRepos = useRecentRepos();
-
-  const options: SelectOption[] = sorted.map((r) => {
-    const [owner, name] = r.fullName.split("/");
-    return {
-      value: r.fullName,
-      searchText: r.fullName.toLowerCase(),
-      label: (
-        // `@container` makes the children respond to the dropdown's own width.
-        // As it narrows we drop the owner first (`@max-[220px]`), then the
-        // visibility badge (`@max-[150px]`); the repo name always stays (it
-        // truncates rather than disappearing).
-        <span className="@container flex w-full items-center gap-1.5">
-          <span className="min-w-0 truncate">
-            <span className="text-white/40 @max-[220px]:hidden">{owner}/</span>
-            <span className="text-white">{name}</span>
-          </span>
-          <span className="ml-auto flex shrink-0 items-center @max-[150px]:hidden">
-            <VisibilityBadge isPrivate={r.private} />
-          </span>
-        </span>
-      ),
-    };
-  });
-
-  return (
-    <SearchableSelect
-      className="min-w-0 flex-1 2xl:w-80 2xl:flex-initial"
-      options={options}
-      value={selected?.fullName ?? null}
-      onChange={(v) => v && onChange(v)}
-      placeholder="Select repository"
-      loading={loading}
-      recentValues={recentRepos}
-      searchPlaceholder="Search repositories…"
-      emptyText="No repositories found. Sign out and back in to grant repo access."
-    />
-  );
-}
+import { TaskTable } from "./task-table";
 
 export function AgentDashboard({
   user,
@@ -120,9 +40,6 @@ export function AgentDashboard({
   const [showDeploy, setShowDeploy] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showRepoConfig, setShowRepoConfig] = useState(false);
-  // Mobile-only: the secondary header controls collapse into this menu so the
-  // bar stays within the viewport on narrow screens.
-  const [menuOpen, setMenuOpen] = useState(false);
 
   // The selected repo lives in the URL (repoSlug) so it survives refreshes.
   // Namespace is derived from the slug directly so the agent list can load
@@ -299,286 +216,36 @@ export function AgentDashboard({
     router.push(`/repo/${fullName}`);
   }
 
-  // Deploy is the primary action. It renders in the right-hand group on small
-  // screens (thumb-friendly for phones) but moves to the horizontal centre of
-  // the bar on large viewports, where a centred target better matches how
-  // people drive a desktop. The button markup is shared between both slots.
-  //
-  // It only has any meaning once a repo is selected and a kubeconfig is
-  // present, so rather than showing a greyed-out, unclickable button we omit it
-  // entirely until both are true. `null` here collapses both slots cleanly.
-  const deployButton =
-    selectedRepo && kubeConfigured ? (
-      <button
-        onClick={() => setShowDeploy(true)}
-        className="rounded-lg bg-purple-600 px-3 py-1.5 text-sm font-medium text-black hover:bg-purple-500"
-      >
-        +<span className="hidden sm:inline"> Deploy Agent</span>
-      </button>
-    ) : null;
+  async function handleSignOut() {
+    await authClient.signOut();
+    router.refresh();
+  }
+
+  // The task the log modal is showing — resolved once rather than re-searched
+  // for every prop it feeds.
+  const logAgent = logPod
+    ? (agents.find((a) => a.name === logPod) ?? null)
+    : null;
 
   return (
     <div className="flex min-h-screen flex-col bg-black text-white">
-      {/* Header */}
-      <header className="border-b border-white/10 px-4 py-3 sm:px-6 sm:py-4">
-        {/* A single row at every width. Below xl: the bar is deliberately spare
-            — a hamburger (far left) holding the secondary controls, the repo
-            selector stretching to fill the middle, and Deploy on the right — so
-            the selector keeps a genuinely usable width across the whole
-            mobile-L → laptop range rather than being crushed to a few pixels.
-
-            At xl: there is finally room for everything inline, so the branding
-            text, repo-config button, "updated" stamp, and the notification /
-            settings / account controls all appear and the hamburger retires.
-
-            Deploy lives in the right-hand group up to 2xl:, then jumps to the
-            centre of the bar on the widest viewports (see the centred overlay
-            below). It always renders and never wraps to a new row. */}
-        <div className="relative flex items-center gap-2 sm:gap-3">
-          {/* Centred Deploy — the very widest viewports only. Absolutely centred
-              over the bar so it stays put regardless of how wide the side
-              groups grow. pointer-events are disabled on the wrapper so the
-              empty space either side never swallows clicks meant for the
-              controls beneath. It only switches on at 2xl: — below that the side
-              groups (branding + repo selector + repo config + inline controls)
-              still reach the horizontal centre, so a centred overlay would
-              collide with them. Up to 2xl: Deploy stays in the right-hand
-              group. */}
-          <div className="pointer-events-none absolute inset-x-0 z-10 hidden justify-center 2xl:flex">
-            <div className="pointer-events-auto">{deployButton}</div>
-          </div>
-
-          {/* Hamburger — far left, below xl. Holds the secondary controls
-              (notifications, settings, account, sign out) so the bar never
-              overflows and the repo selector keeps usable width through the
-              mobile-L → laptop range. The inline controls only appear at xl:,
-              where there is finally room for everything at once. */}
-          <div className="relative shrink-0 xl:hidden">
-            <button
-              onClick={() => setMenuOpen((o) => !o)}
-              aria-label="Menu"
-              aria-expanded={menuOpen}
-              aria-haspopup="menu"
-              className="rounded-lg p-1.5 text-white/60 hover:bg-white/10 hover:text-white"
-            >
-              <svg viewBox="0 0 20 20" fill="currentColor" className="h-5 w-5">
-                <path
-                  fillRule="evenodd"
-                  d="M3 5.75A.75.75 0 0 1 3.75 5h12.5a.75.75 0 0 1 0 1.5H3.75A.75.75 0 0 1 3 5.75Zm0 4.25A.75.75 0 0 1 3.75 9.25h12.5a.75.75 0 0 1 0 1.5H3.75A.75.75 0 0 1 3 10Zm.75 3.5a.75.75 0 0 0 0 1.5h12.5a.75.75 0 0 0 0-1.5H3.75Z"
-                  clipRule="evenodd"
-                />
-              </svg>
-            </button>
-            {menuOpen && (
-              <>
-                {/* Click-away backdrop. */}
-                <button
-                  aria-hidden="true"
-                  tabIndex={-1}
-                  onClick={() => setMenuOpen(false)}
-                  className="fixed inset-0 z-10 cursor-default"
-                />
-                <div
-                  role="menu"
-                  className="absolute left-0 z-20 mt-2 w-56 origin-top-left rounded-xl border border-white/10 bg-[var(--surface-panel)] p-2 shadow-xl"
-                >
-                  <div className="flex items-center gap-2 border-b border-white/10 px-2 pb-2">
-                    {user.image && (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={user.image}
-                        alt={user.name}
-                        className="h-7 w-7 rounded-full"
-                      />
-                    )}
-                    <span className="truncate text-sm text-white/70">
-                      {user.name}
-                    </span>
-                  </div>
-                  {selectedRepo?.isAdmin && (
-                    <button
-                      role="menuitem"
-                      onClick={() => {
-                        setMenuOpen(false);
-                        setShowRepoConfig(true);
-                      }}
-                      className="mt-1 block w-full rounded-lg px-2 py-2 text-left text-sm text-white/70 hover:bg-white/10 hover:text-white"
-                    >
-                      Repo config
-                    </button>
-                  )}
-                  <button
-                    role="menuitem"
-                    onClick={() => {
-                      setMenuOpen(false);
-                      void toggleNotify();
-                    }}
-                    className="block w-full rounded-lg px-2 py-2 text-left text-sm text-white/70 hover:bg-white/10 hover:text-white"
-                  >
-                    {notify ? "Disable notifications" : "Enable notifications"}
-                  </button>
-                  <button
-                    role="menuitem"
-                    onClick={() => {
-                      setMenuOpen(false);
-                      setShowSettings(true);
-                    }}
-                    className="block w-full rounded-lg px-2 py-2 text-left text-sm text-white/70 hover:bg-white/10 hover:text-white"
-                  >
-                    Settings
-                  </button>
-                  <button
-                    role="menuitem"
-                    onClick={async () => {
-                      setMenuOpen(false);
-                      await authClient.signOut();
-                      router.refresh();
-                    }}
-                    className="block w-full rounded-lg px-2 py-2 text-left text-sm text-white/70 hover:bg-white/10 hover:text-white"
-                  >
-                    Sign out
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-
-          <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
-            <h1 className="shrink-0 text-2xl font-bold tracking-tight">
-              <Link
-                href="/"
-                className="flex items-center gap-2.5 transition hover:opacity-80"
-              >
-                <BandolierIcon className="h-7 w-7 shrink-0" />
-                <span className="hidden tracking-[0.15em] uppercase xl:inline">
-                  Bandolier
-                </span>
-              </Link>
-            </h1>
-
-            <RepoSelector
-              repos={repos}
-              selected={selectedRepo}
-              onChange={handleRepoChange}
-              loading={reposLoading}
-            />
-
-            {/* Repo config (webhooks + agent image) — only when the user can
-                manage this repo (admin on GitHub). Kept on the left so toggling
-                it doesn't shift the Deploy button. */}
-            {selectedRepo?.isAdmin && (
-              <button
-                onClick={() => setShowRepoConfig(true)}
-                className="hidden rounded-lg border border-white/10 px-3 py-1.5 text-sm font-medium whitespace-nowrap text-white/70 hover:bg-white/10 hover:text-white xl:inline-flex"
-              >
-                Repo config
-              </button>
-            )}
-          </div>
-
-          <div className="flex shrink-0 items-center gap-2 sm:gap-3">
-            {namespace && kubeConfigured && (
-              <span className="hidden text-xs text-white/30 xl:inline">
-                {agentsLoading
-                  ? "Refreshing…"
-                  : `Updated ${new Date(dataUpdatedAt).toLocaleTimeString()}`}
-              </span>
-            )}
-
-            {/* Secondary controls — inline from xl: up, collapsed into the
-                hamburger menu below that. Holding them in the menu through the
-                mobile-L → laptop range keeps the bar uncluttered and leaves the
-                repo selector its full flexible width. */}
-            <div className="hidden items-center gap-2 xl:flex xl:gap-3">
-              <button
-                onClick={toggleNotify}
-                aria-label={
-                  notify
-                    ? "Disable completion notifications"
-                    : "Enable completion notifications"
-                }
-                title={
-                  notify
-                    ? "Completion alerts on (chime + notification)"
-                    : "Completion alerts off"
-                }
-                className={`rounded-lg p-1.5 hover:bg-white/10 ${
-                  notify ? "text-purple-300" : "text-white/40 hover:text-white"
-                }`}
-              >
-                {notify ? (
-                  <svg
-                    viewBox="0 0 20 20"
-                    fill="currentColor"
-                    className="h-5 w-5"
-                  >
-                    <path d="M10 2a5 5 0 0 0-5 5v2.6c0 .54-.21 1.06-.6 1.45L3 12.5V14h14v-1.5l-1.4-1.45a2.05 2.05 0 0 1-.6-1.45V7a5 5 0 0 0-5-5Zm0 16a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 10 18Z" />
-                  </svg>
-                ) : (
-                  <svg
-                    viewBox="0 0 20 20"
-                    fill="currentColor"
-                    className="h-5 w-5"
-                  >
-                    <path d="M10 2a5 5 0 0 0-5 5v2.6c0 .54-.21 1.06-.6 1.45L3 12.5V14h14v-1.5l-1.4-1.45a2.05 2.05 0 0 1-.6-1.45V7a5 5 0 0 0-5-5Zm0 16a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 10 18Z" />
-                    <path
-                      d="M3 3l14 14"
-                      stroke="currentColor"
-                      strokeWidth="1.6"
-                      strokeLinecap="round"
-                    />
-                  </svg>
-                )}
-              </button>
-              <button
-                onClick={() => setShowSettings(true)}
-                aria-label="Settings"
-                title="Settings"
-                className="rounded-lg p-1.5 text-white/50 hover:bg-white/10 hover:text-white"
-              >
-                <svg
-                  viewBox="0 0 20 20"
-                  fill="currentColor"
-                  className="h-5 w-5"
-                >
-                  <path
-                    fillRule="evenodd"
-                    d="M8.34 1.94a1.5 1.5 0 0 1 3.32 0l.12.66a1.5 1.5 0 0 0 2.06 1.19l.63-.25a1.5 1.5 0 0 1 1.92 2.05l-.32.6a1.5 1.5 0 0 0 .79 2.16l.64.23a1.5 1.5 0 0 1 0 2.84l-.64.23a1.5 1.5 0 0 0-.79 2.16l.32.6a1.5 1.5 0 0 1-1.92 2.05l-.63-.25a1.5 1.5 0 0 0-2.06 1.19l-.12.66a1.5 1.5 0 0 1-3.32 0l-.12-.66a1.5 1.5 0 0 0-2.06-1.19l-.63.25a1.5 1.5 0 0 1-1.92-2.05l.32-.6a1.5 1.5 0 0 0-.79-2.16l-.64-.23a1.5 1.5 0 0 1 0-2.84l.64-.23a1.5 1.5 0 0 0 .79-2.16l-.32-.6a1.5 1.5 0 0 1 1.92-2.05l.63.25a1.5 1.5 0 0 0 2.06-1.19l.12-.66ZM10 13a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"
-                    clipRule="evenodd"
-                  />
-                </svg>
-              </button>
-              <div className="flex items-center gap-2 sm:border-l sm:border-white/10 sm:pl-3">
-                {user.image && (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={user.image}
-                    alt={user.name}
-                    className="h-7 w-7 rounded-full"
-                  />
-                )}
-                <span className="hidden text-sm text-white/60 sm:inline">
-                  {user.name}
-                </span>
-                <button
-                  onClick={async () => {
-                    await authClient.signOut();
-                    router.refresh();
-                  }}
-                  className="rounded bg-white/10 px-2 py-1 text-xs text-white/60 hover:bg-white/20 hover:text-white"
-                >
-                  Sign out
-                </button>
-              </div>
-            </div>
-
-            {/* Deploy lives here up to 2xl:, where it moves to the centred
-                overlay above. It's the last component in this group to give up
-                space and never wraps to a new row. */}
-            <div className="2xl:hidden">{deployButton}</div>
-          </div>
-        </div>
-      </header>
+      <DashboardHeader
+        user={user}
+        repos={repos}
+        selectedRepo={selectedRepo}
+        reposLoading={reposLoading}
+        namespace={namespace}
+        kubeConfigured={kubeConfigured}
+        agentsLoading={agentsLoading}
+        dataUpdatedAt={dataUpdatedAt}
+        notify={notify}
+        onRepoChange={handleRepoChange}
+        onToggleNotify={() => void toggleNotify()}
+        onDeploy={() => setShowDeploy(true)}
+        onShowSettings={() => setShowSettings(true)}
+        onShowRepoConfig={() => setShowRepoConfig(true)}
+        onSignOut={handleSignOut}
+      />
 
       <main className="flex-1 space-y-6 px-4 py-4 sm:px-6 sm:py-6">
         {/* No kubeconfig — prompt to connect a cluster before anything else. */}
@@ -681,154 +348,16 @@ export function AgentDashboard({
                     </button>
                   </div>
                 ) : (
-                  <div
-                    onKeyDown={handleTableKeyDown}
-                    className="overflow-hidden rounded-xl border border-white/10"
-                  >
-                    {/* table-fixed locks column geometry to the header widths
-                        below, so an interactive row expanding in place (a
-                        full-width colSpan cell with logs + input) can only push
-                        the rows below it down — it can never re-balance the
-                        columns the way auto layout did. Percentage widths keep
-                        the layout responsive and redistribute proportionally
-                        when the optional columns are hidden on narrow
-                        viewports. */}
-                    <table className="w-full table-fixed text-sm">
-                      <thead>
-                        <tr className="border-b border-white/10 bg-white/5 text-left text-xs font-medium tracking-wider text-white/50 uppercase">
-                          {[
-                            // Columns whose content is constant-width — status
-                            // pills, output badges, the "Issue #N" source link,
-                            // the expiry clock time, the action controls — get
-                            // fixed rem widths from `md` up, sized to their
-                            // widest real content (measured in the /dev/task-row
-                            // harness: "Terminating" pill 87px, "Issue ⏺" badge
-                            // 68px, "Issue #12345" link 109px, "Dec 28, 12:59 PM"
-                            // 118px, Confirm/Cancel pair 123px, + cell padding).
-                            // A percentage share here grows with the viewport
-                            // while the content doesn't: it starved these columns
-                            // at 1024px (the Expires time and Status pill bled
-                            // into their neighbours) and wasted ~100px per column
-                            // at 1920px that belongs to the Task column. Below
-                            // `md` the percentage shares remain: those are
-                            // header-bound ("STATUS" must fit its cell at 360px),
-                            // and the compact layout has only four columns.
-                            // Status/Output share the same widths as the
-                            // overview panel so the two tables line up.
-                            {
-                              label: "Status",
-                              width: "w-[18%] md:w-[7.5rem]",
-                              center: true,
-                            },
-                            {
-                              label: "Output",
-                              width: "w-[23%] md:w-[7rem]",
-                              center: true,
-                            },
-                            // The primary column: `w-auto` so it absorbs all the
-                            // width the fixed columns leave behind. A fixed share
-                            // here would clamp the description to a constant
-                            // width — truncating as if the wide action controls
-                            // (confirm/cancel, "End session") were always present
-                            // even when only the compact terminate glyph is, and
-                            // wasting the freed space. Mirrors the Repository
-                            // column in the overview panel.
-                            { label: "Task", width: "w-auto" },
-                            // The three secondary columns appear only in the full
-                            // layout (lg+). Below `lg` — including the 768–1023
-                            // tablet band — the row stays readable with
-                            // Status/Output/Task alone. (Showing all seven at
-                            // `md` starved the pill columns: a centered Status
-                            // pill wider than its cell overflowed symmetrically
-                            // and bled out past the table's edge, and the
-                            // "Issue #N" source spilled into Currently.)
-                            // Sized to the "Issue #12345" source badge; a long
-                            // creator username truncates (see SourceBadge).
-                            {
-                              label: "Created by",
-                              width: "w-36",
-                              optional: "lg",
-                            },
-                            // Truncating free text — the one secondary column
-                            // that can use extra width, so it keeps a percentage
-                            // share (its content caps at max-w-[16rem] anyway).
-                            // Deferred to `xl`: in the 1024–1279 band the fixed
-                            // columns leave the Task column ~150px if Currently
-                            // also takes a share, so the least-dense column sits
-                            // out until the viewport can afford it.
-                            {
-                              label: "Currently",
-                              width: "w-[13%]",
-                              optional: "xl",
-                            },
-                            {
-                              label: "Expires",
-                              width: "w-[9.5rem]",
-                              optional: "lg",
-                            },
-                            // Holds the "End session" control (on running
-                            // interactive rows) alongside the terminate control.
-                            // On mobile the "End session" button collapses to a
-                            // compact icon (see InteractiveRow) so both controls
-                            // sit on one line: the column is sized to fit that
-                            // icon + glyph pair without wrapping, because a
-                            // wrapped second line would make a running row taller
-                            // than its single-line neighbours. The full-text
-                            // buttons ("End session", Confirm/Cancel) appear from
-                            // `lg` up; the fixed `md:w-40` holds the widest pair
-                            // (123px) and the terminate glyph on one line.
-                            { label: "", width: "w-[30%] md:w-40" },
-                          ].map((h, i) => (
-                            <th
-                              key={i}
-                              className={`px-3 py-2 align-middle md:px-4 md:py-3 ${h.width} ${h.center ? "text-center" : ""} ${h.optional === "lg" ? "hidden lg:table-cell" : ""} ${h.optional === "xl" ? "hidden xl:table-cell" : ""}`}
-                            >
-                              {h.label}
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-white/5">
-                        {/* Just-deployed tasks sit at the very top until their
-                            real pod appears in the list (then they're pruned). */}
-                        {visiblePending.map((p) => (
-                          <PendingDeployRow
-                            key={p.jobName}
-                            displayName={p.displayName}
-                          />
-                        ))}
-                        {visibleAgents.map((agent) =>
-                          agent.interactive && agent.ownedByViewer ? (
-                            // Interactive sessions are rows too, expanding in
-                            // place to reveal their live logs + input. Only the
-                            // owner gets the expanding input row — a
-                            // collaborator's session renders as a read-only
-                            // task row (logs viewable, no input).
-                            <InteractiveRow
-                              key={agent.name}
-                              agent={agent}
-                              namespace={namespace}
-                              repoFullName={repoSlug ?? undefined}
-                              focusSignal={
-                                focusTarget?.name === agent.name
-                                  ? focusTarget.token
-                                  : null
-                              }
-                              awaitingCount={awaitingNames.length}
-                            />
-                          ) : (
-                            <TaskRow
-                              key={agent.name}
-                              agent={agent}
-                              namespace={namespace}
-                              repoFullName={repoSlug ?? undefined}
-                              onOpenLogs={setLogPod}
-                            />
-                          ),
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
+                  <TaskTable
+                    visibleAgents={visibleAgents}
+                    visiblePending={visiblePending}
+                    namespace={namespace}
+                    repoFullName={repoSlug ?? undefined}
+                    focusTarget={focusTarget}
+                    awaitingCount={awaitingNames.length}
+                    onTableKeyDown={handleTableKeyDown}
+                    onOpenLogs={setLogPod}
+                  />
                 )}
               </div>
             )}
@@ -863,10 +392,10 @@ export function AgentDashboard({
         <LogModal
           podName={logPod}
           namespace={namespace}
-          jobName={agents.find((a) => a.name === logPod)?.jobName}
+          jobName={logAgent?.jobName}
           repoFullName={repoSlug ?? undefined}
-          prompt={agents.find((a) => a.name === logPod)?.prompt ?? null}
-          tokens={agents.find((a) => a.name === logPod)?.tokens ?? null}
+          prompt={logAgent?.prompt ?? null}
+          tokens={logAgent?.tokens ?? null}
           onClose={() => setLogPod(null)}
         />
       )}

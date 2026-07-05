@@ -814,6 +814,7 @@ export function AgentDashboard({
                                   ? focusTarget.token
                                   : null
                               }
+                              awaitingCount={awaitingNames.length}
                             />
                           ) : (
                             <TaskRow

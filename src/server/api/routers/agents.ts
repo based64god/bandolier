@@ -1716,6 +1716,7 @@ export const agentsRouter = createTRPCRouter({
 
         return { jobName };
       } catch (err) {
+        if (err instanceof TRPCError) throw err;
         console.error("[bandolier:deploy] failed", {
           error: err instanceof Error ? err.message : String(err),
         });

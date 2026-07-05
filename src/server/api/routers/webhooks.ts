@@ -17,7 +17,7 @@ import {
   renderDefaultNetworkPolicyYaml,
   validateNetworkPolicyYaml,
 } from "~/server/agents/network-policy";
-import { isRepoAdmin } from "~/server/agents/webhook-config";
+import { isRepoAdmin } from "~/server/agents/github-repos";
 import { parseComputeInput } from "~/server/agents/compute";
 import { EFFORT_LEVELS } from "~/lib/effort";
 import { type db } from "~/server/db";

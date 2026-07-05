@@ -14,11 +14,12 @@ import { repoWebhookConfig, userCompute } from "~/server/db/schema";
 
 // Both loaders run a single select().from().where().limit() chain; a stub that
 // keys the resolved rows on the table passed to from() drives every branch
-// without real drizzle/pg.
+// without real drizzle/pg. The repo compute default is read off the full
+// repo-config row (loadRepoConfig), hence the computeCpu/computeMemory columns.
 let userRows: { cpu: string | null; memory: string | null }[] = [];
 let repoRows: {
-  cpu: string | null;
-  memory: string | null;
+  computeCpu: string | null;
+  computeMemory: string | null;
   preferRepoCredentials: boolean;
 }[] = [];
 const db = {
@@ -49,7 +50,9 @@ describe("getUserCompute / getRepoCompute", () => {
     await expect(getRepoCompute(db, "o/r")).resolves.toBeNull();
 
     userRows = [{ cpu: "4", memory: null }];
-    repoRows = [{ cpu: null, memory: "8Gi", preferRepoCredentials: true }];
+    repoRows = [
+      { computeCpu: null, computeMemory: "8Gi", preferRepoCredentials: true },
+    ];
     await expect(getUserCompute(db, "u1")).resolves.toEqual({
       cpu: "4",
       memory: null,
@@ -80,7 +83,9 @@ describe("resolveCompute", () => {
 
   it("prefers the user's default over the repo's by default", async () => {
     userRows = [{ cpu: "4", memory: "8Gi" }];
-    repoRows = [{ cpu: "2", memory: "2Gi", preferRepoCredentials: false }];
+    repoRows = [
+      { computeCpu: "2", computeMemory: "2Gi", preferRepoCredentials: false },
+    ];
     await expect(resolveCompute(db, "u1", "o/r")).resolves.toEqual({
       cpu: "4",
       memory: "8Gi",
@@ -89,7 +94,9 @@ describe("resolveCompute", () => {
 
   it("prefers the repo's default when its prefer flag is set", async () => {
     userRows = [{ cpu: "4", memory: "8Gi" }];
-    repoRows = [{ cpu: "2", memory: "2Gi", preferRepoCredentials: true }];
+    repoRows = [
+      { computeCpu: "2", computeMemory: "2Gi", preferRepoCredentials: true },
+    ];
     await expect(resolveCompute(db, "u1", "o/r")).resolves.toEqual({
       cpu: "2",
       memory: "2Gi",
@@ -98,7 +105,9 @@ describe("resolveCompute", () => {
 
   it("resolves per field: a source missing one field falls through for just that field", async () => {
     userRows = [{ cpu: "4", memory: "8Gi" }];
-    repoRows = [{ cpu: null, memory: "16Gi", preferRepoCredentials: true }];
+    repoRows = [
+      { computeCpu: null, computeMemory: "16Gi", preferRepoCredentials: true },
+    ];
     await expect(resolveCompute(db, "u1", "o/r")).resolves.toEqual({
       cpu: "4",
       memory: "16Gi",
@@ -107,7 +116,9 @@ describe("resolveCompute", () => {
 
   it("only considers the user's default for repo-less runs", async () => {
     userRows = [{ cpu: "4", memory: null }];
-    repoRows = [{ cpu: "2", memory: "2Gi", preferRepoCredentials: true }];
+    repoRows = [
+      { computeCpu: "2", computeMemory: "2Gi", preferRepoCredentials: true },
+    ];
     await expect(resolveCompute(db, "u1")).resolves.toEqual({
       cpu: "4",
       memory: null,

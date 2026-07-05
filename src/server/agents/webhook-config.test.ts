@@ -4,10 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { db as Database } from "~/server/db";
 import { repoWebhookConfig } from "~/server/db/schema";
 import {
-  getRepoAgentImage,
   getRepoCredentials,
-  getRepoNetworkPolicy,
-  getRepoSystemPrompt,
   getRepoWebhookConfig,
   isRepoAdmin,
 } from "~/server/agents/webhook-config";
@@ -182,52 +179,6 @@ describe("getRepoWebhookConfig", () => {
         policyYaml: null,
       },
     });
-  });
-});
-
-describe("getRepoNetworkPolicy", () => {
-  it("returns null when the repo has no config row (default isolated egress)", async () => {
-    const { database } = makeSelectDb([]);
-    expect(await getRepoNetworkPolicy(database, "o/r")).toBeNull();
-  });
-
-  it("maps the toggles and custom policy YAML through", async () => {
-    const { database } = makeSelectDb([
-      {
-        allowPrivateEgress: true,
-        allowAllPortsEgress: false,
-        networkPolicyYaml: "kind: NetworkPolicy",
-      },
-    ]);
-    expect(await getRepoNetworkPolicy(database, "o/r")).toEqual({
-      allowPrivateEgress: true,
-      allowAllPortsEgress: false,
-      policyYaml: "kind: NetworkPolicy",
-    });
-  });
-});
-
-describe("getRepoSystemPrompt", () => {
-  it("returns null when the repo has no config row", async () => {
-    const { database } = makeSelectDb([]);
-    expect(await getRepoSystemPrompt(database, "o/r")).toBeNull();
-  });
-
-  it("returns the stored repo-wide prompt", async () => {
-    const { database } = makeSelectDb([{ systemPrompt: "be terse" }]);
-    expect(await getRepoSystemPrompt(database, "o/r")).toBe("be terse");
-  });
-});
-
-describe("getRepoAgentImage", () => {
-  it("returns null when the repo has no config row", async () => {
-    const { database } = makeSelectDb([]);
-    expect(await getRepoAgentImage(database, "o/r")).toBeNull();
-  });
-
-  it("returns the configured image override", async () => {
-    const { database } = makeSelectDb([{ agentImage: "ghcr.io/x/y:1" }]);
-    expect(await getRepoAgentImage(database, "o/r")).toBe("ghcr.io/x/y:1");
   });
 });
 

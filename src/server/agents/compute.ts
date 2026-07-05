@@ -6,8 +6,9 @@ import {
   validateCpuQuantity,
   validateMemoryQuantity,
 } from "~/lib/compute";
+import { loadRepoConfig } from "~/server/agents/webhook-config";
 import { type db } from "~/server/db";
-import { repoWebhookConfig, userCompute } from "~/server/db/schema";
+import { userCompute } from "~/server/db/schema";
 
 /**
  * A stored compute default (user- or repo-level). Either field may be null —
@@ -40,16 +41,13 @@ export async function getRepoCompute(
   database: typeof db,
   repoFullName: string,
 ): Promise<(ComputeDefaults & { preferRepoCredentials: boolean }) | null> {
-  const [row] = await database
-    .select({
-      cpu: repoWebhookConfig.computeCpu,
-      memory: repoWebhookConfig.computeMemory,
-      preferRepoCredentials: repoWebhookConfig.preferRepoCredentials,
-    })
-    .from(repoWebhookConfig)
-    .where(eq(repoWebhookConfig.repoFullName, repoFullName))
-    .limit(1);
-  return row ?? null;
+  const row = await loadRepoConfig(database, repoFullName);
+  if (!row) return null;
+  return {
+    cpu: row.computeCpu,
+    memory: row.computeMemory,
+    preferRepoCredentials: row.preferRepoCredentials,
+  };
 }
 
 /**

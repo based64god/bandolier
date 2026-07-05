@@ -8,6 +8,8 @@ resource "random_password" "better_auth_secret" {
 }
 
 locals {
+  install_app = var.install_app && !var.agent_only
+
   bandolier_values = {
     replicaCount = var.app_replicas
 
@@ -32,7 +34,7 @@ locals {
     }
 
     postgres = {
-      mode = var.managed_database ? "external" : "bundled"
+      mode = local.managed_database ? "external" : "bundled"
     }
 
     secrets = {
@@ -51,7 +53,7 @@ locals {
 }
 
 resource "helm_release" "bandolier" {
-  count = var.install_app ? 1 : 0
+  count = local.install_app ? 1 : 0
 
   name             = var.name
   chart            = "${path.module}/../../helm/bandolier"

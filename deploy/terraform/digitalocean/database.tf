@@ -2,8 +2,12 @@
 # chart's postgres.mode=external. Placed on the cluster's VPC and firewalled so
 # only pods on the DOKS cluster can reach it.
 
+locals {
+  managed_database = var.managed_database && !var.agent_only
+}
+
 resource "digitalocean_database_cluster" "postgres" {
-  count = var.managed_database ? 1 : 0
+  count = local.managed_database ? 1 : 0
 
   name                 = "${var.name}-postgres"
   engine               = "pg"
@@ -15,21 +19,21 @@ resource "digitalocean_database_cluster" "postgres" {
 }
 
 resource "digitalocean_database_db" "app" {
-  count = var.managed_database ? 1 : 0
+  count = local.managed_database ? 1 : 0
 
   cluster_id = digitalocean_database_cluster.postgres[0].id
   name       = "bandolier"
 }
 
 resource "digitalocean_database_user" "app" {
-  count = var.managed_database ? 1 : 0
+  count = local.managed_database ? 1 : 0
 
   cluster_id = digitalocean_database_cluster.postgres[0].id
   name       = "bandolier"
 }
 
 resource "digitalocean_database_firewall" "postgres" {
-  count = var.managed_database ? 1 : 0
+  count = local.managed_database ? 1 : 0
 
   cluster_id = digitalocean_database_cluster.postgres[0].id
 
@@ -43,7 +47,7 @@ locals {
   # Private-network URL; DO managed Postgres requires TLS, and the app's
   # postgres-js client honors sslmode=require. Empty when the chart bundles
   # its own Postgres instead.
-  database_url = var.managed_database ? format(
+  database_url = local.managed_database ? format(
     "postgresql://%s:%s@%s:%d/%s?sslmode=require",
     digitalocean_database_user.app[0].name,
     urlencode(digitalocean_database_user.app[0].password),

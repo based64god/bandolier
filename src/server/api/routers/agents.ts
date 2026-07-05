@@ -54,6 +54,31 @@ import { createTRPCRouter, protectedProcedure } from "../trpc";
  */
 export const END_SESSION_SENTINEL = "__BANDOLIER_END_SESSION__";
 
+/**
+ * Rethrows a caught error as an INTERNAL_SERVER_ERROR, passing existing
+ * TRPCErrors through unchanged so their code/message are preserved. Non-Error
+ * causes fall back to `fallback` for the client-facing message. Pass `log` to
+ * emit a console.error (with the underlying message) for non-TRPCError causes
+ * before rethrowing.
+ */
+function rethrowAsInternal(
+  err: unknown,
+  fallback: string,
+  log?: string,
+): never {
+  if (err instanceof TRPCError) throw err;
+  if (log) {
+    console.error(log, {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+  throw new TRPCError({
+    code: "INTERNAL_SERVER_ERROR",
+    message: err instanceof Error ? err.message : fallback,
+    cause: err,
+  });
+}
+
 export const agentsRouter = createTRPCRouter({
   // Reports the configured model provider for a deploy (AWS Bedrock takes
   // precedence over an Anthropic key). When a repo is given, repo-scoped
@@ -253,12 +278,7 @@ export const agentsRouter = createTRPCRouter({
           userId,
         );
       } catch (err) {
-        if (err instanceof TRPCError) throw err;
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: err instanceof Error ? err.message : "Failed to get task",
-          cause: err,
-        });
+        rethrowAsInternal(err, "Failed to get task");
       }
     }),
 
@@ -321,12 +341,7 @@ export const agentsRouter = createTRPCRouter({
         );
         return { success: true };
       } catch (err) {
-        if (err instanceof TRPCError) throw err;
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: err instanceof Error ? err.message : "Failed to rename task",
-          cause: err,
-        });
+        rethrowAsInternal(err, "Failed to rename task");
       }
     }),
 
@@ -454,13 +469,7 @@ export const agentsRouter = createTRPCRouter({
         });
         return { success: true };
       } catch (err) {
-        if (err instanceof TRPCError) throw err;
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message:
-            err instanceof Error ? err.message : "Failed to terminate pod",
-          cause: err,
-        });
+        rethrowAsInternal(err, "Failed to terminate pod");
       }
     }),
 
@@ -917,16 +926,11 @@ export const agentsRouter = createTRPCRouter({
 
         return { jobName };
       } catch (err) {
-        if (err instanceof TRPCError) throw err;
-        console.error("[bandolier:deploy] failed", {
-          error: err instanceof Error ? err.message : String(err),
-        });
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message:
-            err instanceof Error ? err.message : "Failed to deploy agent",
-          cause: err,
-        });
+        rethrowAsInternal(
+          err,
+          "Failed to deploy agent",
+          "[bandolier:deploy] failed",
+        );
       }
     }),
 });

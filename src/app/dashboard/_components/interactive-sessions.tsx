@@ -662,13 +662,43 @@ function ToolGroup({
 
 function ToolRow({ item }: { item: Extract<TimelineItem, { type: "tool" }> }) {
   const glyph = TOOL_KIND_GLYPH[item.kind] ?? TOOL_KIND_GLYPH.other;
-  return (
-    <div className="flex items-start gap-2 font-mono text-[11px] text-white/45">
+  const header = (
+    <>
       <span className="mt-px shrink-0 text-white/30 select-none">{glyph}</span>
       <span className="shrink-0 uppercase">{item.kind}</span>
       <span className="min-w-0 break-words whitespace-pre-wrap text-white/55">
         {item.title}
       </span>
-    </div>
+    </>
+  );
+
+  // A call with no captured output stays a plain, non-interactive row.
+  if (!item.output) {
+    return (
+      <div className="flex items-start gap-2 font-mono text-[11px] text-white/45">
+        {header}
+      </div>
+    );
+  }
+
+  // With output, the row becomes its own expander so the result stays folded
+  // away by default — expanding the enclosing tool group reveals the calls, not
+  // a wall of their outputs. A chevron marks that this row can open further.
+  return (
+    <details className="group/tool">
+      <summary className="flex cursor-pointer list-none items-start gap-2 font-mono text-[11px] text-white/45 hover:text-white/70 [&::-webkit-details-marker]:hidden">
+        <svg
+          viewBox="0 0 12 12"
+          fill="currentColor"
+          className="mt-0.5 h-2.5 w-2.5 shrink-0 text-white/30 transition-transform group-open/tool:rotate-90"
+        >
+          <path d="M4 2l5 4-5 4V2z" />
+        </svg>
+        {header}
+      </summary>
+      <pre className="mt-1 ml-6 max-h-64 overflow-auto rounded border border-white/10 bg-black/40 px-2 py-1 text-[11px] leading-4 break-words whitespace-pre-wrap text-white/50">
+        {item.output}
+      </pre>
+    </details>
   );
 }

@@ -17,9 +17,16 @@ export type TimelineItem =
   | {
       type: "tool";
       id: string;
+      // The agent-assigned tool_call id, used to match a later
+      // tool_call_update back to this call. Undefined for tool calls whose
+      // source omitted one (e.g. the codex driver).
+      toolCallId?: string;
       kind: string;
       title: string;
       status: string;
+      // The tool's output, accumulated from tool_call_update frames. Rendered
+      // as a nested expander in the UI so a call's result doesn't flood the row.
+      output?: string;
     };
 
 export interface RawAcpFrame {
@@ -33,14 +40,33 @@ export interface AvailableCommand {
   description?: string;
 }
 
+/** One block of a tool_call_update's `content` array. */
+interface ToolContentBlock {
+  content?: { text?: string };
+}
+
 interface ParsedUpdate {
   sessionUpdate?: string;
   messageId?: string;
+  toolCallId?: string;
   title?: string;
   kind?: string;
   status?: string;
-  content?: { text?: string };
+  // An object `{text}` for message chunks; an array of blocks for
+  // tool_call_update. Narrowed per-case via chunkText / toolOutputText.
+  content?: { text?: string } | ToolContentBlock[];
   availableCommands?: AvailableCommand[];
+}
+
+/** Text of a message chunk's content, ignoring the tool_call_update array form. */
+function chunkText(content: ParsedUpdate["content"]): string {
+  return content && !Array.isArray(content) ? (content.text ?? "") : "";
+}
+
+/** Concatenated text of a tool_call_update's content blocks. */
+function toolOutputText(content: ParsedUpdate["content"]): string {
+  if (!Array.isArray(content)) return "";
+  return content.map((c) => c?.content?.text ?? "").join("");
 }
 
 interface ParsedFrame {
@@ -57,7 +83,8 @@ interface ParsedFrame {
  * Folds a batch of relay frames (both directions, seq-ordered) into the
  * timeline, returning the new items and the session id if one was observed.
  * Assistant message chunks that share a messageId are coalesced into a single
- * bubble; tool calls become their own rows; user_message_chunk frames (the
+ * bubble; tool calls become their own rows, with any tool_call_update frames
+ * folded into the matching row as its output; user_message_chunk frames (the
  * proxy's seed echo) become user bubbles. The user's follow-up turns exist in
  * the relay only as their client→agent session/prompt frames, so those render
  * as user bubbles too — that's what makes a replay (page reload, or reopening
@@ -106,7 +133,7 @@ export function applyFrames(
     const u = msg.params.update;
     switch (u.sessionUpdate) {
       case "agent_message_chunk": {
-        const text = u.content?.text ?? "";
+        const text = chunkText(u.content);
         if (!text) break;
         const last = items[items.length - 1];
         // Coalesce only with the immediately-preceding bubble of the same
@@ -132,7 +159,7 @@ export function applyFrames(
         break;
       }
       case "user_message_chunk": {
-        const text = u.content?.text ?? "";
+        const text = chunkText(u.content);
         if (!text) break;
         items.push({ type: "message", role: "user", id: `u-${f.seq}`, text });
         break;
@@ -141,10 +168,31 @@ export function applyFrames(
         items.push({
           type: "tool",
           id: `t-${f.seq}`,
+          toolCallId: u.toolCallId,
           kind: u.kind ?? "other",
           title: u.title ?? "",
           status: u.status ?? "pending",
         });
+        break;
+      }
+      case "tool_call_update": {
+        // Attach the tool's output (and updated status) to its originating
+        // call, matched by toolCallId. A batch may carry several updates for
+        // one call, so accumulate rather than replace. Ignored if no matching
+        // call is in the timeline (e.g. the update arrived before its call).
+        if (!u.toolCallId) break;
+        const output = toolOutputText(u.content);
+        for (let i = items.length - 1; i >= 0; i--) {
+          const it = items[i];
+          if (it?.type === "tool" && it.toolCallId === u.toolCallId) {
+            items[i] = {
+              ...it,
+              status: u.status ?? it.status,
+              output: output ? (it.output ?? "") + output : it.output,
+            };
+            break;
+          }
+        }
         break;
       }
       case "available_commands_update": {

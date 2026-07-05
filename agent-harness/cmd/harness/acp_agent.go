@@ -254,15 +254,44 @@ func (d *claudeDriver) handle(raw []byte) {
 					a.emit(acp.AgentThoughtChunk{SessionUpdate: acp.UpdateAgentThoughtChunk, MessageID: a.curMsgID, Content: acp.TextBlock(t)})
 				}
 			case "tool_use":
+				// Reuse Claude's own tool_use id as the ACP toolCallId so the
+				// follow-up tool_result (a `user` event) can be matched back to
+				// this call via a tool_call_update.
+				id := c.ID
+				if id == "" {
+					id = c.Name + "-" + shortUnique()
+				}
 				a.emit(acp.ToolCall{
 					SessionUpdate: acp.UpdateToolCall,
-					ToolCallID:    c.Name + "-" + shortUnique(),
+					ToolCallID:    id,
 					Title:         toolSummary(c.Name, c.Input),
 					Kind:          toolKind(c.Name),
 					Status:        acp.ToolStatusPending,
 					RawInput:      c.Input,
 				})
 			}
+		}
+	case "user":
+		// Claude reports each tool's output as a tool_result block on a `user`
+		// event. Forward it as a tool_call_update so the transcript (and the UI)
+		// can attach the output — expandable — to the originating tool call.
+		for _, c := range ev.Message.Content {
+			if c.Type != "tool_result" || c.ToolUseID == "" {
+				continue
+			}
+			status := acp.ToolStatusCompleted
+			if c.IsError {
+				status = acp.ToolStatusFailed
+			}
+			up := acp.ToolCallUpdate{
+				SessionUpdate: acp.UpdateToolCallUpdate,
+				ToolCallID:    c.ToolUseID,
+				Status:        status,
+			}
+			if t := toolResultText(c.ToolResult); t != "" {
+				up.Content = []acp.ToolCallContent{{Type: "content", Content: acp.TextBlock(t)}}
+			}
+			a.emit(up)
 		}
 	case "result":
 		// Accumulate this turn's usage into the session total and re-emit the

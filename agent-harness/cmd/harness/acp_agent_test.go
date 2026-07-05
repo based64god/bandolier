@@ -128,6 +128,78 @@ func TestClaudeDriverToolCallTranslation(t *testing.T) {
 	}
 }
 
+// collectToolUpdates parses the tool_call_update frames in buf.
+func collectToolUpdates(t *testing.T, buf interface{ String() string }) []acp.ToolCallUpdate {
+	t.Helper()
+	var ups []acp.ToolCallUpdate
+	for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+		if line == "" {
+			continue
+		}
+		var f struct {
+			Params struct {
+				Update json.RawMessage `json:"update"`
+			} `json:"params"`
+		}
+		if json.Unmarshal([]byte(line), &f) != nil {
+			continue
+		}
+		if acp.UpdateKind(f.Params.Update) == acp.UpdateToolCallUpdate {
+			var u acp.ToolCallUpdate
+			_ = json.Unmarshal(f.Params.Update, &u)
+			ups = append(ups, u)
+		}
+	}
+	return ups
+}
+
+func TestClaudeDriverToolResultTranslation(t *testing.T) {
+	var buf bytes.Buffer
+	a := captureEmits(&buf)
+	d := &claudeDriver{agent: a}
+	// A tool_use fixes the toolCallId; the follow-up tool_result (a `user`
+	// event) must translate to a tool_call_update carrying that id and output.
+	d.handle([]byte(`{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_9","name":"Bash","input":{"command":"echo hi"}}]}}`))
+	d.handle([]byte(`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_9","content":"hi\n"}]}}`))
+
+	calls := collectUpdates(t, &buf)
+	if len(calls) != 1 || calls[0].ToolCallID != "toolu_9" {
+		t.Fatalf("tool call = %+v, want id toolu_9", calls)
+	}
+	ups := collectToolUpdates(t, &buf)
+	if len(ups) != 1 {
+		t.Fatalf("got %d tool updates, want 1", len(ups))
+	}
+	if ups[0].ToolCallID != "toolu_9" {
+		t.Errorf("update id = %q, want toolu_9", ups[0].ToolCallID)
+	}
+	if ups[0].Status != acp.ToolStatusCompleted {
+		t.Errorf("status = %q, want completed", ups[0].Status)
+	}
+	if len(ups[0].Content) != 1 || ups[0].Content[0].Content.Text != "hi\n" {
+		t.Errorf("content = %+v, want text %q", ups[0].Content, "hi\n")
+	}
+}
+
+func TestClaudeDriverToolResultArrayAndError(t *testing.T) {
+	var buf bytes.Buffer
+	a := captureEmits(&buf)
+	d := &claudeDriver{agent: a}
+	// A tool_result whose content is an array of blocks, flagged is_error.
+	d.handle([]byte(`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","is_error":true,"content":[{"type":"text","text":"boom"}]}]}}`))
+
+	ups := collectToolUpdates(t, &buf)
+	if len(ups) != 1 {
+		t.Fatalf("got %d tool updates, want 1", len(ups))
+	}
+	if ups[0].Status != acp.ToolStatusFailed {
+		t.Errorf("status = %q, want failed", ups[0].Status)
+	}
+	if len(ups[0].Content) != 1 || ups[0].Content[0].Content.Text != "boom" {
+		t.Errorf("content = %+v, want text %q", ups[0].Content, "boom")
+	}
+}
+
 // collectAvailableCommands parses the available_commands_update frames in buf.
 func collectAvailableCommands(t *testing.T, buf interface{ String() string }) []acp.AvailableCommand {
 	t.Helper()

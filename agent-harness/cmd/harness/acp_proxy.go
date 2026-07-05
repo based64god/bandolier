@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/bandolier/agent-harness/internal/acp"
 )
 
 // ── ACP proxy mode ────────────────────────────────────────────────────────────
@@ -443,28 +445,56 @@ func renderFrameToTranscript(raw []byte) {
 	if json.Unmarshal(raw, &m) != nil || m.Method != "session/update" {
 		return
 	}
-	var u struct {
-		SessionUpdate string `json:"sessionUpdate"`
-		Title         string `json:"title"`
-		Content       struct {
-			Text string `json:"text"`
-		} `json:"content"`
-	}
-	if json.Unmarshal(m.Params.Update, &u) != nil {
-		return
-	}
-	switch u.SessionUpdate {
-	case "agent_message_chunk":
-		if t := strings.TrimSpace(u.Content.Text); t != "" {
-			fmt.Fprintln(stdoutTee, t)
+	// `content` differs by update kind — an object {text} for message chunks, an
+	// array of blocks for tool_call_update — so switch on the discriminator
+	// before decoding it into the shape that variant expects.
+	switch acp.UpdateKind(m.Params.Update) {
+	case acp.UpdateToolCallUpdate:
+		var tu struct {
+			Content []struct {
+				Content struct {
+					Text string `json:"text"`
+				} `json:"content"`
+			} `json:"content"`
 		}
-	case "user_message_chunk":
-		if t := strings.TrimSpace(u.Content.Text); t != "" {
-			logUserInput(t)
+		if json.Unmarshal(m.Params.Update, &tu) != nil {
+			return
 		}
-	case "tool_call":
-		if u.Title != "" {
-			log.Printf("[harness] → %s", u.Title)
+		var b strings.Builder
+		for _, c := range tu.Content {
+			b.WriteString(c.Content.Text)
+		}
+		if t := strings.TrimSpace(b.String()); t != "" {
+			lines := strings.Split(t, "\n")
+			log.Printf("[harness]   ← %s", lines[0])
+			for _, l := range lines[1:] {
+				log.Printf("[harness]     %s", l)
+			}
+		}
+	default:
+		var u struct {
+			SessionUpdate string `json:"sessionUpdate"`
+			Title         string `json:"title"`
+			Content       struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		}
+		if json.Unmarshal(m.Params.Update, &u) != nil {
+			return
+		}
+		switch u.SessionUpdate {
+		case "agent_message_chunk":
+			if t := strings.TrimSpace(u.Content.Text); t != "" {
+				fmt.Fprintln(stdoutTee, t)
+			}
+		case "user_message_chunk":
+			if t := strings.TrimSpace(u.Content.Text); t != "" {
+				logUserInput(t)
+			}
+		case "tool_call":
+			if u.Title != "" {
+				log.Printf("[harness] → %s", u.Title)
+			}
 		}
 	}
 }

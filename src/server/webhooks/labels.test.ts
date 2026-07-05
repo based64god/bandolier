@@ -30,13 +30,15 @@ describe("labelQuery", () => {
   });
 
   it("ignores a prefix with an empty value", () => {
-    expect(labelQuery(labels("model:", "model:sonnet"), MODEL_LABEL_PREFIX)).toBe(
-      "sonnet",
-    );
+    expect(
+      labelQuery(labels("model:", "model:sonnet"), MODEL_LABEL_PREFIX),
+    ).toBe("sonnet");
   });
 
   it("returns null when no label carries the prefix", () => {
-    expect(labelQuery(labels("bug", "model:opus"), CPU_LABEL_PREFIX)).toBeNull();
+    expect(
+      labelQuery(labels("bug", "model:opus"), CPU_LABEL_PREFIX),
+    ).toBeNull();
   });
 
   it("returns null for an empty label set", () => {

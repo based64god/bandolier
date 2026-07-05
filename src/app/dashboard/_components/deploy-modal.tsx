@@ -13,32 +13,27 @@ import { EffortPicker } from "./effort-picker";
 import { usePreferredEffort } from "./preferred-effort";
 import { usePreferredModel } from "./preferred-model";
 import { Modal } from "./modal";
-import { ProviderTag } from "./provider-tag";
+import { PROVIDER_ACCENT, ProviderTag } from "./provider-tag";
 import { modelKey, resolveEffectiveModel } from "./resolve-effective-model";
 import { SearchableSelect } from "./searchable-select";
 
-const PROVIDER_LABELS = {
-  anthropic: {
-    label: "Anthropic API",
-    style: "border-purple-500/40 bg-purple-500/10 text-purple-300",
-  },
-  bedrock: {
-    label: "AWS Bedrock",
-    style: "border-orange-500/40 bg-orange-500/10 text-orange-300",
-  },
-  openai: {
-    label: "OpenAI API",
-    style: "border-teal-500/40 bg-teal-500/10 text-teal-300",
-  },
-  gemini: {
-    label: "Google Gemini",
-    style: "border-blue-500/40 bg-blue-500/10 text-blue-300",
-  },
-  none: {
-    label: "No provider configured",
-    style: "border-red-500/40 bg-red-500/10 text-red-400",
-  },
-} as const;
+// The provider badge shown in the modal header. Reuses the shared
+// PROVIDER_ACCENT convention (color + badge style) so provider colors live in
+// one place; only the "none" state — specific to this modal — is defined here.
+const NO_PROVIDER_LABEL = {
+  label: "No provider configured",
+  style: "border-red-500/40 bg-red-500/10 text-red-400",
+};
+
+const PROVIDER_LABELS: Record<string, { label: string; style: string }> = {
+  ...Object.fromEntries(
+    Object.entries(PROVIDER_ACCENT).map(([provider, accent]) => [
+      provider,
+      { label: accent.fullLabel, style: accent.badge },
+    ]),
+  ),
+  none: NO_PROVIDER_LABEL,
+};
 
 // The deploy form's fields as a single value. "" means "use the default" for
 // the derived/optional fields (model, effort, maxTurns, cpu, memory,
@@ -269,16 +264,17 @@ export function DeployModal({
   // loads. Subscription-backed selections say so instead of "… API".
   const badgeProvider =
     selectedModel?.provider ?? providerInfo?.provider ?? "none";
+  const badgeMeta = PROVIDER_LABELS[badgeProvider] ?? NO_PROVIDER_LABEL;
   const providerMeta =
     selectedModel?.auth === "subscription"
       ? {
-          ...PROVIDER_LABELS[badgeProvider],
+          ...badgeMeta,
           label:
             badgeProvider === "openai"
               ? "ChatGPT subscription"
               : "Claude subscription",
         }
-      : PROVIDER_LABELS[badgeProvider];
+      : badgeMeta;
 
   return (
     <Modal

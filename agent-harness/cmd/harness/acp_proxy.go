@@ -276,12 +276,7 @@ func (p *acpProxy) acpPull(ctx context.Context) ([]string, error) {
 	if p.cfg.acpURL == "" {
 		return nil, fmt.Errorf("no ACP relay URL configured")
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.cfg.acpURL, nil)
-	if err != nil {
-		return nil, err
-	}
-	p.setAuth(req)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := bando.get(ctx, p.cfg.acpURL)
 	if err != nil {
 		return nil, err
 	}
@@ -315,13 +310,7 @@ func (p *acpProxy) acpPush(ctx context.Context, frame string) error {
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.cfg.acpURL, bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	p.setAuth(req)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := bando.post(ctx, p.cfg.acpURL, "application/json", bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -330,11 +319,6 @@ func (p *acpProxy) acpPush(ctx context.Context, frame string) error {
 		return fmt.Errorf("acp push status %d", resp.StatusCode)
 	}
 	return nil
-}
-
-func (p *acpProxy) setAuth(req *http.Request) {
-	req.Header.Set("Authorization", "Bearer "+os.Getenv("BANDOLIER_INGEST_TOKEN"))
-	req.Header.Set("X-Bandolier-Job", os.Getenv("BANDOLIER_JOB"))
 }
 
 // ── frame helpers ─────────────────────────────────────────────────────────────

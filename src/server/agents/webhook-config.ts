@@ -19,8 +19,7 @@ export interface RepoWebhookConfig {
   defaultWebhookEffort: string | null;
   /**
    * Repo-attached system prompt appended to every agent run for this repo; null
-   * means no repo-wide prompt. See `getRepoSystemPrompt` for the loader callers
-   * use on the deploy/webhook paths.
+   * means no repo-wide prompt.
    */
   systemPrompt: string | null;
   /**
@@ -42,8 +41,7 @@ export interface RepoWebhookConfig {
  * Per-repo agent NetworkPolicy configuration (admin-only): egress-loosening
  * toggles (both default off, preserving the locked-down baseline) and,
  * advanced, a raw custom policy YAML that replaces the built-in policy —
- * toggles included — entirely. See `getRepoNetworkPolicy` for the loader
- * callers use on the deploy/webhook paths.
+ * toggles included — entirely.
  */
 export interface RepoNetworkPolicy {
   /** Allow egress to private / in-cluster (RFC-1918) ranges. */
@@ -69,28 +67,30 @@ export interface RepoCredentials {
   preferRepoCredentials: boolean;
 }
 
-/** Loads a repo's shared credentials, or null when no config row exists. */
-export async function getRepoCredentials(
+/** The full repo-config row, or null when the repo has no config row. */
+export type RepoConfigRow = typeof repoWebhookConfig.$inferSelect;
+
+/**
+ * Loads a repo's config row in a single query — the one source every repo-config
+ * accessor (credentials, webhook config, artifact store, compute) shapes its
+ * result from. Callers that need only a slice of the row still read it through
+ * here, so the near-identical per-field selects that used to be spread across
+ * these modules are gone. Returns null when the repo has no config row.
+ */
+export async function loadRepoConfig(
   database: typeof db,
   repoFullName: string,
-): Promise<RepoCredentials | null> {
+): Promise<RepoConfigRow | null> {
   const [row] = await database
-    .select({
-      kubeconfig: repoWebhookConfig.kubeconfig,
-      anthropicApiKey: repoWebhookConfig.anthropicApiKey,
-      openaiApiKey: repoWebhookConfig.openaiApiKey,
-      geminiApiKey: repoWebhookConfig.geminiApiKey,
-      awsAccessKeyId: repoWebhookConfig.awsAccessKeyId,
-      awsSecretAccessKey: repoWebhookConfig.awsSecretAccessKey,
-      awsSessionToken: repoWebhookConfig.awsSessionToken,
-      awsRegion: repoWebhookConfig.awsRegion,
-      preferRepoCredentials: repoWebhookConfig.preferRepoCredentials,
-    })
+    .select()
     .from(repoWebhookConfig)
     .where(eq(repoWebhookConfig.repoFullName, repoFullName))
     .limit(1);
-  if (!row) return null;
+  return row ?? null;
+}
 
+/** Shapes a config row into a repo's shared credentials (pure). */
+export function repoCredentials(row: RepoConfigRow): RepoCredentials {
   // AWS creds are only usable as a set — require at least the key id + secret.
   const aws: AwsCredentials | null =
     row.awsAccessKeyId && row.awsSecretAccessKey
@@ -112,27 +112,21 @@ export async function getRepoCredentials(
   };
 }
 
+/** Loads a repo's shared credentials, or null when no config row exists. */
+export async function getRepoCredentials(
+  database: typeof db,
+  repoFullName: string,
+): Promise<RepoCredentials | null> {
+  const row = await loadRepoConfig(database, repoFullName);
+  return row ? repoCredentials(row) : null;
+}
+
 /** Returns a repo's config (prefix + agent image + default model), or null. */
 export async function getRepoWebhookConfig(
   database: typeof db,
   repoFullName: string,
 ): Promise<RepoWebhookConfig | null> {
-  const [row] = await database
-    .select({
-      prefix: repoWebhookConfig.prefix,
-      agentImage: repoWebhookConfig.agentImage,
-      defaultWebhookModel: repoWebhookConfig.defaultWebhookModel,
-      defaultWebhookEffort: repoWebhookConfig.defaultWebhookEffort,
-      systemPrompt: repoWebhookConfig.systemPrompt,
-      resumeOnCiFailure: repoWebhookConfig.resumeOnCiFailure,
-      autoMergeBandolierPrs: repoWebhookConfig.autoMergeBandolierPrs,
-      allowPrivateEgress: repoWebhookConfig.allowPrivateEgress,
-      allowAllPortsEgress: repoWebhookConfig.allowAllPortsEgress,
-      networkPolicyYaml: repoWebhookConfig.networkPolicyYaml,
-    })
-    .from(repoWebhookConfig)
-    .where(eq(repoWebhookConfig.repoFullName, repoFullName))
-    .limit(1);
+  const row = await loadRepoConfig(database, repoFullName);
   if (!row) return null;
   return {
     prefix: row.prefix ?? null,
@@ -148,65 +142,6 @@ export async function getRepoWebhookConfig(
       policyYaml: row.networkPolicyYaml ?? null,
     },
   };
-}
-
-/**
- * The repo-attached system prompt for a repo: the blanket instruction appended
- * to every agent run, or null when none is set (callers append nothing). Read on
- * the deploy and webhook paths the same way `getRepoAgentImage` is.
- */
-export async function getRepoSystemPrompt(
-  database: typeof db,
-  repoFullName: string,
-): Promise<string | null> {
-  const [row] = await database
-    .select({ systemPrompt: repoWebhookConfig.systemPrompt })
-    .from(repoWebhookConfig)
-    .where(eq(repoWebhookConfig.repoFullName, repoFullName))
-    .limit(1);
-  return row?.systemPrompt ?? null;
-}
-
-/**
- * A repo's network-policy egress toggles, or null when no config row exists
- * (callers then apply the default isolated egress). Read on the deploy and
- * webhook paths the same way `getRepoAgentImage` is.
- */
-export async function getRepoNetworkPolicy(
-  database: typeof db,
-  repoFullName: string,
-): Promise<RepoNetworkPolicy | null> {
-  const [row] = await database
-    .select({
-      allowPrivateEgress: repoWebhookConfig.allowPrivateEgress,
-      allowAllPortsEgress: repoWebhookConfig.allowAllPortsEgress,
-      networkPolicyYaml: repoWebhookConfig.networkPolicyYaml,
-    })
-    .from(repoWebhookConfig)
-    .where(eq(repoWebhookConfig.repoFullName, repoFullName))
-    .limit(1);
-  if (!row) return null;
-  return {
-    allowPrivateEgress: row.allowPrivateEgress,
-    allowAllPortsEgress: row.allowAllPortsEgress,
-    policyYaml: row.networkPolicyYaml ?? null,
-  };
-}
-
-/**
- * The agent harness image to use for a repo: its configured override, or null
- * when none is set (callers fall back to the built-in DEFAULT_HARNESS_IMAGE).
- */
-export async function getRepoAgentImage(
-  database: typeof db,
-  repoFullName: string,
-): Promise<string | null> {
-  const [row] = await database
-    .select({ agentImage: repoWebhookConfig.agentImage })
-    .from(repoWebhookConfig)
-    .where(eq(repoWebhookConfig.repoFullName, repoFullName))
-    .limit(1);
-  return row?.agentImage ?? null;
 }
 
 /**

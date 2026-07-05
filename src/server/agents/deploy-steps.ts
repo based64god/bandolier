@@ -5,7 +5,6 @@ import {
   buildIssueUserMessage,
   makeIssueBranch,
 } from "~/lib/issue-prompt";
-import { type AwsCredentials } from "~/server/agents/aws";
 import { getRegistryPullSecret } from "~/server/agents/github-app";
 import { getIssue } from "~/server/agents/github-issues";
 import {
@@ -20,96 +19,10 @@ import {
 } from "~/server/agents/repo-permissions";
 import { type ModelCredentials } from "~/server/agents/resolve-credentials";
 import {
-  getRepoAgentImage,
-  getRepoNetworkPolicy,
-  getRepoSystemPrompt,
+  getRepoWebhookConfig,
   type RepoNetworkPolicy,
 } from "~/server/agents/webhook-config";
 import { type db } from "~/server/db";
-
-export type ModelProvider = "anthropic" | "bedrock" | "openai" | "gemini";
-export type ModelAuth = "api_key" | "subscription";
-
-/** The credentials and provider a run will execute on. */
-export interface RunCredentials {
-  provider: ModelProvider | undefined;
-  awsCredentials: AwsCredentials | null;
-  anthropicApiKey: string | null;
-  anthropicOauthToken: string | null;
-  openaiApiKey: string | null;
-  codexAuthJson: string | null;
-  geminiApiKey: string | null;
-}
-
-/**
- * Picks the single provider + credential set a run executes on. The provider is
- * either the one the picker sent or, for programmatic clients that omit it, the
- * primary-provider precedence (Bedrock → Anthropic → OpenAI → Gemini). Within a
- * provider, `modelAuth` pins the run to an API key or a subscription; unset
- * falls back to API-key-beats-subscription. Throws BAD_REQUEST when the resolved
- * credentials serve no usable provider.
- */
-export function selectRunCredentials(
-  resolved: ModelCredentials,
-  modelProvider: ModelProvider | undefined,
-  modelAuth: ModelAuth | undefined,
-): RunCredentials {
-  const provider =
-    modelProvider ??
-    (resolved.aws
-      ? "bedrock"
-      : resolved.anthropicApiKey || resolved.anthropicOauthToken
-        ? "anthropic"
-        : resolved.openaiApiKey || resolved.codexAuthJson
-          ? "openai"
-          : resolved.geminiApiKey
-            ? "gemini"
-            : undefined);
-
-  const wantSubscription = modelAuth === "subscription";
-  const wantApiKey = modelAuth === "api_key";
-  const awsCredentials = provider === "bedrock" ? resolved.aws : null;
-  const anthropicApiKey =
-    provider === "anthropic" && !wantSubscription
-      ? resolved.anthropicApiKey
-      : null;
-  const anthropicOauthToken =
-    provider === "anthropic" && !wantApiKey && !anthropicApiKey
-      ? resolved.anthropicOauthToken
-      : null;
-  const openaiApiKey =
-    provider === "openai" && !wantSubscription ? resolved.openaiApiKey : null;
-  const codexAuthJson =
-    provider === "openai" && !wantApiKey && !openaiApiKey
-      ? resolved.codexAuthJson
-      : null;
-  const geminiApiKey = provider === "gemini" ? resolved.geminiApiKey : null;
-
-  if (
-    !awsCredentials &&
-    !anthropicApiKey &&
-    !anthropicOauthToken &&
-    !openaiApiKey &&
-    !codexAuthJson &&
-    !geminiApiKey
-  ) {
-    throw new TRPCError({
-      code: "BAD_REQUEST",
-      message:
-        "No model credentials configured for the selected model. Add AWS Bedrock, an Anthropic, OpenAI, or Gemini API key in settings (or repo configuration) before deploying.",
-    });
-  }
-
-  return {
-    provider,
-    awsCredentials,
-    anthropicApiKey,
-    anthropicOauthToken,
-    openaiApiKey,
-    codexAuthJson,
-    geminiApiKey,
-  };
-}
 
 /** A resolved git author identity plus the GitHub login it was derived from. */
 export interface ResolvedGitIdentity {
@@ -262,9 +175,9 @@ export interface RepoRunConfig {
 /**
  * Loads the per-repo run configuration: a harness image override (with pull
  * credentials for a private ghcr.io package), the repo-attached system prompt,
- * and the network-policy config. Every lookup is best-effort — a failure logs
- * and leaves the field unset (the built-in default) rather than blocking the
- * deploy. A no-op for repo-less runs.
+ * and the network-policy config — one consolidated config-row read. Best-effort:
+ * a lookup failure logs and leaves the fields unset (the built-in defaults)
+ * rather than blocking the deploy. A no-op for repo-less runs.
  */
 export async function loadRepoRunConfig(
   database: typeof db,
@@ -280,10 +193,12 @@ export async function loadRepoRunConfig(
   if (!repoFullName) return config;
 
   try {
-    config.agentImage =
-      (await getRepoAgentImage(database, repoFullName)) ?? undefined;
+    const repoConfig = await getRepoWebhookConfig(database, repoFullName);
+    config.agentImage = repoConfig?.agentImage ?? undefined;
+    config.repoSystemPrompt = repoConfig?.systemPrompt ?? undefined;
+    config.networkPolicy = repoConfig?.networkPolicy;
   } catch (err) {
-    console.warn("[bandolier:deploy] agent image lookup failed", {
+    console.warn("[bandolier:deploy] repo config lookup failed", {
       error: err instanceof Error ? err.message : String(err),
     });
   }
@@ -293,22 +208,6 @@ export async function loadRepoRunConfig(
   if (config.agentImage) {
     config.imagePullSecret =
       getRegistryPullSecret(config.agentImage, githubToken) ?? undefined;
-  }
-  try {
-    config.repoSystemPrompt =
-      (await getRepoSystemPrompt(database, repoFullName)) ?? undefined;
-  } catch (err) {
-    console.warn("[bandolier:deploy] repo system prompt lookup failed", {
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
-  try {
-    config.networkPolicy =
-      (await getRepoNetworkPolicy(database, repoFullName)) ?? undefined;
-  } catch (err) {
-    console.warn("[bandolier:deploy] network policy lookup failed", {
-      error: err instanceof Error ? err.message : String(err),
-    });
   }
   return config;
 }

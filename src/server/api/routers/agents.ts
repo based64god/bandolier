@@ -18,27 +18,30 @@ import {
 } from "~/server/agents/authz";
 import { loadPersistedOutputs, podToTask } from "~/server/agents/task-view";
 import {
+  type ComputeSpec,
   DEFAULT_CPU_LIMIT,
   DEFAULT_MEMORY_LIMIT,
-  validateCpuQuantity,
-  validateMemoryQuantity,
 } from "~/lib/compute";
 import { EFFORT_LEVELS, providerSupportsEffort } from "~/lib/effort";
 import { createAgentJob, DEFAULT_MAX_TURNS } from "~/server/agents/create-job";
 import { getRepoBotToken } from "~/server/agents/github-app";
 import { getUserGithubToken } from "~/server/agents/github-token";
-import { mergeCompute, resolveCompute } from "~/server/agents/compute";
+import {
+  mergeCompute,
+  parseComputeInput,
+  resolveCompute,
+} from "~/server/agents/compute";
 import { listModelsForUser, pickPrWriterModel } from "~/server/agents/models";
 import {
-  pickProvider,
+  providerForCredentials,
   resolveModelCredentials,
+  selectRunCredentials,
 } from "~/server/agents/resolve-credentials";
 import {
   assertMayUseRepoCredentials,
   loadRepoRunConfig,
   resolveGitIdentity,
   resolveIssueContext,
-  selectRunCredentials,
 } from "~/server/agents/deploy-steps";
 import { acpFrame, agentInput, taskRun } from "~/server/db/schema";
 import { getBatchV1Api, getCoreV1Api } from "~/server/k8s/client";
@@ -64,46 +67,18 @@ export const agentsRouter = createTRPCRouter({
         ctx.session.user.id,
         input?.repoFullName,
       );
-      const {
-        aws,
-        anthropicApiKey,
-        anthropicOauthToken,
-        openaiApiKey,
-        codexAuthJson,
-        geminiApiKey,
-      } = pickProvider(creds);
-      if (aws) {
+      const provider = providerForCredentials(creds);
+      if (!provider) {
         return {
-          provider: "bedrock" as const,
-          region: aws.region,
-          source: creds.source,
-        };
-      }
-      if (anthropicApiKey ?? anthropicOauthToken) {
-        return {
-          provider: "anthropic" as const,
+          provider: "none" as const,
           region: null,
-          source: creds.source,
-        };
-      }
-      if (openaiApiKey ?? codexAuthJson) {
-        return {
-          provider: "openai" as const,
-          region: null,
-          source: creds.source,
-        };
-      }
-      if (geminiApiKey) {
-        return {
-          provider: "gemini" as const,
-          region: null,
-          source: creds.source,
+          source: "none" as const,
         };
       }
       return {
-        provider: "none" as const,
-        region: null,
-        source: "none" as const,
+        provider,
+        region: provider === "bedrock" ? (creds.aws?.region ?? null) : null,
+        source: creds.source,
       };
     }),
 
@@ -721,21 +696,11 @@ export const agentsRouter = createTRPCRouter({
 
       // Validate a per-task compute override up front, so a malformed quantity
       // is a clear 400 rather than a failed job creation.
-      const computeOverride: { cpu?: string; memory?: string } = {};
-      if (input.cpu?.trim()) {
-        const v = validateCpuQuantity(input.cpu);
-        if (!v.valid) {
-          throw new TRPCError({ code: "BAD_REQUEST", message: v.error });
-        }
-        computeOverride.cpu = v.normalized;
-      }
-      if (input.memory?.trim()) {
-        const v = validateMemoryQuantity(input.memory);
-        if (!v.valid) {
-          throw new TRPCError({ code: "BAD_REQUEST", message: v.error });
-        }
-        computeOverride.memory = v.normalized;
-      }
+      const parsed = parseComputeInput(input.cpu, input.memory);
+      const computeOverride: ComputeSpec = {
+        cpu: parsed.cpu ?? undefined,
+        memory: parsed.memory ?? undefined,
+      };
 
       // A repo's shared cluster and credentials are only for users who can reach
       // that repo. Verify access before resolving anything repo-scoped, so a
@@ -757,9 +722,11 @@ export const agentsRouter = createTRPCRouter({
         computeOverride,
       );
 
-      // Resolve model credentials, then pick the single provider + credential
-      // set the run executes on (see selectRunCredentials); throws when none is
-      // configured for the chosen model.
+      // Resolve model credentials, then select the exact set for this run: the
+      // provider of the model the user chose (falling back to the primary-provider
+      // precedence for REST/webhook clients with no picker), and — for Anthropic /
+      // OpenAI, which the picker offers once per credential kind — the auth kind
+      // they pinned (falling back to the API-key-beats-subscription precedence).
       const resolved = await resolveModelCredentials(
         ctx.db,
         userId,
@@ -767,13 +734,32 @@ export const agentsRouter = createTRPCRouter({
       );
       const {
         provider,
-        awsCredentials,
+        authKind,
+        aws: awsCredentials,
         anthropicApiKey,
         anthropicOauthToken,
         openaiApiKey,
         codexAuthJson,
         geminiApiKey,
-      } = selectRunCredentials(resolved, input.modelProvider, input.modelAuth);
+      } = selectRunCredentials(resolved, {
+        modelProvider: input.modelProvider,
+        modelAuth: input.modelAuth,
+      });
+
+      if (
+        !awsCredentials &&
+        !anthropicApiKey &&
+        !anthropicOauthToken &&
+        !openaiApiKey &&
+        !codexAuthJson &&
+        !geminiApiKey
+      ) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message:
+            "No model credentials configured for the selected model. Add AWS Bedrock, an Anthropic, OpenAI, or Gemini API key in settings (or repo configuration) before deploying.",
+        });
+      }
 
       // Validate AWS credentials up-front (catches expired STS sessions) so a
       // clear error surfaces instead of a pod that fails to authenticate.
@@ -836,23 +822,13 @@ export const agentsRouter = createTRPCRouter({
               userId,
               input.repoFullName,
             );
-            // The auth kind the run's credentials actually resolved to (the API
-            // key beats the subscription), mirroring the routing above.
-            const auth =
-              provider === "anthropic"
-                ? anthropicApiKey
-                  ? ("api_key" as const)
-                  : ("subscription" as const)
-                : provider === "openai"
-                  ? openaiApiKey
-                    ? ("api_key" as const)
-                    : ("subscription" as const)
-                  : undefined;
             prWriterModel = pickPrWriterModel(models, {
               id: input.model,
               label: input.model,
               provider,
-              auth,
+              // The auth kind the run's credentials actually resolved to (the
+              // API key beats the subscription), from selectRunCredentials.
+              auth: authKind ?? undefined,
             });
           } catch (err) {
             console.warn("[bandolier:deploy] PR-writer model lookup failed", {

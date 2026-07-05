@@ -110,13 +110,15 @@ describe("validateKubeconfig", () => {
     );
     const result = await validateKubeconfig("kc");
     expect(result.valid).toBe(false);
-    expect(result.error).toContain(
-      "the selected context authenticates with an exec credential plugin",
-    );
-    // env.BETTER_AUTH_URL defaults to localhost in the test environment.
-    expect(result.error).toContain(
-      "curl -fsSL http://localhost:3000/setup.sh | bash",
-    );
+    if (!result.valid) {
+      expect(result.error).toContain(
+        "the selected context authenticates with an exec credential plugin",
+      );
+      // env.BETTER_AUTH_URL defaults to localhost in the test environment.
+      expect(result.error).toContain(
+        "curl -fsSL http://localhost:3000/setup.sh | bash",
+      );
+    }
     expect(getCode).not.toHaveBeenCalled();
   });
 
@@ -165,7 +167,8 @@ describe("validateKubeconfig", () => {
     getKubeconfigServer.mockReturnValue("https://[fe80::1]:6443");
     const result = await validateKubeconfig("kc");
     expect(result.valid).toBe(false);
-    expect(result.error).toContain("points at a link-local/metadata address");
+    if (!result.valid)
+      expect(result.error).toContain("points at a link-local/metadata address");
   });
 
   it("blocks a DNS name that resolves to a metadata address", async () => {

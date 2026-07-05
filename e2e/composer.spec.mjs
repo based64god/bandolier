@@ -1,33 +1,11 @@
-// Browser smoke test for the slash-command composer. Playwright isn't a project
-// dependency (it's installed globally in this environment), so resolve it from
-// the local node_modules if present, else fall back to the global install.
+// Browser smoke test for the slash-command composer.
 //
 // Run against a dev server serving the harness route:
 //   pnpm next dev --port 3137 &
 //   node e2e/composer.spec.mjs
-import { createRequire } from "node:module";
-const require = createRequire(import.meta.url);
-let chromium;
-try {
-  ({ chromium } = require("playwright"));
-} catch {
-  ({ chromium } = require("/usr/local/lib/node_modules/playwright/index.js"));
-}
+import { BASE, check, launch, finish } from "./helpers.mjs";
 
-const BASE = process.env.COMPOSER_BASE_URL ?? "http://localhost:3137";
-let passed = 0;
-let failed = 0;
-function check(name, cond) {
-  if (cond) {
-    passed++;
-    console.log(`  ✓ ${name}`);
-  } else {
-    failed++;
-    console.log(`  ✗ ${name}`);
-  }
-}
-
-const browser = await chromium.launch();
+const browser = await launch();
 const page = await browser.newPage();
 
 // ── Scenario 1: live commands advertised via ?commands= ──────────────────────
@@ -132,6 +110,4 @@ for (let i = 0; i < 25; i++) await ta3.press("ArrowUp");
 const scrollTopUp = await menu3.evaluate((el) => el.scrollTop);
 check("ArrowUp scrolls back toward the top", scrollTopUp < scrollTopDown);
 
-await browser.close();
-console.log(`\n${passed} passed, ${failed} failed`);
-process.exit(failed === 0 ? 0 : 1);
+await finish(browser);

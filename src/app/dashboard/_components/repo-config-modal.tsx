@@ -452,10 +452,9 @@ function RepoArtifactsSection({
         Run artifact storage (S3)
       </h4>
       <p className="text-xs text-white/40">
-        A bucket this repo owns for persisted run transcripts (and historical
-        context, later). Without one, this repo&apos;s run transcripts are not
-        persisted and vanish with the pod. Use credentials scoped to just this
-        bucket — they stay on the server and are never given to agents.
+        A bucket this repo owns for persisted run transcripts. Without one, they
+        vanish with the pod. Use credentials scoped to just this bucket — they
+        stay on the server, never given to agents.
       </p>
       {status?.configured ? (
         <div className="flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm">
@@ -765,10 +764,10 @@ function RepoDefaultEffortSection({ repoFullName }: { repoFullName: string }) {
   );
 }
 
-// Resumeable tasks: when a CI pipeline fails on a pull request Bandolier opened,
-// auto-resume the run that produced it so the agent can investigate and push a
-// fix. Off by default — it spends the run owner's credentials without a human in
-// the loop, and is bounded server-side (once per failing commit, capped per PR).
+// Resumeable tasks: when CI fails on a PR Bandolier opened, auto-resume the run
+// that produced it to investigate and push a fix. Off by default — it spends the
+// owner's credentials unattended, bounded server-side (once per commit, capped
+// per PR).
 function RepoResumeSection({ repoFullName }: { repoFullName: string }) {
   const utils = api.useUtils();
   const { data: config, isLoading } = api.webhooks.getConfig.useQuery({
@@ -787,16 +786,13 @@ function RepoResumeSection({ repoFullName }: { repoFullName: string }) {
           Resume tasks on CI failure
         </h3>
         <p className="text-xs text-white/40">
-          When a CI pipeline (a GitHub Actions{" "}
+          When CI (a GitHub Actions{" "}
           <code className="rounded bg-white/10 px-1 text-white/60">
             workflow_run
           </code>
-          ) fails on a pull request Bandolier produced, automatically resume the
-          run that opened it — seeded with its transcript and continuing on the
-          PR&apos;s branch — to investigate the failure and push a fix. Only
-          open, same-repo pull requests resume; each failing commit resumes at
-          most once, and a PR stops after a few attempts so a fix that never
-          lands can&apos;t loop.
+          ) fails on a pull request Bandolier opened, resume the run that
+          produced it to investigate and push a fix. Only open, same-repo PRs;
+          each commit resumes once, and a PR stops after a few attempts.
         </p>
       </div>
       {isLoading ? (
@@ -809,8 +805,8 @@ function RepoResumeSection({ repoFullName }: { repoFullName: string }) {
                 Auto-resume on failing CI
               </h4>
               <p className="text-[11px] text-white/40">
-                Resumes run as the task&apos;s owner and use their model and
-                cluster credentials — enable only if that&apos;s intended.
+                Runs as the task&apos;s owner, on their model and cluster
+                credentials.
               </p>
             </div>
             <button
@@ -843,10 +839,9 @@ function RepoResumeSection({ repoFullName }: { repoFullName: string }) {
 }
 
 // Auto-merge: enable GitHub's native auto-merge on every pull request a Bandolier
-// run reports as its output, so it lands once its required checks pass — no human
-// click. Off by default — it lets an agent's work merge on its own. Auto-merge
-// still respects the branch's protection rules, so a repo relies on its own
-// required reviews/checks as the gate; a repo with none would merge immediately.
+// run opens, so it lands once its required checks pass — no human click. Off by
+// default. Branch protection still gates the merge, so a repo with none would
+// merge immediately.
 function RepoAutoMergeSection({ repoFullName }: { repoFullName: string }) {
   const utils = api.useUtils();
   const { data: config, isLoading } = api.webhooks.getConfig.useQuery({
@@ -865,13 +860,11 @@ function RepoAutoMergeSection({ repoFullName }: { repoFullName: string }) {
           Auto-merge Bandolier PRs
         </h3>
         <p className="text-xs text-white/40">
-          When a Bandolier run opens a pull request, automatically enable GitHub
-          auto-merge on it, so it merges itself once its required checks pass
-          and it&apos;s mergeable. Auto-merge still honors the branch&apos;s
-          protection rules (required reviews / status checks) — this only lands
-          what the repo&apos;s own gates already allow, so a branch with no
-          protection would merge right away. The merge method is the first of
-          merge / squash / rebase the repo permits.
+          When a Bandolier run opens a pull request, enable GitHub auto-merge on
+          it, so it merges once its required checks pass. Branch protection
+          (required reviews / status checks) still gates the merge, so a branch
+          with none would merge right away. Uses the first of merge / squash /
+          rebase the repo permits.
         </p>
       </div>
       {isLoading ? (
@@ -884,9 +877,8 @@ function RepoAutoMergeSection({ repoFullName }: { repoFullName: string }) {
                 Auto-merge on passing checks
               </h4>
               <p className="text-[11px] text-white/40">
-                Lets an agent&apos;s PR merge without a human pressing the
-                button — enable only if your branch protection is the gate you
-                trust.
+                Merges an agent&apos;s PR with no human click — enable only if
+                branch protection is a gate you trust.
               </p>
             </div>
             <button

@@ -12,7 +12,7 @@ import {
   RepoDefaultModelSection,
 } from "./defaults-sections";
 import { RepoNetworkPolicySection } from "./network-policy-section";
-import { RepoAutoMergeSection, RepoResumeSection } from "./toggles";
+import { RepoResumeSection } from "./toggles";
 
 export function RepoConfigModal({
   repoFullName,
@@ -209,8 +209,6 @@ export function RepoConfigModal({
         <RepoDefaultEffortSection repoFullName={repoFullName} />
 
         <RepoResumeSection repoFullName={repoFullName} />
-
-        <RepoAutoMergeSection repoFullName={repoFullName} />
 
         <RepoDefaultComputeSection repoFullName={repoFullName} />
 

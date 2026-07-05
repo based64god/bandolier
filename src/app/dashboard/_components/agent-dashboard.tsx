@@ -26,7 +26,7 @@ import { OverviewPanel } from "./overview-panel";
 import { recordRecentRepo } from "./recent-repos";
 import { RepoConfigModal } from "./repo-config-modal";
 import { SettingsModal } from "./settings-modal";
-import { TaskTable } from "./task-table";
+import { TaskTable, TaskTableSkeleton } from "./task-table";
 
 export function AgentDashboard({
   user,
@@ -303,7 +303,13 @@ export function AgentDashboard({
                 No agents running in{" "}
                 <code className="text-white/60">{namespace}</code>
               </div>
-            ) : agents.length === 0 && visiblePending.length === 0 ? null : (
+            ) : agents.length === 0 && visiblePending.length === 0 ? (
+              // First fetch still in flight (the empty+error case renders the
+              // banner above and nothing else). The list query round-trips to
+              // the cluster and can take a while — show a skeleton so the task
+              // area doesn't sit blank.
+              !error && <TaskTableSkeleton />
+            ) : (
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <h2 className="flex items-center gap-2 text-xs font-medium tracking-wider text-white/40 uppercase">

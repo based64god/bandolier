@@ -1,35 +1,13 @@
 // Browser smoke test for the StatusBadge failure popover: a Failed pill with
 // failure detail opens a reason + suggested fix on tap, without triggering the
 // surrounding row's click handler.
-// Playwright is installed globally in this environment; resolve it locally
-// first, else fall back to the global install.
 //
 // Run against a dev server serving the harness route:
 //   pnpm next dev --port 3137 &
 //   node e2e/status-badge.spec.mjs
-import { createRequire } from "node:module";
-const require = createRequire(import.meta.url);
-let chromium;
-try {
-  ({ chromium } = require("playwright"));
-} catch {
-  ({ chromium } = require("/usr/local/lib/node_modules/playwright/index.js"));
-}
+import { BASE, check, launch, finish } from "./helpers.mjs";
 
-const BASE = process.env.STATUS_BADGE_BASE_URL ?? "http://localhost:3137";
-let passed = 0;
-let failed = 0;
-function check(name, cond) {
-  if (cond) {
-    passed++;
-    console.log(`  ✓ ${name}`);
-  } else {
-    failed++;
-    console.log(`  ✗ ${name}`);
-  }
-}
-
-const browser = await chromium.launch();
+const browser = await launch();
 const page = await browser.newPage();
 const popover = () => page.getByRole("dialog", { name: "Failure details" });
 const rowClicks = () => page.getByTestId("row-clicks").innerText();
@@ -100,6 +78,4 @@ check(
   (await page.getByTestId("succeeded").getByRole("button").count()) === 0,
 );
 
-await browser.close();
-console.log(`\n${passed} passed, ${failed} failed`);
-process.exit(failed === 0 ? 0 : 1);
+await finish(browser);

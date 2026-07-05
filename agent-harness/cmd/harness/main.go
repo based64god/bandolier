@@ -1554,6 +1554,13 @@ type claudeEvent struct {
 			Thinking string          `json:"thinking"`
 			Name     string          `json:"name"`
 			Input    json.RawMessage `json:"input"`
+			// ID is the tool_use block's id; ToolUseID / ToolResult / IsError
+			// carry the matching tool_result (from the follow-up `user` event)
+			// so the output can be correlated back to its call.
+			ID         string          `json:"id"`
+			ToolUseID  string          `json:"tool_use_id"`
+			ToolResult json.RawMessage `json:"content"`
+			IsError    bool            `json:"is_error"`
 		} `json:"content"`
 	} `json:"message"`
 	// Usage is carried by the terminal `result` event: the run's cumulative
@@ -1592,6 +1599,42 @@ func toolSummary(name string, input json.RawMessage) string {
 		b, _ := json.Marshal(m)
 		return fmt.Sprintf("%s: %s", name, string(b))
 	}
+}
+
+// maxToolOutput caps how much of a tool result we forward as a tool_call_update:
+// results can be huge (a full file read, a long command's stdout), and both the
+// pod-log transcript and the relayed frame carry the text, so we truncate to
+// keep them bounded. The UI collapses the output behind an expander regardless.
+const maxToolOutput = 12000
+
+// toolResultText renders a Claude tool_result's `content` — which is either a
+// bare string or an array of content blocks — as plain text, truncating to
+// maxToolOutput characters.
+func toolResultText(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var out string
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		out = s
+	} else {
+		var blocks []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		}
+		if json.Unmarshal(raw, &blocks) == nil {
+			var b strings.Builder
+			for _, blk := range blocks {
+				b.WriteString(blk.Text)
+			}
+			out = b.String()
+		}
+	}
+	if len(out) > maxToolOutput {
+		out = out[:maxToolOutput] + "\n… (truncated)"
+	}
+	return out
 }
 
 // logToolUse logs a tool invocation, tagging every line with [harness] so a

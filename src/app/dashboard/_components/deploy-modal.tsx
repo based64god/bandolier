@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 
 import {
   buildIssueSystemPrompt,
@@ -13,6 +13,7 @@ import { EffortPicker } from "./effort-picker";
 import { usePreferredEffort } from "./preferred-effort";
 import { usePreferredModel } from "./preferred-model";
 import { ProviderTag } from "./provider-tag";
+import { modelKey, resolveEffectiveModel } from "./resolve-effective-model";
 import { SearchableSelect } from "./searchable-select";
 
 const PROVIDER_LABELS = {
@@ -38,11 +39,92 @@ const PROVIDER_LABELS = {
   },
 } as const;
 
-// Picker option key. A model can be offered once per credential kind (a user
-// with both an API key and a subscription sees e.g. "claude-opus-4-8" twice),
-// so options are keyed by id + auth rather than the bare id.
-function modelKey(m: { id: string; auth?: string }): string {
-  return m.auth ? `${m.id}::${m.auth}` : m.id;
+// The deploy form's fields as a single value. "" means "use the default" for
+// the derived/optional fields (model, effort, maxTurns, cpu, memory,
+// issueNumber). Collapsing these into one reducer keeps submit mapping a single
+// state value rather than a dozen scattered useState setters.
+interface DeployForm {
+  task: string;
+  repoUrl: string;
+  branch: string;
+  // Empty string means "use the default"; the effective model is derived below.
+  model: string;
+  // Empty string means "use the CLI default" reasoning effort.
+  effort: string;
+  maxTurns: string;
+  // Per-task compute (CPU / memory limit) overrides; "" uses the resolved
+  // repo/user default shown as the placeholder.
+  cpu: string;
+  memory: string;
+  // "" means no issue selected.
+  issueNumber: string;
+  // Interactive agents stay alive and wait for the user's input between turns.
+  interactive: boolean;
+  // "pr" opens a pull request; "issue" opens a GitHub issue (sub-task) from the
+  // agent's findings. Issue output needs a repository to open the issue in.
+  outputType: "pr" | "issue";
+}
+
+type DeployFormAction = {
+  [K in keyof DeployForm]: { field: K; value: DeployForm[K] };
+}[keyof DeployForm];
+
+function deployFormReducer(
+  state: DeployForm,
+  action: DeployFormAction,
+): DeployForm {
+  return { ...state, [action.field]: action.value };
+}
+
+// Context-preview tooltip. Hover shows it; clicking the info button "pins" it
+// open so the user can scroll/select inside without it closing on mouse-out.
+// Clicking outside a pinned tooltip dismisses it.
+function PinnedTooltip({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  const [pinned, setPinned] = useState(false);
+  const [hovered, setHovered] = useState(false);
+  const ref = useRef<HTMLSpanElement>(null);
+  const open = pinned || hovered;
+
+  useEffect(() => {
+    if (!pinned) return;
+    const handler = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setPinned(false);
+    };
+    window.addEventListener("mousedown", handler);
+    return () => window.removeEventListener("mousedown", handler);
+  }, [pinned]);
+
+  return (
+    <span
+      ref={ref}
+      className="flex"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      <button
+        type="button"
+        onClick={() => setPinned((p) => !p)}
+        className="flex text-white/40 hover:text-white/70"
+        aria-label={label}
+        aria-expanded={open}
+      >
+        <svg viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5">
+          <path d="M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0Zm0 4a1 1 0 0 1 1 1v3a1 1 0 0 1-2 0V5a1 1 0 0 1 1-1Zm0 7.5a1.1 1.1 0 1 1 0 2.2 1.1 1.1 0 0 1 0-2.2Z" />
+        </svg>
+      </button>
+      {open && (
+        <div className="absolute top-full right-0 left-0 z-30 mt-1">
+          {children}
+        </div>
+      )}
+    </span>
+  );
 }
 
 export function DeployModal({
@@ -63,36 +145,37 @@ export function DeployModal({
   defaultRepoUrl?: string;
   defaultBranch?: string;
 }) {
-  const [task, setTask] = useState("");
-  const [repoUrl, setRepoUrl] = useState(defaultRepoUrl ?? "");
-  const [branch, setBranch] = useState(defaultBranch ?? "main");
-  // Empty string means "use the default"; the effective model is derived below.
-  const [model, setModel] = useState("");
-  // Empty string means "use the CLI default" reasoning effort.
-  const [effort, setEffort] = useState("");
-  const [maxTurns, setMaxTurns] = useState("");
-  // Per-task compute (CPU / memory limit) overrides; "" uses the resolved
-  // repo/user default shown as the placeholder.
-  const [cpu, setCpu] = useState("");
-  const [memory, setMemory] = useState("");
-  // "" means no issue selected.
-  const [issueNumber, setIssueNumber] = useState("");
-  // Interactive agents stay alive and wait for the user's input between turns.
-  const [interactive, setInteractive] = useState(false);
-  // "pr" opens a pull request; "issue" opens a GitHub issue (sub-task) from the
-  // agent's findings. Issue output needs a repository to open the issue in.
-  const [outputType, setOutputType] = useState<"pr" | "issue">("pr");
+  const [form, setField] = useReducer(deployFormReducer, {
+    task: "",
+    repoUrl: defaultRepoUrl ?? "",
+    branch: defaultBranch ?? "main",
+    model: "",
+    effort: "",
+    maxTurns: "",
+    cpu: "",
+    memory: "",
+    issueNumber: "",
+    interactive: false,
+    outputType: "pr",
+  });
+  const {
+    task,
+    repoUrl,
+    branch,
+    model,
+    effort,
+    maxTurns,
+    cpu,
+    memory,
+    issueNumber,
+    interactive,
+    outputType,
+  } = form;
   const issueOutput = outputType === "issue";
 
-  // Context-preview tooltip. Hover shows it; clicking the info button "pins" it
-  // open so the user can scroll/select inside without it closing on mouse-out.
-  const [contextPinned, setContextPinned] = useState(false);
-  const [contextHovered, setContextHovered] = useState(false);
-  const contextRef = useRef<HTMLSpanElement>(null);
   // Tracks whether the current mouse gesture began on the backdrop, so a drag
   // that ends outside the modal doesn't count as a backdrop click.
   const backdropMouseDown = useRef(false);
-  const showContext = contextPinned || contextHovered;
 
   const { data: providerInfo } = api.agents.providerInfo.useQuery({
     repoFullName,
@@ -126,29 +209,13 @@ export function DeployModal({
     : null;
 
   // Derive the effective model (no effect needed): an explicit choice, else the
-  // user's preferred model (if still available), else a Sonnet, else the first
-  // available. Selection state holds the option KEY (id + credential kind), not
-  // the bare id — the same model can be offered once per credential kind, and
-  // the key disambiguates "run on my API key" from "run on my subscription".
-  // A legacy stored preference may be a bare id; resolve it by id as a fallback.
-  const preferredOption =
-    models.find((m) => modelKey(m) === preferredModel) ??
-    models.find((m) => m.id === preferredModel);
-  const fallbackOption =
-    models.find((m) => /sonnet/i.test(m.id) || /sonnet/i.test(m.label)) ??
-    models[0];
-  const defaultModel = preferredOption
-    ? modelKey(preferredOption)
-    : fallbackOption
-      ? modelKey(fallbackOption)
-      : "";
-  const effectiveModel = model || defaultModel;
-  const selectedModel =
-    models.find((m) => modelKey(m) === effectiveModel) ?? null;
-  const isPreferred =
-    !!selectedModel &&
-    (modelKey(selectedModel) === preferredModel ||
-      selectedModel.id === preferredModel);
+  // user's preferred model, else a Sonnet, else the first available.
+  const {
+    effectiveKey: effectiveModel,
+    selected: selectedModel,
+    isPreferred,
+    submitId: submitModelId,
+  } = resolveEffectiveModel(models, model, preferredModel);
 
   // Reasoning effort only applies to Claude models (Anthropic / Bedrock). Hide
   // the picker for OpenAI/Gemini and never send a value for them. Default to the
@@ -193,18 +260,6 @@ export function DeployModal({
     };
   }, []);
 
-  // Clicking outside a pinned context tooltip dismisses it.
-  useEffect(() => {
-    if (!contextPinned) return;
-    const handler = (e: MouseEvent) => {
-      if (!contextRef.current?.contains(e.target as Node)) {
-        setContextPinned(false);
-      }
-    };
-    window.addEventListener("mousedown", handler);
-    return () => window.removeEventListener("mousedown", handler);
-  }, [contextPinned]);
-
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     deploy.mutate({
@@ -213,7 +268,7 @@ export function DeployModal({
       repoUrl: repoUrl || undefined,
       repoFullName,
       branch,
-      model: selectedModel?.id ?? effectiveModel.split("::")[0]!,
+      model: submitModelId,
       modelProvider: selectedModel?.provider,
       modelAuth: selectedModel?.auth,
       effort:
@@ -256,7 +311,8 @@ export function DeployModal({
         backdropMouseDown.current = e.target === e.currentTarget;
       }}
       onClick={(e) => {
-        if (e.target === e.currentTarget && backdropMouseDown.current) onClose();
+        if (e.target === e.currentTarget && backdropMouseDown.current)
+          onClose();
       }}
     >
       <div
@@ -318,52 +374,28 @@ export function DeployModal({
                   <span className="font-normal text-white/30">(optional)</span>
                 </label>
                 {selectedIssue && (
-                  <span
-                    ref={contextRef}
-                    className="flex"
-                    onMouseEnter={() => setContextHovered(true)}
-                    onMouseLeave={() => setContextHovered(false)}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => setContextPinned((p) => !p)}
-                      className="flex text-white/40 hover:text-white/70"
-                      aria-label="Preview context sent to Claude"
-                      aria-expanded={showContext}
-                    >
-                      <svg
-                        viewBox="0 0 16 16"
-                        fill="currentColor"
-                        className="h-3.5 w-3.5"
-                      >
-                        <path d="M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0Zm0 4a1 1 0 0 1 1 1v3a1 1 0 0 1-2 0V5a1 1 0 0 1 1-1Zm0 7.5a1.1 1.1 0 1 1 0 2.2 1.1 1.1 0 0 1 0-2.2Z" />
-                      </svg>
-                    </button>
-                    {showContext && (
-                      <div className="absolute top-full right-0 left-0 z-30 mt-1">
-                        <div className="max-h-72 overflow-auto rounded-lg border border-white/10 bg-[var(--surface-panel)] p-3 shadow-2xl">
-                          <p className="mb-1.5 text-[10px] font-medium tracking-wider text-white/40 uppercase">
-                            System prompt
-                          </p>
-                          <pre className="mb-3 font-mono text-[11px] leading-4 whitespace-pre-wrap text-white/60">
-                            {buildIssueSystemPrompt(
-                              selectedIssue,
-                              issuePreviewBranch(
-                                selectedIssue.number,
-                                selectedIssue.title,
-                              ),
-                            )}
-                          </pre>
-                          <p className="mb-1.5 text-[10px] font-medium tracking-wider text-white/40 uppercase">
-                            Context sent to Claude
-                          </p>
-                          <pre className="font-mono text-[11px] leading-4 whitespace-pre-wrap text-white/60">
-                            {buildIssueUserMessage(selectedIssue, task)}
-                          </pre>
-                        </div>
-                      </div>
-                    )}
-                  </span>
+                  <PinnedTooltip label="Preview context sent to Claude">
+                    <div className="max-h-72 overflow-auto rounded-lg border border-white/10 bg-[var(--surface-panel)] p-3 shadow-2xl">
+                      <p className="mb-1.5 text-[10px] font-medium tracking-wider text-white/40 uppercase">
+                        System prompt
+                      </p>
+                      <pre className="mb-3 font-mono text-[11px] leading-4 whitespace-pre-wrap text-white/60">
+                        {buildIssueSystemPrompt(
+                          selectedIssue,
+                          issuePreviewBranch(
+                            selectedIssue.number,
+                            selectedIssue.title,
+                          ),
+                        )}
+                      </pre>
+                      <p className="mb-1.5 text-[10px] font-medium tracking-wider text-white/40 uppercase">
+                        Context sent to Claude
+                      </p>
+                      <pre className="font-mono text-[11px] leading-4 whitespace-pre-wrap text-white/60">
+                        {buildIssueUserMessage(selectedIssue, task)}
+                      </pre>
+                    </div>
+                  </PinnedTooltip>
                 )}
               </div>
               <SearchableSelect
@@ -378,7 +410,9 @@ export function DeployModal({
                   ),
                 }))}
                 value={issueNumber || null}
-                onChange={(v) => setIssueNumber(v ?? "")}
+                onChange={(v) =>
+                  setField({ field: "issueNumber", value: v ?? "" })
+                }
                 placeholder="No issue — freeform task"
                 clearLabel="No issue — freeform task"
                 loading={issuesLoading}
@@ -413,7 +447,9 @@ export function DeployModal({
                   <button
                     key={opt.value}
                     type="button"
-                    onClick={() => setOutputType(opt.value)}
+                    onClick={() =>
+                      setField({ field: "outputType", value: opt.value })
+                    }
                     className={`flex-1 rounded-lg border px-3 py-1.5 text-sm transition ${
                       outputType === opt.value
                         ? "border-purple-500/50 bg-purple-500/15 text-white"
@@ -450,7 +486,9 @@ export function DeployModal({
               required={!hasIssue}
               rows={3}
               value={task}
-              onChange={(e) => setTask(e.target.value)}
+              onChange={(e) =>
+                setField({ field: "task", value: e.target.value })
+              }
               placeholder={
                 hasIssue
                   ? "Extra guidance for the agent (optional)…"
@@ -480,7 +518,7 @@ export function DeployModal({
                     ),
                   }))}
                   value={effectiveModel || null}
-                  onChange={(v) => setModel(v ?? "")}
+                  onChange={(v) => setField({ field: "model", value: v ?? "" })}
                   placeholder="Select a model"
                   loading={modelsLoading}
                   disabled={!modelsLoading && models.length === 0}
@@ -523,7 +561,7 @@ export function DeployModal({
           {effortSupported && (
             <EffortPicker
               value={effectiveEffort}
-              onChange={setEffort}
+              onChange={(v) => setField({ field: "effort", value: v })}
               preferred
               isPreferred={isPreferredEffort}
               onTogglePreferred={(next) =>
@@ -541,7 +579,9 @@ export function DeployModal({
               <input
                 type="url"
                 value={repoUrl}
-                onChange={(e) => setRepoUrl(e.target.value)}
+                onChange={(e) =>
+                  setField({ field: "repoUrl", value: e.target.value })
+                }
                 placeholder="https://github.com/org/repo"
                 className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-white placeholder-white/30 focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/30 focus:outline-none"
               />
@@ -553,7 +593,9 @@ export function DeployModal({
               <input
                 type="text"
                 value={branch}
-                onChange={(e) => setBranch(e.target.value)}
+                onChange={(e) =>
+                  setField({ field: "branch", value: e.target.value })
+                }
                 placeholder="main"
                 className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-white placeholder-white/30 focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/30 focus:outline-none"
               />
@@ -570,7 +612,9 @@ export function DeployModal({
                 type="number"
                 min={1}
                 value={maxTurns}
-                onChange={(e) => setMaxTurns(e.target.value)}
+                onChange={(e) =>
+                  setField({ field: "maxTurns", value: e.target.value })
+                }
                 disabled={interactive}
                 placeholder={
                   defaultMaxTurns === undefined
@@ -589,7 +633,9 @@ export function DeployModal({
               <input
                 type="text"
                 value={cpu}
-                onChange={(e) => setCpu(e.target.value)}
+                onChange={(e) =>
+                  setField({ field: "cpu", value: e.target.value })
+                }
                 placeholder={defaultCompute?.cpu ?? ""}
                 className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-white placeholder-white/30 focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/30 focus:outline-none"
               />
@@ -601,7 +647,9 @@ export function DeployModal({
               <input
                 type="text"
                 value={memory}
-                onChange={(e) => setMemory(e.target.value)}
+                onChange={(e) =>
+                  setField({ field: "memory", value: e.target.value })
+                }
                 placeholder={defaultCompute?.memory ?? ""}
                 className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-white placeholder-white/30 focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/30 focus:outline-none"
               />
@@ -618,7 +666,9 @@ export function DeployModal({
             <input
               type="checkbox"
               checked={interactive}
-              onChange={(e) => setInteractive(e.target.checked)}
+              onChange={(e) =>
+                setField({ field: "interactive", value: e.target.checked })
+              }
               className="mt-0.5 h-4 w-4 cursor-pointer accent-purple-600"
             />
             <span className="text-xs text-white/60">

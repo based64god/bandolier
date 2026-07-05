@@ -1257,6 +1257,12 @@ export function RepoConfigModal({
     },
   });
 
+  const setAllowResume = api.webhooks.setAllowResume.useMutation({
+    onSuccess: () => {
+      void utils.webhooks.getConfig.invalidate({ repoFullName });
+    },
+  });
+
   // The GitHub App install page; null when no slug is configured (self-hosters
   // who haven't set NEXT_PUBLIC_GITHUB_APP_SLUG), in which case we show generic
   // guidance instead of a broken link.
@@ -1374,6 +1380,17 @@ export function RepoConfigModal({
                 trigger an agent. Leave blank to act on all events.
               </p>
             </div>
+
+            {/* Resume on comment */}
+            <NetworkPolicyToggle
+              label="Resume on comment"
+              description="Let a trigger comment on an issue/PR that already ran spawn a follow-up run. Off by default — a trigger comment on an item with no prior run always starts a fresh run regardless."
+              enabled={config?.allowResume ?? false}
+              disabled={setAllowResume.isPending}
+              onChange={(v) =>
+                setAllowResume.mutate({ repoFullName, allowResume: v })
+              }
+            />
 
             {/* Agent image */}
             <div className="space-y-1.5">

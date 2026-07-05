@@ -155,6 +155,13 @@
       "when": 1783116740508,
       "tag": "0021_burly_kree",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1783232379714,
+      "tag": "0022_exotic_thor",
+      "breakpoints": true
     }
   ]
 }

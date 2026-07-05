@@ -7,6 +7,12 @@ import { repoWebhookConfig } from "~/server/db/schema";
 export interface RepoWebhookConfig {
   /** Trigger phrase events must contain; null means act on all events. */
   prefix: string | null;
+  /**
+   * Whether a comment on an issue/PR that already has a run may resume it.
+   * False (default) means re-triggering an already-run item is ignored; a
+   * trigger comment on an item with no prior run still starts a fresh run.
+   */
+  allowResume: boolean;
   /** Agent harness image override; null means use the server-wide default. */
   agentImage: string | null;
   /** Default model id for webhook-triggered agents; null means provider default. */
@@ -109,6 +115,7 @@ export async function getRepoWebhookConfig(
   const [row] = await database
     .select({
       prefix: repoWebhookConfig.prefix,
+      allowResume: repoWebhookConfig.allowResume,
       agentImage: repoWebhookConfig.agentImage,
       defaultWebhookModel: repoWebhookConfig.defaultWebhookModel,
       defaultWebhookEffort: repoWebhookConfig.defaultWebhookEffort,
@@ -123,6 +130,7 @@ export async function getRepoWebhookConfig(
   if (!row) return null;
   return {
     prefix: row.prefix ?? null,
+    allowResume: row.allowResume,
     agentImage: row.agentImage ?? null,
     defaultWebhookModel: row.defaultWebhookModel ?? null,
     defaultWebhookEffort: row.defaultWebhookEffort ?? null,

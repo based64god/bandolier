@@ -217,6 +217,11 @@ export const repoWebhookConfig = pgTable("repo_webhook_config", {
   // Optional trigger phrase: when set, only webhook events whose text contains
   // it are acted on. Null = act on all events.
   prefix: text("prefix"),
+  // Whether a comment on an issue/PR that already has a run may spawn a
+  // follow-up (resume) run. Off by default: a trigger comment on an issue with
+  // no prior run always starts a fresh run ("picks up the task"), but
+  // re-triggering an item that already ran is ignored unless this is on.
+  allowResume: boolean("allow_resume").notNull().default(false),
   // Optional override for the agent harness container image used by agents run
   // for this repo. Null = use the built-in DEFAULT_HARNESS_IMAGE.
   agentImage: text("agent_image"),

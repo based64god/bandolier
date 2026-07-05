@@ -86,6 +86,7 @@ export const webhooksRouter = createTRPCRouter({
         .select({
           updatedAt: repoWebhookConfig.updatedAt,
           prefix: repoWebhookConfig.prefix,
+          allowResume: repoWebhookConfig.allowResume,
           agentImage: repoWebhookConfig.agentImage,
           defaultWebhookModel: repoWebhookConfig.defaultWebhookModel,
           defaultWebhookEffort: repoWebhookConfig.defaultWebhookEffort,
@@ -106,6 +107,7 @@ export const webhooksRouter = createTRPCRouter({
         configured: !!row,
         updatedAt: row?.updatedAt ?? null,
         prefix: row?.prefix ?? "",
+        allowResume: row?.allowResume ?? false,
         agentImage: row?.agentImage ?? "",
         defaultWebhookModel: row?.defaultWebhookModel ?? null,
         defaultWebhookEffort: row?.defaultWebhookEffort ?? null,
@@ -223,6 +225,24 @@ export const webhooksRouter = createTRPCRouter({
         prefix,
         agentImage,
         systemPrompt,
+      });
+      return { success: true };
+    }),
+
+  // Toggle whether a comment on an item that already has a run may resume it.
+  // Off by default; a trigger comment on an item with no prior run always starts
+  // a fresh run regardless. Partial upsert so it doesn't clobber other config.
+  setAllowResume: protectedProcedure
+    .input(
+      z.object({
+        repoFullName: z.string().min(1),
+        allowResume: z.boolean(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await requireRepoAdmin(ctx, input.repoFullName);
+      await upsertRepoConfig(ctx.db, input.repoFullName, ctx.session.user.id, {
+        allowResume: input.allowResume,
       });
       return { success: true };
     }),

@@ -195,7 +195,9 @@ Optionally, each repo can set a trigger phrase that issue text must contain (set
 
 Commenting on an issue or pull request that a run already worked on **resumes** it: Bandolier finds the item's most recent run, spawns a follow-up run under the commenter's credentials, and seeds it with the parent run's persisted transcript (when the repo has [artifact storage](#run-artifacts-optional) configured) so the agent picks up with full context of what was already done. While the parent's PR is still open, the follow-up works directly on its branch and pushes onto the same PR; otherwise it starts a fresh branch. Resumed tasks carry a "↻ resumed" chip in the dashboard naming their parent.
 
-Comments from bots are ignored (including Bando's own acknowledgements), a comment only ever resumes — one with no prior run does nothing — and the repo's trigger phrase, when configured, applies to comments too.
+Resuming is off by default and gated by the **Resume on comment** repo setting: unless it's enabled, commenting on an item that already ran (a "re-trigger") does nothing. Independently of that setting, commenting on an **issue that has no prior run** with the trigger phrase **picks up the task** — it starts a fresh run just as opening the issue with the trigger would, so an issue filed without the trigger can be handed to Bandolier later by commenting. (A comment on a pull request with no prior run has no standalone task to pick up, so it's ignored.)
+
+Comments from bots are ignored (including Bando's own acknowledgements), and the repo's trigger phrase, when configured, applies to comments too.
 
 ---
 

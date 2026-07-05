@@ -420,6 +420,35 @@ async function handleIssueOpened(
     }
   }
 
+  await startFreshIssueRun(
+    issue,
+    repository,
+    sender,
+    agentImage,
+    defaultModel,
+    defaultEffort,
+    repoSystemPrompt,
+    networkPolicy,
+  );
+}
+
+/**
+ * Start a fresh agent run for an issue: resolve credentials, apply the
+ * maintainer gate for shared repo credentials, dispatch the job, and post the
+ * "picked up" acknowledgement. Shared by the issue-opened path and the comment
+ * path that picks up an issue with no prior run; the caller has already applied
+ * the trigger-prefix gate.
+ */
+async function startFreshIssueRun(
+  issue: GitHubIssue,
+  repository: GitHubRepository,
+  sender: { id: number; login: string },
+  agentImage: string | null,
+  defaultModel: string | null,
+  defaultEffort: string | null,
+  repoSystemPrompt: string | null,
+  networkPolicy: RepoNetworkPolicy | undefined,
+): Promise<void> {
   const run = await resolveWebhookRun({
     sender,
     repoFullName: repository.full_name,
@@ -657,6 +686,7 @@ function prNumberFromUrl(url: string | null): number | null {
 async function handleIssueComment(
   payload: IssueCommentPayload,
   prefix: string | null,
+  allowResume: boolean,
   agentImage: string | null,
   defaultModel: string | null,
   defaultEffort: string | null,
@@ -687,8 +717,8 @@ async function handleIssueComment(
   }
 
   // The parent is the most recent run for the commented item: matched by PR
-  // URL for pull requests, by repo + issue number for issues. No parent run
-  // means there is nothing to resume.
+  // URL for pull requests, by repo + issue number for issues. Its presence
+  // decides whether this comment is a re-trigger (resume) or a fresh pickup.
   const [parent] = await db
     .select({
       jobName: taskRun.jobName,
@@ -709,9 +739,41 @@ async function handleIssueComment(
     )
     .orderBy(desc(taskRun.createdAt))
     .limit(1);
+
+  // No prior run for this item. A trigger comment on an *issue* picks up the
+  // task by starting a fresh run — independent of whether resume is enabled. A
+  // comment on a pull request has no standalone task to pick up, so it's
+  // ignored.
   if (!parent) {
+    if (isPullRequest) {
+      console.log(
+        "[bandolier:webhook] comment skipped — no run to resume",
+        logCtx,
+      );
+      return;
+    }
     console.log(
-      "[bandolier:webhook] comment skipped — no run to resume",
+      "[bandolier:webhook] comment picks up issue — no prior run",
+      logCtx,
+    );
+    await startFreshIssueRun(
+      issue,
+      repository,
+      { id: comment.user.id, login: comment.user.login },
+      agentImage,
+      defaultModel,
+      defaultEffort,
+      repoSystemPrompt,
+      networkPolicy,
+    );
+    return;
+  }
+
+  // A prior run exists, so this comment is a re-trigger. Resuming it is gated
+  // and off by default: re-triggering does nothing unless the repo opts in.
+  if (!allowResume) {
+    console.log(
+      "[bandolier:webhook] comment skipped — resume disabled for repo",
       logCtx,
     );
     return;
@@ -1123,6 +1185,7 @@ export async function POST(req: NextRequest) {
         await handleIssueComment(
           payload as IssueCommentPayload,
           repoConfig?.prefix ?? null,
+          repoConfig?.allowResume ?? false,
           repoConfig?.agentImage ?? null,
           repoConfig?.defaultWebhookModel ?? null,
           repoConfig?.defaultWebhookEffort ?? null,

@@ -1,0 +1,1 @@
+ALTER TABLE "repo_webhook_config" ADD COLUMN "allow_resume" boolean DEFAULT false NOT NULL;

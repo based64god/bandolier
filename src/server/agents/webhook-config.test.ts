@@ -126,6 +126,7 @@ describe("getRepoWebhookConfig", () => {
     const { database } = makeSelectDb([
       {
         prefix: "/bando",
+        allowResume: true,
         agentImage: "ghcr.io/x/harness:1",
         defaultWebhookModel: "claude-sonnet-4-5",
         defaultWebhookEffort: "high",
@@ -137,6 +138,7 @@ describe("getRepoWebhookConfig", () => {
     ]);
     expect(await getRepoWebhookConfig(database, "o/r")).toEqual({
       prefix: "/bando",
+      allowResume: true,
       agentImage: "ghcr.io/x/harness:1",
       defaultWebhookModel: "claude-sonnet-4-5",
       defaultWebhookEffort: "high",
@@ -153,6 +155,7 @@ describe("getRepoWebhookConfig", () => {
     const { database } = makeSelectDb([
       {
         prefix: null,
+        allowResume: false,
         agentImage: null,
         defaultWebhookModel: null,
         defaultWebhookEffort: null,
@@ -164,6 +167,7 @@ describe("getRepoWebhookConfig", () => {
     ]);
     expect(await getRepoWebhookConfig(database, "o/r")).toEqual({
       prefix: null,
+      allowResume: false,
       agentImage: null,
       defaultWebhookModel: null,
       defaultWebhookEffort: null,

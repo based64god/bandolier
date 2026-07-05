@@ -8,8 +8,8 @@ import {
   validateAnthropicOauthToken,
 } from "~/server/agents/anthropic";
 import { cleanSessionToken, validateAwsCredentials } from "~/server/agents/aws";
-import { getUserCompute } from "~/server/agents/compute";
-import { validateCpuQuantity, validateMemoryQuantity } from "~/lib/compute";
+import { getUserCompute, parseComputeInput } from "~/server/agents/compute";
+import { maskKey, stripWhitespace } from "~/server/api/credentials";
 import {
   getUserKubeconfig,
   resolveKubeconfig,
@@ -36,16 +36,6 @@ import {
   userOpenaiCredentials,
 } from "~/server/db/schema";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
-
-function maskKey(key: string): string {
-  if (key.length <= 8) return key;
-  return `${key.slice(0, 4)}…${key.slice(-4)}`;
-}
-
-// Single-line secrets pasted from a wrapped terminal line carry interior
-// spaces/newlines that survive trim(); real keys/tokens never contain
-// whitespace, so it's always safe to strip.
-const stripWhitespace = z.string().transform((s) => s.replace(/\s+/g, ""));
 
 export const accountRouter = createTRPCRouter({
   // Returns non-secret info about the user's stored AWS credentials.
@@ -501,22 +491,7 @@ export const accountRouter = createTRPCRouter({
   setCompute: protectedProcedure
     .input(z.object({ cpu: z.string(), memory: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      let cpu: string | null = null;
-      if (input.cpu.trim()) {
-        const v = validateCpuQuantity(input.cpu);
-        if (!v.valid) {
-          throw new TRPCError({ code: "BAD_REQUEST", message: v.error });
-        }
-        cpu = v.normalized;
-      }
-      let memory: string | null = null;
-      if (input.memory.trim()) {
-        const v = validateMemoryQuantity(input.memory);
-        if (!v.valid) {
-          throw new TRPCError({ code: "BAD_REQUEST", message: v.error });
-        }
-        memory = v.normalized;
-      }
+      const { cpu, memory } = parseComputeInput(input.cpu, input.memory);
 
       if (cpu === null && memory === null) {
         await ctx.db

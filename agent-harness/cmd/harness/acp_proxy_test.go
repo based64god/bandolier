@@ -2,9 +2,11 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -171,6 +173,180 @@ func TestACPProxyRelays(t *testing.T) {
 	_ = agentStdoutW.Close()
 }
 
+// TestACPProxyIdleTimeout drives serve against a fake agent with no queued
+// client frames; the c2aPump must end the session once the idle timeout elapses.
+func TestACPProxyIdleTimeout(t *testing.T) {
+	t.Setenv("INTERACTIVE_IDLE_TIMEOUT", "100ms")
+
+	relay := &fakeRelay{}
+	srv := httptest.NewServer(relay)
+	defer srv.Close()
+
+	agentStdinR, agentStdinW := io.Pipe()
+	agentStdoutR, agentStdoutW := io.Pipe()
+	go fakeAgent(t, agentStdinR, agentStdoutW)
+
+	p := &acpProxy{
+		cfg:   config{acpURL: srv.URL, workDir: t.TempDir(), task: "build the feature"},
+		stdin: agentStdinW,
+		ended: make(chan struct{}),
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() { done <- p.serve(ctx, agentStdoutR) }()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("serve returned error: %v", err)
+		}
+		if ctx.Err() != nil {
+			t.Fatal("serve ended via ctx, not the idle path")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("serve did not end via the idle timeout")
+	}
+
+	_ = agentStdinW.Close()
+	_ = agentStdoutW.Close()
+}
+
+// TestACPProxyAgentExit exercises the a2cPump agent-exit branch: when the agent's
+// stdout closes, serve must end the session rather than waiting on the idle timeout.
+func TestACPProxyAgentExit(t *testing.T) {
+	relay := &fakeRelay{}
+	srv := httptest.NewServer(relay)
+	defer srv.Close()
+
+	agentStdinR, agentStdinW := io.Pipe()
+	agentStdoutR, agentStdoutW := io.Pipe()
+	go fakeAgent(t, agentStdinR, agentStdoutW)
+
+	p := &acpProxy{
+		cfg:   config{acpURL: srv.URL, workDir: t.TempDir(), task: "build the feature"},
+		stdin: agentStdinW,
+		ended: make(chan struct{}),
+	}
+
+	// A long idle timeout so a passing test can only end via the agent-exit path.
+	t.Setenv("INTERACTIVE_IDLE_TIMEOUT", "1h")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() { done <- p.serve(ctx, agentStdoutR) }()
+
+	// Wait until the seed round-trip completed, then close the agent's stdout to
+	// simulate the agent exiting.
+	waitFor(t, func() bool {
+		for _, f := range relay.pushed() {
+			if strings.Contains(f, "agent_message_chunk") {
+				return true
+			}
+		}
+		return false
+	})
+	_ = agentStdoutW.Close()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("serve returned error: %v", err)
+		}
+		if ctx.Err() != nil {
+			t.Fatal("serve ended via ctx, not the agent-exit path")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("serve did not end after the agent exited")
+	}
+
+	_ = agentStdinW.Close()
+}
+
+// toggleWriter forwards writes to an inner writer until fail is flipped, after
+// which every write errors — lets a test make the c2aPump's stdin write fail
+// only after the handshake writes have gone through.
+type toggleWriter struct {
+	mu   sync.Mutex
+	w    io.Writer
+	fail bool
+}
+
+func (t *toggleWriter) setFail() {
+	t.mu.Lock()
+	t.fail = true
+	t.mu.Unlock()
+}
+
+func (t *toggleWriter) Write(p []byte) (int, error) {
+	t.mu.Lock()
+	fail := t.fail
+	t.mu.Unlock()
+	if fail {
+		return 0, io.ErrClosedPipe
+	}
+	return t.w.Write(p)
+}
+
+// TestACPProxyStdinWriteFailure exercises the c2aPump stdin-write-failure branch:
+// when forwarding a client frame to the agent fails, serve must end the session.
+func TestACPProxyStdinWriteFailure(t *testing.T) {
+	t.Setenv("INTERACTIVE_IDLE_TIMEOUT", "1h")
+
+	relay := &fakeRelay{}
+	srv := httptest.NewServer(relay)
+	defer srv.Close()
+
+	agentStdinR, agentStdinW := io.Pipe()
+	agentStdoutR, agentStdoutW := io.Pipe()
+	go fakeAgent(t, agentStdinR, agentStdoutW)
+
+	stdin := &toggleWriter{w: agentStdinW}
+	p := &acpProxy{
+		cfg:   config{acpURL: srv.URL, workDir: t.TempDir(), task: "build the feature"},
+		stdin: stdin,
+		ended: make(chan struct{}),
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() { done <- p.serve(ctx, agentStdoutR) }()
+
+	// Let the handshake and seed complete, then make subsequent stdin writes fail
+	// and enqueue a client frame the pump will try to forward.
+	waitFor(t, func() bool {
+		for _, f := range relay.pushed() {
+			if strings.Contains(f, "agent_message_chunk") {
+				return true
+			}
+		}
+		return false
+	})
+	stdin.setFail()
+	relay.enqueue(`{"jsonrpc":"2.0","id":2,"method":"session/cancel","params":{"sessionId":"sess-1"}}`)
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("serve returned error: %v", err)
+		}
+		if ctx.Err() != nil {
+			t.Fatal("serve ended via ctx, not the stdin-write-failure path")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("serve did not end after the stdin write failed")
+	}
+
+	_ = agentStdinW.Close()
+	_ = agentStdoutW.Close()
+}
+
 func TestFramePromptText(t *testing.T) {
 	cases := []struct {
 		name, frame, want string
@@ -200,6 +376,147 @@ func TestFramePromptText(t *testing.T) {
 		if got := framePromptText(tc.frame); got != tc.want {
 			t.Errorf("%s: framePromptText = %q, want %q", tc.name, got, tc.want)
 		}
+	}
+}
+
+func TestFrameID(t *testing.T) {
+	cases := []struct {
+		name, frame, want string
+	}{
+		{"string id", `{"jsonrpc":"2.0","id":"bandolier-new","method":"session/new"}`, "bandolier-new"},
+		{"numeric id returns empty", `{"jsonrpc":"2.0","id":7,"method":"session/prompt"}`, ""},
+		{"no id", `{"jsonrpc":"2.0","method":"session/update"}`, ""},
+		{"invalid json", `not json`, ""},
+	}
+	for _, tc := range cases {
+		if got := frameID([]byte(tc.frame)); got != tc.want {
+			t.Errorf("%s: frameID = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestFrameMethod(t *testing.T) {
+	cases := []struct {
+		name, frame, want string
+	}{
+		{"session/update", `{"jsonrpc":"2.0","method":"session/update"}`, "session/update"},
+		{"end-session control", `{"jsonrpc":"2.0","method":"_bandolier/endSession"}`, "_bandolier/endSession"},
+		{"no method (response)", `{"jsonrpc":"2.0","id":1,"result":{}}`, ""},
+		{"invalid json", `not json`, ""},
+	}
+	for _, tc := range cases {
+		if got := frameMethod(tc.frame); got != tc.want {
+			t.Errorf("%s: frameMethod = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestNewSessionID(t *testing.T) {
+	cases := []struct {
+		name, frame, want string
+	}{
+		{"session/new response", `{"jsonrpc":"2.0","id":"bandolier-new","result":{"sessionId":"sess-1"}}`, "sess-1"},
+		{"no session id", `{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}`, ""},
+		{"not a response", `{"jsonrpc":"2.0","method":"session/update"}`, ""},
+		{"invalid json", `not json`, ""},
+	}
+	for _, tc := range cases {
+		if got := newSessionID([]byte(tc.frame)); got != tc.want {
+			t.Errorf("%s: newSessionID = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestFrameStopReason(t *testing.T) {
+	cases := []struct {
+		name, frame, want string
+	}{
+		{"end_turn", `{"jsonrpc":"2.0","id":"bandolier-seed","result":{"stopReason":"end_turn"}}`, "end_turn"},
+		{"no stop reason", `{"jsonrpc":"2.0","id":"bandolier-new","result":{"sessionId":"sess-1"}}`, ""},
+		{"not a response", `{"jsonrpc":"2.0","method":"session/update"}`, ""},
+		{"invalid json", `not json`, ""},
+	}
+	for _, tc := range cases {
+		if got := frameStopReason([]byte(tc.frame)); got != tc.want {
+			t.Errorf("%s: frameStopReason = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+// TestRenderFrameToTranscript exercises every update kind the renderer switches
+// on, plus frames it must ignore. It captures both sinks: agent text goes to
+// stdoutTee, while user turns and tool activity go through the log package.
+func TestRenderFrameToTranscript(t *testing.T) {
+	cases := []struct {
+		name       string
+		frame      string
+		wantStdout string // trimmed stdoutTee content
+		wantLog    string // substring expected in the log output ("" = expect empty)
+	}{
+		{
+			name:       "agent_message_chunk to stdout",
+			frame:      `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"assistant reply"}}}}`,
+			wantStdout: "assistant reply",
+		},
+		{
+			name:    "user_message_chunk logged as user input",
+			frame:   `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"a follow-up"}}}}`,
+			wantLog: "[user] a follow-up",
+		},
+		{
+			name:    "tool_call logs its title",
+			frame:   `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call","title":"Read file.go"}}}`,
+			wantLog: "→ Read file.go",
+		},
+		{
+			name:    "tool_call_update concatenates nested content blocks",
+			frame:   `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call_update","content":[{"content":{"type":"text","text":"line one"}},{"content":{"type":"text","text":" more"}}]}}}`,
+			wantLog: "← line one more",
+		},
+		{
+			name:  "non session/update frame ignored",
+			frame: `{"jsonrpc":"2.0","id":"bandolier-seed","result":{"stopReason":"end_turn"}}`,
+		},
+		{
+			name:  "unknown update kind ignored",
+			frame: `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"plan"}}}`,
+		},
+		{
+			name:  "invalid json ignored",
+			frame: `not json`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var out bytes.Buffer
+			origTee := stdoutTee
+			stdoutTee = &out
+			defer func() { stdoutTee = origTee }()
+
+			var logBuf bytes.Buffer
+			origWriter := log.Writer()
+			origFlags := log.Flags()
+			log.SetOutput(&logBuf)
+			log.SetFlags(0)
+			defer func() {
+				log.SetOutput(origWriter)
+				log.SetFlags(origFlags)
+			}()
+
+			renderFrameToTranscript([]byte(tc.frame))
+
+			if got := strings.TrimSpace(out.String()); got != tc.wantStdout {
+				t.Errorf("stdoutTee = %q, want %q", got, tc.wantStdout)
+			}
+			if tc.wantLog == "" {
+				if logBuf.Len() != 0 {
+					t.Errorf("log output = %q, want empty", logBuf.String())
+				}
+			} else if !strings.Contains(logBuf.String(), tc.wantLog) {
+				t.Errorf("log output = %q, want to contain %q", logBuf.String(), tc.wantLog)
+			}
+		})
 	}
 }
 

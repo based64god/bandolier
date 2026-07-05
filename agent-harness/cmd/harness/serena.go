@@ -128,9 +128,5 @@ func setupSerenaAntigravity(cfg *config) {
 // MCP server definitions from. It lives under ~/.gemini/config alongside agy's
 // other config.
 func antigravityMCPConfigPath() string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		home = "/root"
-	}
-	return filepath.Join(home, ".gemini", "config", "mcp_config.json")
+	return filepath.Join(homeDir(), ".gemini", "config", "mcp_config.json")
 }

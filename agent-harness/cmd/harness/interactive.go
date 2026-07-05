@@ -15,11 +15,14 @@ import (
 // ── Interactive mode ────────────────────────────────────────────────────────────
 
 // endSessionSentinel is the input message that ends an interactive session.
-// Kept in sync with the server's matching constant (agents router).
+// This value crosses to the server, so it's pinned in wire-contract.json and
+// asserted by both test suites (see wire_contract_test.go).
 const endSessionSentinel = "__BANDOLIER_END_SESSION__"
 
 // Log markers the dashboard parses to know whether an interactive agent is
-// currently waiting for the user. Kept in sync with the agents router.
+// currently waiting for the user. These values cross to the server, so they're
+// pinned in wire-contract.json and asserted by both test suites (see
+// wire_contract_test.go).
 const (
 	awaitInputMarker = "BANDOLIER_AWAIT_INPUT"
 	resumeMarker     = "BANDOLIER_RESUME"

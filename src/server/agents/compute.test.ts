@@ -1,9 +1,12 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
+import { TRPCError } from "@trpc/server";
+
 import {
   getRepoCompute,
   getUserCompute,
   mergeCompute,
+  parseComputeInput,
   resolveCompute,
 } from "~/server/agents/compute";
 import { type db as Database } from "~/server/db";
@@ -129,5 +132,39 @@ describe("mergeCompute", () => {
     expect(
       mergeCompute({ cpu: "4", memory: "8Gi" }, { memory: "16Gi" }),
     ).toEqual({ cpu: "4", memory: "16Gi" });
+  });
+});
+
+describe("parseComputeInput", () => {
+  it("returns null for blank / whitespace-only / omitted fields", () => {
+    expect(parseComputeInput()).toEqual({ cpu: null, memory: null });
+    expect(parseComputeInput("", "  ")).toEqual({ cpu: null, memory: null });
+  });
+
+  it("returns normalized quantities for valid input", () => {
+    expect(parseComputeInput(" 500m ", "4")).toEqual({
+      cpu: "500m",
+      memory: "4Gi",
+    });
+  });
+
+  it("throws BAD_REQUEST on an invalid CPU quantity", () => {
+    try {
+      parseComputeInput("banana", "4Gi");
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(TRPCError);
+      expect((err as TRPCError).code).toBe("BAD_REQUEST");
+    }
+  });
+
+  it("throws BAD_REQUEST on an invalid memory quantity", () => {
+    try {
+      parseComputeInput("2", "64Mi");
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(TRPCError);
+      expect((err as TRPCError).code).toBe("BAD_REQUEST");
+    }
   });
 });

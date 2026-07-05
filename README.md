@@ -406,13 +406,15 @@ deploy/
 | `pnpm test`                               | Run the unit-test suite once (Vitest).                                     |
 | `pnpm test:watch`                         | Run Vitest in watch mode.                                                  |
 | `pnpm test:coverage`                      | Run the suite and emit a coverage report under `coverage/`.                |
+| `pnpm test:e2e`                           | Run the Playwright browser smoke tests against the `/dev/*` harness routes. |
 
 ---
 
 ## Tests
 
-Two suites cover the project's pure logic — fast, hermetic, and free of any
-database, network, or Kubernetes access:
+Three suites cover the project. The first two exercise the pure logic — fast,
+hermetic, and free of any database, network, or Kubernetes access; the third
+drives the UI components in a real browser against inert harness routes:
 
 - **Web app (Vitest).** Unit tests live next to the code they cover as
   `*.test.ts` files under `src/`. They exercise the parsing, validation,
@@ -426,7 +428,17 @@ database, network, or Kubernetes access:
   parsing, issue-closing keyword handling, provider detection, and tool-use
   rendering. Run them with `go test ./...` from `agent-harness/`.
 
-Both suites run in CI on every push and pull request (see
+- **Browser smoke tests (Playwright).** `e2e/*.spec.mjs` drive the UI
+  components — the composer, conversation view, credential UI, effort picker,
+  modal, searchable select, status badge, and task row — in a real Chromium
+  against the `/dev/*` harness routes, which contact no real services.
+  `e2e/run.mjs` boots `next dev`, waits for the routes, then runs each spec.
+  This suite needs a browser, so install one first with
+  `pnpm exec playwright install chromium` (add `--with-deps` on Linux to also
+  fetch the system libraries), then run `pnpm test:e2e`. Set `E2E_BASE_URL` to
+  reuse an already-running server instead of having the runner boot its own.
+
+All three suites run in CI on every push and pull request (see
 `.github/workflows/ci.yml`).
 
 ---

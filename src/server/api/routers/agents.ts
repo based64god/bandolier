@@ -1,26 +1,22 @@
 import { randomUUID } from "crypto";
 
-import { setHeaderOptions, type V1Pod } from "@kubernetes/client-node";
+import { setHeaderOptions } from "@kubernetes/client-node";
 import { TRPCError } from "@trpc/server";
-import { and, asc, eq, gt, inArray } from "drizzle-orm";
+import { and, asc, eq, gt } from "drizzle-orm";
 import { z } from "zod";
 
 import { env } from "~/env";
 import { getArtifact, resolveArtifactStore } from "~/server/agents/artifacts";
 import { validateAwsCredentials } from "~/server/agents/aws";
+import { postIssueCommentWithFallback } from "~/server/agents/github-issues";
 import {
-  getGithubItemState,
-  getIssue,
-  postIssueCommentWithFallback,
-  type GithubItemState,
-} from "~/server/agents/github-issues";
-import { SPAWNED_BY_LABEL, spawnedByLabelValue } from "~/server/agents/labels";
-import { podFailure } from "~/server/agents/pod-failure";
-import {
-  buildIssueSystemPrompt,
-  buildIssueUserMessage,
-  makeIssueBranch,
-} from "~/lib/issue-prompt";
+  assertOwnsInteractiveJob,
+  assertRepoAccess,
+  ownedSelector,
+  repoViewSelector,
+  requireKubeconfig,
+} from "~/server/agents/authz";
+import { loadPersistedOutputs, podToTask } from "~/server/agents/task-view";
 import {
   DEFAULT_CPU_LIMIT,
   DEFAULT_MEMORY_LIMIT,
@@ -28,61 +24,25 @@ import {
   validateMemoryQuantity,
 } from "~/lib/compute";
 import { EFFORT_LEVELS, providerSupportsEffort } from "~/lib/effort";
-import { parseTokenUsageFromLogs, type TokenUsage } from "~/lib/tokens";
-import {
-  createAgentJob,
-  DEFAULT_MAX_TURNS,
-  JOB_TTL_SECONDS,
-} from "~/server/agents/create-job";
-import {
-  getRegistryPullSecret,
-  getRepoBotToken,
-} from "~/server/agents/github-app";
-import { userHasRepoAccess } from "~/server/agents/github-repos";
-import {
-  getGithubIdentity,
-  getUserGithubToken,
-  githubGitIdentity,
-  type GitIdentity,
-} from "~/server/agents/github-token";
+import { createAgentJob, DEFAULT_MAX_TURNS } from "~/server/agents/create-job";
+import { getRepoBotToken } from "~/server/agents/github-app";
+import { getUserGithubToken } from "~/server/agents/github-token";
 import { mergeCompute, resolveCompute } from "~/server/agents/compute";
-import { resolveKubeconfig } from "~/server/agents/kubeconfig";
-import { repoToNamespace } from "~/server/agents/namespace";
 import { listModelsForUser, pickPrWriterModel } from "~/server/agents/models";
 import {
   pickProvider,
   resolveModelCredentials,
 } from "~/server/agents/resolve-credentials";
 import {
-  getUserRepoPermission,
-  isMaintainerOrHigher,
-  runUsesRepoCredentials,
-} from "~/server/agents/repo-permissions";
-import {
-  getRepoAgentImage,
-  getRepoNetworkPolicy,
-  getRepoSystemPrompt,
-  type RepoNetworkPolicy,
-} from "~/server/agents/webhook-config";
-import { type db } from "~/server/db";
+  assertMayUseRepoCredentials,
+  loadRepoRunConfig,
+  resolveGitIdentity,
+  resolveIssueContext,
+  selectRunCredentials,
+} from "~/server/agents/deploy-steps";
 import { acpFrame, agentInput, taskRun } from "~/server/db/schema";
 import { getBatchV1Api, getCoreV1Api } from "~/server/k8s/client";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
-
-const LABEL_SELECTOR = env.K8S_LABEL_SELECTOR;
-const INTERACTIVE_LABEL = "bandolier.io/interactive";
-
-const PR_MARKER = /PR_URL=(https:\/\/\S+)/;
-// The harness logs this when an issue-output run opens its GitHub issue.
-const ISSUE_MARKER = /ISSUE_URL=(https:\/\/\S+)/;
-// Harness log markers bracketing an interactive turn: it prints AWAIT when it
-// starts waiting for the next user message and RESUME when one arrives. The most
-// recent of the two tells us whether the agent is currently awaiting input.
-const AWAIT_MARKER = "BANDOLIER_AWAIT_INPUT";
-const RESUME_MARKER = "BANDOLIER_RESUME";
-// Tags transcript lines carrying a user's interactive message. Kept in sync with
-// the harness (userInputMarker) and the dashboard's log renderer.
-const USER_MARKER = "[user]";
 
 /**
  * Sentinel input message that tells the harness to end an interactive session
@@ -90,495 +50,6 @@ const USER_MARKER = "[user]";
  * harness's matching constant.
  */
 export const END_SESSION_SENTINEL = "__BANDOLIER_END_SESSION__";
-
-interface PodInspection {
-  /** The most recent assistant (non-harness) line — what Claude is doing now. */
-  currently: string | null;
-  /** The pull-request URL the harness logged, if any. */
-  pullRequestUrl: string | null;
-  /** The URL of the issue an issue-output run created, if any. */
-  createdIssueUrl: string | null;
-  /** True when an interactive agent is currently waiting for user input. */
-  awaitingInput: boolean;
-  /**
-   * The run's token usage, parsed from the harness's most recent token marker
-   * in the logs. Null when no marker is present (run hasn't reported yet, or a
-   * provider that doesn't report tokens).
-   */
-  tokens: TokenUsage | null;
-}
-
-// Pod inspections are cached. Terminal pods' logs are immutable, so those
-// entries never expire. Running pods get a TTL just under the dashboard's 5s
-// poll — every poll still re-reads the logs so "currently" stays live, but
-// concurrent viewers of the same pods (repo collaborators, multiple tabs,
-// overview + list) coalesce onto one log read per pod instead of one each.
-// The in-flight promise is what's cached, so simultaneous calls share a
-// single read rather than racing past an empty cache.
-const RUNNING_INSPECTION_TTL_MS = 3_000;
-const inspectionCache = new Map<
-  string,
-  { inspection: Promise<PodInspection>; freshUntil: number }
->();
-
-/** The uncached log read behind inspectPod. Rejects on any read failure. */
-async function readPodInspection(
-  podName: string,
-  namespace: string,
-  terminal: boolean,
-  kubeconfig: string,
-): Promise<PodInspection> {
-  const logs = await getCoreV1Api(kubeconfig).readNamespacedPodLog({
-    name: podName,
-    namespace,
-    tailLines: 200,
-  });
-
-  const lines = logs.split("\n").map((l) => l.trim());
-
-  // Forward pass: the last AWAIT/RESUME marker decides the awaiting state.
-  let lastAwait = -1;
-  let lastResume = -1;
-  for (let i = 0; i < lines.length; i++) {
-    if (lines[i]!.includes(AWAIT_MARKER)) lastAwait = i;
-    if (lines[i]!.includes(RESUME_MARKER)) lastResume = i;
-  }
-
-  // Backward pass: the last assistant line is what Claude is doing now. Skip
-  // both harness diagnostics and the user's own messages — neither is Claude.
-  let currently: string | null = null;
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i]!;
-    if (line && !line.includes("[harness]") && !line.includes(USER_MARKER)) {
-      currently = line;
-      break;
-    }
-  }
-
-  return {
-    currently,
-    pullRequestUrl: PR_MARKER.exec(logs)?.[1] ?? null,
-    createdIssueUrl: ISSUE_MARKER.exec(logs)?.[1] ?? null,
-    awaitingInput: !terminal && lastAwait >= 0 && lastAwait > lastResume,
-    tokens: parseTokenUsageFromLogs(logs),
-  };
-}
-
-/**
- * Reads a pod's recent logs once to derive both its live "currently" status (the
- * last assistant line) and any pull-request URL the harness produced.
- */
-async function inspectPod(
-  podName: string,
-  namespace: string,
-  phase: string,
-  kubeconfig: string,
-): Promise<PodInspection> {
-  const terminal = phase === "Succeeded" || phase === "Failed";
-  // Phase class is part of the key so a pod that just finished gets one fresh
-  // terminal read instead of being served its cached running-phase inspection.
-  const runningKey = `${namespace}/${podName}/running`;
-  const key = terminal ? `${namespace}/${podName}/terminal` : runningKey;
-  const cached = inspectionCache.get(key);
-  if (cached && cached.freshUntil > Date.now()) return cached.inspection;
-
-  const inspection: Promise<PodInspection> = readPodInspection(
-    podName,
-    namespace,
-    terminal,
-    kubeconfig,
-  ).catch((): PodInspection => {
-    // transient; evict so the next poll retries the read instead of being
-    // served this empty fallback for the rest of the TTL. (A .catch callback
-    // runs on a microtask, so `inspection` is always assigned by now.)
-    if (inspectionCache.get(key)?.inspection === inspection) {
-      inspectionCache.delete(key);
-    }
-    return {
-      currently: null,
-      pullRequestUrl: null,
-      createdIssueUrl: null,
-      awaitingInput: false,
-      tokens: null,
-    };
-  });
-
-  inspectionCache.set(key, {
-    inspection,
-    freshUntil: terminal ? Infinity : Date.now() + RUNNING_INSPECTION_TTL_MS,
-  });
-  // A terminal pod no longer needs its running-phase entry.
-  if (terminal) inspectionCache.delete(runningKey);
-  return inspection;
-}
-
-/**
- * Resolves the kubeconfig to use (repo-scoped or the user's own — see
- * resolveKubeconfig), throwing if none is set. Pass `repoFullName` so a
- * repo's shared cluster is considered for repo-scoped views.
- */
-async function requireKubeconfig(
-  db: Parameters<typeof resolveKubeconfig>[0],
-  userId: string,
-  repoFullName?: string,
-): Promise<string> {
-  const kubeconfig = await resolveKubeconfig(db, userId, repoFullName);
-  if (!kubeconfig) {
-    throw new TRPCError({
-      code: "BAD_REQUEST",
-      message:
-        "No kubeconfig configured. Add one in settings to manage agents.",
-    });
-  }
-  return kubeconfig;
-}
-
-/**
- * Throws unless the acting user owns an agent with the given job name (matched by
- * the spawned-by label, so users can only send input to their own agents). The
- * pod must still exist, which it does for a live interactive session.
- */
-async function assertOwnsInteractiveJob(
-  db: Parameters<typeof resolveKubeconfig>[0],
-  userId: string,
-  namespace: string,
-  jobName: string,
-  repoFullName?: string,
-): Promise<void> {
-  const kubeconfig = await requireKubeconfig(db, userId, repoFullName);
-  const res = await getCoreV1Api(kubeconfig).listNamespacedPod({
-    namespace,
-    labelSelector: `${LABEL_SELECTOR},${SPAWNED_BY_LABEL}=${spawnedByLabelValue(userId)},bandolier.io/job=${jobName}`,
-  });
-  if (res.items.length === 0) {
-    throw new TRPCError({
-      code: "NOT_FOUND",
-      message: `Interactive agent ${jobName} not found.`,
-    });
-  }
-}
-
-/**
- * Label selector that restricts a pod query to the agents the given user spawned.
- * Pods carry SPAWNED_BY_LABEL, so this enforces per-user ownership on a shared
- * cluster/namespace (the same control overview and assertOwnsInteractiveJob use).
- * Pass `extra` to AND in a further selector (e.g. a specific job).
- */
-function ownedSelector(userId: string, extra?: string): string {
-  const base = `${LABEL_SELECTOR},${SPAWNED_BY_LABEL}=${spawnedByLabelValue(userId)}`;
-  return extra ? `${base},${extra}` : base;
-}
-
-/**
- * Label selector for a repo-scoped, read-only view. Tasks in a repo are visible
- * to every GitHub collaborator on that repo (the caller must already have
- * passed assertRepoAccess), not just their spawner — so when the query targets
- * the repo's own namespace, the spawned-by scoping is dropped. Any other
- * namespace/repo combination falls back to owner-scoping: the repo-access check
- * authorizes exactly one namespace (the repo's), and nothing else. Mutations
- * (terminate, rename, interactive input) never use this — they stay owner-only.
- */
-function repoViewSelector(
-  userId: string,
-  namespace: string,
-  repoFullName?: string,
-  extra?: string,
-): string {
-  if (repoFullName && namespace === repoToNamespace(repoFullName)) {
-    return extra ? `${LABEL_SELECTOR},${extra}` : LABEL_SELECTOR;
-  }
-  return ownedSelector(userId, extra);
-}
-
-// Short-TTL cache of confirmed (user → repo) access, so polled procedures (list,
-// getLogs run every ~5s) don't hit the GitHub API on every call. Only positive
-// results are cached: a member's checks are served from memory, while a
-// non-member's repeated probes are never cached, so the map can't be grown by
-// guessing repo names and revoked access is re-verified within the TTL.
-const repoAccessCache = new Map<string, number>();
-const REPO_ACCESS_TTL_MS = 60_000;
-
-/**
- * Gates access to repo-scoped resources (a repo's shared kubeconfig/credentials
- * and its namespace). When a repoFullName is supplied, the caller must be able to
- * reach that repo through their own GitHub token — otherwise we refuse rather
- * than resolve another team's shared cluster/credentials for them. A no-op for
- * repo-less (personal) operations, which only ever use the caller's own creds.
- */
-async function assertRepoAccess(
-  db: Parameters<typeof resolveKubeconfig>[0],
-  userId: string,
-  repoFullName?: string,
-): Promise<void> {
-  if (!repoFullName) return;
-  const key = `${userId} ${repoFullName}`;
-  const cachedUntil = repoAccessCache.get(key);
-  if (cachedUntil !== undefined && cachedUntil > Date.now()) return;
-
-  const token = await getUserGithubToken(db, userId);
-  if (!token || !(await userHasRepoAccess(token, repoFullName))) {
-    repoAccessCache.delete(key);
-    throw new TRPCError({
-      code: "FORBIDDEN",
-      message: `You do not have access to ${repoFullName}.`,
-    });
-  }
-  repoAccessCache.set(key, Date.now() + REPO_ACCESS_TTL_MS);
-}
-
-/**
- * The token to read PR/issue state with. Prefers the repo's GitHub App
- * installation token (a bot-voice read that doesn't depend on the viewer having
- * a GitHub account or spend their rate limit), falling back to the viewer's own
- * token when the App isn't installed on the repo. Returns null when neither is
- * available, so polling degrades to no state badge rather than failing.
- */
-async function resolvePollToken(
-  database: typeof db,
-  repoFullName: string | null,
-  userGithubToken: string | null,
-  nowMs: number,
-): Promise<string | null> {
-  if (repoFullName) {
-    const botToken = await getRepoBotToken(database, repoFullName, nowMs);
-    if (botToken) return botToken;
-  }
-  return userGithubToken;
-}
-
-/**
- * Resolves the open/closed/merged state of a created PR, created issue, and
- * source issue for a task. Best-effort: without a GitHub token (or on an API
- * failure) the states stay null and the badges render without an indicator.
- */
-async function resolveItemStates(
-  githubToken: string | null,
-  urls: {
-    pullRequestUrl: string | null;
-    createdIssueUrl: string | null;
-    issueUrl: string | null;
-  },
-): Promise<{
-  pullRequestState: GithubItemState | null;
-  createdIssueState: GithubItemState | null;
-  issueState: GithubItemState | null;
-}> {
-  if (!githubToken) {
-    return {
-      pullRequestState: null,
-      createdIssueState: null,
-      issueState: null,
-    };
-  }
-  const [pullRequestState, createdIssueState, issueState] = await Promise.all([
-    urls.pullRequestUrl
-      ? getGithubItemState(githubToken, urls.pullRequestUrl)
-      : null,
-    urls.createdIssueUrl
-      ? getGithubItemState(githubToken, urls.createdIssueUrl)
-      : null,
-    urls.issueUrl ? getGithubItemState(githubToken, urls.issueUrl) : null,
-  ]);
-  return { pullRequestState, createdIssueState, issueState };
-}
-
-interface OutputUrls {
-  pullRequestUrl: string | null;
-  createdIssueUrl: string | null;
-  /** Persisted token usage (null when the run never reported any). */
-  tokens: TokenUsage | null;
-}
-
-/** A pod's stable job name (falls back to the pod name for legacy pods). */
-function podJobName(pod: V1Pod): string {
-  return (
-    pod.metadata?.labels?.["bandolier.io/job"] ??
-    pod.metadata?.name ??
-    "unknown"
-  );
-}
-
-/**
- * Batch-loads persisted output URLs for the terminal pods in `pods` in a single
- * query, keyed by job name. The harness records these via the ingest callback,
- * so a finished run's PR/issue links survive pod loss (TTL deletion, eviction,
- * node failure, transient log-read errors). Running pods are skipped — they have
- * no persisted output yet — so a list of only running pods issues no query at
- * all; otherwise the lookup is one `IN (...)` regardless of pod count, rather
- * than one query per pod.
- */
-async function loadPersistedOutputs(
-  database: typeof db,
-  pods: V1Pod[],
-): Promise<Map<string, OutputUrls>> {
-  const jobNames = pods
-    .filter((p) => {
-      const phase = p.status?.phase;
-      return phase === "Succeeded" || phase === "Failed";
-    })
-    .map(podJobName);
-
-  const byJob = new Map<string, OutputUrls>();
-  if (jobNames.length === 0) return byJob;
-
-  const rows = await database
-    .select({
-      jobName: taskRun.jobName,
-      pullRequestUrl: taskRun.pullRequestUrl,
-      createdIssueUrl: taskRun.createdIssueUrl,
-      inputTokens: taskRun.inputTokens,
-      outputTokens: taskRun.outputTokens,
-      cacheReadInputTokens: taskRun.cacheReadInputTokens,
-      cacheCreationInputTokens: taskRun.cacheCreationInputTokens,
-    })
-    .from(taskRun)
-    .where(inArray(taskRun.jobName, jobNames));
-  for (const row of rows) {
-    byJob.set(row.jobName, {
-      pullRequestUrl: row.pullRequestUrl,
-      createdIssueUrl: row.createdIssueUrl,
-      // Only treat the row as carrying usage when at least one field was
-      // recorded — an un-reported run leaves all four null.
-      tokens:
-        row.inputTokens != null ||
-        row.outputTokens != null ||
-        row.cacheReadInputTokens != null ||
-        row.cacheCreationInputTokens != null
-          ? {
-              inputTokens: row.inputTokens ?? 0,
-              outputTokens: row.outputTokens ?? 0,
-              cacheReadInputTokens: row.cacheReadInputTokens ?? 0,
-              cacheCreationInputTokens: row.cacheCreationInputTokens ?? 0,
-            }
-          : null,
-    });
-  }
-  return byJob;
-}
-
-/**
- * Merges a pod's log-derived output URLs with the batch-loaded persisted
- * fallback, preferring whatever the live logs supplied.
- */
-function mergeOutput(
-  logUrls: OutputUrls,
-  persisted: OutputUrls | undefined,
-): OutputUrls {
-  return {
-    pullRequestUrl: logUrls.pullRequestUrl ?? persisted?.pullRequestUrl ?? null,
-    createdIssueUrl:
-      logUrls.createdIssueUrl ?? persisted?.createdIssueUrl ?? null,
-    // Prefer the live log figure (it includes the latest interactive turn);
-    // fall back to the persisted total once the pod's logs are gone.
-    tokens: logUrls.tokens ?? persisted?.tokens ?? null,
-  };
-}
-
-/**
- * Maps a pod into the task shape returned by `list`/`get` (reads logs once).
- * `persistedOutputs` is the batch-loaded fallback keyed by job name (see
- * loadPersistedOutputs); it's consulted only when the logs don't supply a URL.
- * `viewerId` is the requesting user — repo views include collaborators' tasks,
- * and the UI needs to know which rows are the viewer's own (only those get
- * terminate/input controls; the server enforces the same on its mutations).
- */
-async function podToTask(
-  pod: V1Pod,
-  namespace: string,
-  kubeconfig: string,
-  database: typeof db,
-  userGithubToken: string | null,
-  nowMs: number,
-  persistedOutputs: Map<string, OutputUrls>,
-  viewerId: string,
-) {
-  const annotations = pod.metadata?.annotations ?? {};
-  const name = pod.metadata?.name ?? "unknown";
-  const status = pod.status?.phase ?? "Unknown";
-  const ownedByViewer =
-    pod.metadata?.labels?.[SPAWNED_BY_LABEL] === spawnedByLabelValue(viewerId);
-
-  // The Job's TTL deletes it JOB_TTL_SECONDS after the harness container
-  // finishes, so expiry = finishedAt + TTL. Null while running.
-  const finishedAt =
-    pod.status?.containerStatuses?.[0]?.state?.terminated?.finishedAt;
-  const expiresAt = finishedAt
-    ? new Date(
-        new Date(finishedAt).getTime() + JOB_TTL_SECONDS * 1000,
-      ).toISOString()
-    : null;
-
-  const inspection = await inspectPod(name, namespace, status, kubeconfig);
-  const { currently, awaitingInput } = inspection;
-  const jobName = podJobName(pod);
-  // Fall back to the persisted output when logs didn't yield it (pod gone or a
-  // transient log-read failure) — the harness records it on the run row.
-  const { pullRequestUrl, createdIssueUrl, tokens } = mergeOutput(
-    inspection,
-    persistedOutputs.get(jobName),
-  );
-
-  const containerEnv = pod.spec?.containers?.[0]?.env ?? [];
-  const prompt =
-    containerEnv.find((e) => e.name === "CLAUDE_TASK")?.value ?? null;
-  const interactive = pod.metadata?.labels?.[INTERACTIVE_LABEL] === "true";
-
-  const creationTimestamp = pod.metadata?.creationTimestamp;
-
-  const repoFullName = annotations["bandolier.io/repo"] ?? null;
-  const issueUrl = annotations["bandolier.io/issue-url"] ?? null;
-  const pollToken = await resolvePollToken(
-    database,
-    repoFullName,
-    userGithubToken,
-    nowMs,
-  );
-  const { pullRequestState, createdIssueState, issueState } =
-    await resolveItemStates(pollToken, {
-      pullRequestUrl,
-      createdIssueUrl,
-      issueUrl,
-    });
-
-  return {
-    name,
-    jobName,
-    repoFullName,
-    displayName: annotations["bandolier.io/display-name"] ?? name,
-    // Pod creation time, used to sort the task list reverse-chronologically.
-    createdAt: creationTimestamp
-      ? new Date(creationTimestamp).toISOString()
-      : null,
-    prompt,
-    source: pod.metadata?.labels?.["bandolier.io/source"] ?? "dashboard",
-    issueNumber: annotations["bandolier.io/github-issue"] ?? null,
-    issueUrl,
-    createdBy: annotations["bandolier.io/created-by"] ?? null,
-    // Lineage of a resumed run: the job it continues, for the UI to surface.
-    parentJobName: annotations["bandolier.io/parent-job"] ?? null,
-    parentDisplayName: annotations["bandolier.io/parent-name"] ?? null,
-    // Whether this task belongs to the requesting user. Repo views also list
-    // collaborators' tasks (read-only); the UI keys its controls off this.
-    ownedByViewer,
-    status,
-    // Why a Failed pod failed (OOM kill, eviction, crash) — null otherwise.
-    failure: podFailure(pod),
-    currently,
-    expiresAt,
-    pullRequestUrl,
-    pullRequestState,
-    createdIssueUrl,
-    createdIssueState,
-    issueState,
-    outputType:
-      pod.metadata?.annotations?.["bandolier.io/output-type"] === "issue"
-        ? ("issue" as const)
-        : ("pr" as const),
-    interactive,
-    awaitingInput: interactive && awaitingInput,
-    tokens,
-  };
-}
 
 export const agentsRouter = createTRPCRouter({
   // Reports the configured model provider for a deploy (AWS Bedrock takes
@@ -661,8 +132,9 @@ export const agentsRouter = createTRPCRouter({
   // regardless of repository (including repo-less tasks, and webhook tasks
   // triggered by the user's GitHub account). Permission is enforced by the label
   // selector — pods are tagged with their owner's id, so we ask Kubernetes only
-  // for this user's pods rather than scanning every pod. Lightweight by design
-  // (no per-pod log reads): the per-repo view carries "currently"/PR detail.
+  // for this user's pods rather than scanning every pod. Each row is the same
+  // task view-model `list`/`get` build (podToTask), extended with `namespace`
+  // so the home screen can link each task back to its repo view.
   overview: protectedProcedure.query(async ({ ctx }) => {
     const userId = ctx.session.user.id;
     const kubeconfig = await requireKubeconfig(ctx.db, userId);
@@ -671,7 +143,7 @@ export const agentsRouter = createTRPCRouter({
 
     try {
       const res = await getCoreV1Api(kubeconfig).listPodForAllNamespaces({
-        labelSelector: `${LABEL_SELECTOR},${SPAWNED_BY_LABEL}=${spawnedByLabelValue(userId)}`,
+        labelSelector: ownedSelector(userId),
       });
 
       // One batched query recovers persisted output for every terminal pod whose
@@ -680,78 +152,18 @@ export const agentsRouter = createTRPCRouter({
 
       return await Promise.all(
         res.items.map(async (pod) => {
-          const annotations = pod.metadata?.annotations ?? {};
-          const name = pod.metadata?.name ?? "unknown";
           const namespace = pod.metadata?.namespace ?? "";
-          const status = pod.status?.phase ?? "Unknown";
-
-          // The pull-request URL lives in the harness logs; read it per pod
-          // (cheap here — only the user's own agents, and terminal pods cache).
-          const inspection = await inspectPod(
-            name,
+          const task = await podToTask(
+            pod,
             namespace,
-            status,
             kubeconfig,
-          );
-          const { awaitingInput } = inspection;
-          const jobName = podJobName(pod);
-          // Fall back to the persisted output when the logs are gone (TTL
-          // deletion, eviction) or unreadable — kept on the durable run row.
-          const { pullRequestUrl, createdIssueUrl, tokens } = mergeOutput(
-            inspection,
-            persistedOutputs.get(jobName),
-          );
-          const interactive =
-            pod.metadata?.labels?.[INTERACTIVE_LABEL] === "true";
-
-          const repoFullName = annotations["bandolier.io/repo"] ?? null;
-          const issueUrl = annotations["bandolier.io/issue-url"] ?? null;
-          const pollToken = await resolvePollToken(
             ctx.db,
-            repoFullName,
             githubToken,
             nowMs,
+            persistedOutputs,
+            userId,
           );
-          const { pullRequestState, createdIssueState, issueState } =
-            await resolveItemStates(pollToken, {
-              pullRequestUrl,
-              createdIssueUrl,
-              issueUrl,
-            });
-
-          return {
-            name,
-            namespace,
-            repoFullName,
-            displayName: annotations["bandolier.io/display-name"] ?? name,
-            // Pod creation time, used to sort the overview reverse-chronologically.
-            createdAt: pod.metadata?.creationTimestamp
-              ? new Date(pod.metadata.creationTimestamp).toISOString()
-              : null,
-            source:
-              pod.metadata?.labels?.["bandolier.io/source"] ?? "dashboard",
-            issueNumber: annotations["bandolier.io/github-issue"] ?? null,
-            issueUrl,
-            createdBy: annotations["bandolier.io/created-by"] ?? null,
-            // Lineage of a resumed run, surfaced next to the task name.
-            parentJobName: annotations["bandolier.io/parent-job"] ?? null,
-            parentDisplayName: annotations["bandolier.io/parent-name"] ?? null,
-            status,
-            // Why a Failed pod failed (OOM kill, eviction, crash) — null otherwise.
-            failure: podFailure(pod),
-            pullRequestUrl,
-            pullRequestState,
-            createdIssueUrl,
-            createdIssueState,
-            issueState,
-            outputType:
-              annotations["bandolier.io/output-type"] === "issue"
-                ? ("issue" as const)
-                : ("pr" as const),
-            interactive,
-            awaitingInput: interactive && awaitingInput,
-            tokens,
-          };
+          return { ...task, namespace };
         }),
       );
     } catch (err) {
@@ -1345,71 +757,23 @@ export const agentsRouter = createTRPCRouter({
         computeOverride,
       );
 
-      // Resolve model credentials, then pick the set that matches the provider of
-      // the model the user chose (so a user with several providers configured
-      // gets the right one). When the provider is omitted — e.g. a REST/webhook
-      // client with no picker — fall back to the primary-provider precedence.
+      // Resolve model credentials, then pick the single provider + credential
+      // set the run executes on (see selectRunCredentials); throws when none is
+      // configured for the chosen model.
       const resolved = await resolveModelCredentials(
         ctx.db,
         userId,
         input.repoFullName,
       );
-      const primary = pickProvider(resolved);
-      const provider =
-        input.modelProvider ??
-        (resolved.aws
-          ? "bedrock"
-          : resolved.anthropicApiKey || resolved.anthropicOauthToken
-            ? "anthropic"
-            : resolved.openaiApiKey || resolved.codexAuthJson
-              ? "openai"
-              : resolved.geminiApiKey
-                ? "gemini"
-                : undefined);
-
-      // The picker offers a model once per credential kind, so an explicit
-      // modelAuth pins the run to that kind ("run this on my subscription" vs
-      // "on my API key"). Unset — programmatic clients — falls back to the
-      // API-key-beats-subscription precedence.
-      const wantSubscription = input.modelAuth === "subscription";
-      const wantApiKey = input.modelAuth === "api_key";
-      const awsCredentials =
-        provider === "bedrock" ? (resolved.aws ?? primary.aws) : null;
-      const anthropicApiKey =
-        provider === "anthropic" && !wantSubscription
-          ? (resolved.anthropicApiKey ?? primary.anthropicApiKey)
-          : null;
-      const anthropicOauthToken =
-        provider === "anthropic" && !wantApiKey && !anthropicApiKey
-          ? (resolved.anthropicOauthToken ?? primary.anthropicOauthToken)
-          : null;
-      const openaiApiKey =
-        provider === "openai" && !wantSubscription
-          ? (resolved.openaiApiKey ?? primary.openaiApiKey)
-          : null;
-      const codexAuthJson =
-        provider === "openai" && !wantApiKey && !openaiApiKey
-          ? (resolved.codexAuthJson ?? primary.codexAuthJson)
-          : null;
-      const geminiApiKey =
-        provider === "gemini"
-          ? (resolved.geminiApiKey ?? primary.geminiApiKey)
-          : null;
-
-      if (
-        !awsCredentials &&
-        !anthropicApiKey &&
-        !anthropicOauthToken &&
-        !openaiApiKey &&
-        !codexAuthJson &&
-        !geminiApiKey
-      ) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message:
-            "No model credentials configured for the selected model. Add AWS Bedrock, an Anthropic, OpenAI, or Gemini API key in settings (or repo configuration) before deploying.",
-        });
-      }
+      const {
+        provider,
+        awsCredentials,
+        anthropicApiKey,
+        anthropicOauthToken,
+        openaiApiKey,
+        codexAuthJson,
+        geminiApiKey,
+      } = selectRunCredentials(resolved, input.modelProvider, input.modelAuth);
 
       // Validate AWS credentials up-front (catches expired STS sessions) so a
       // clear error surfaces instead of a pod that fails to authenticate.
@@ -1434,117 +798,28 @@ export const agentsRouter = createTRPCRouter({
           console.warn("[bandolier:deploy] user has no linked GitHub token");
         }
 
-        // Attribute commits to the deploying user. Prefer their GitHub no-reply
-        // address (guarantees GitHub links the commits to that account); fall
-        // back to the account email if there's no token or the lookup fails.
-        let gitIdentity: GitIdentity = {
-          name: ctx.session.user.name,
-          email: ctx.session.user.email,
-        };
-        let githubLogin: string | null = null;
-        if (githubToken) {
-          try {
-            const gh = await getGithubIdentity(githubToken);
-            gitIdentity = githubGitIdentity(gh.id, gh.login);
-            githubLogin = gh.login;
-          } catch (err) {
-            console.warn("[bandolier:deploy] GitHub identity lookup failed", {
-              error: err instanceof Error ? err.message : String(err),
-            });
-          }
-        }
+        const { gitIdentity, githubLogin } = await resolveGitIdentity(
+          githubToken,
+          { name: ctx.session.user.name, email: ctx.session.user.email },
+        );
 
-        // Privilege gate: a run that would spend the repo's *shared* credentials
-        // (a repo-level kubeconfig or model key) is restricted to GitHub users
-        // with maintainer-or-higher on the repo. A less-privileged user can only
-        // use their own credentials. (The webhook path holds such a run for a
-        // maintainer's approval; from the dashboard/REST we reject it outright,
-        // since the actor is present to be told why.)
-        if (input.repoFullName) {
-          const usesRepoCreds = await runUsesRepoCredentials(
-            ctx.db,
-            userId,
-            input.repoFullName,
-            resolved,
-          );
-          if (usesRepoCreds) {
-            if (!githubToken || !githubLogin) {
-              throw new TRPCError({
-                code: "FORBIDDEN",
-                message:
-                  "A linked GitHub account is required to run on this repository's shared credentials.",
-              });
-            }
-            const permission = await getUserRepoPermission(
-              githubToken,
-              input.repoFullName,
-              githubLogin,
-            );
-            if (!isMaintainerOrHigher(permission)) {
-              throw new TRPCError({
-                code: "FORBIDDEN",
-                message:
-                  "This run would use the repository's shared credentials, which requires maintainer access or higher. Ask a maintainer to run it, or configure your own credentials in settings.",
-              });
-            }
-          }
-        }
+        await assertMayUseRepoCredentials(
+          ctx.db,
+          userId,
+          input.repoFullName,
+          resolved,
+          githubToken,
+          githubLogin,
+        );
 
-        // When an issue is selected, fetch its details for the display label and
-        // wire issue mode so the harness builds context + opens a closing PR.
-        let issue: {
-          number: number;
-          title: string;
-          url: string;
-          body: string;
-        } | null = null;
-        if (input.issueNumber !== undefined) {
-          if (!input.repoFullName) {
-            throw new TRPCError({
-              code: "BAD_REQUEST",
-              message: "A repository is required to work on an issue.",
-            });
-          }
-          if (!githubToken) {
-            throw new TRPCError({
-              code: "BAD_REQUEST",
-              message:
-                "A linked GitHub account is required to work on an issue.",
-            });
-          }
-          issue = await getIssue(
+        const { issue, task, displayName, agentBranch, systemPrompt } =
+          await resolveIssueContext(
             githubToken,
             input.repoFullName,
             input.issueNumber,
+            input.task,
+            issueOutput,
           );
-          if (!issue) {
-            throw new TRPCError({
-              code: "NOT_FOUND",
-              message: `Issue #${input.issueNumber} not found in ${input.repoFullName}.`,
-            });
-          }
-        }
-
-        const taskPreview =
-          input.task.length > 60 ? `${input.task.slice(0, 60)}…` : input.task;
-        const displayName = issue
-          ? `#${issue.number}: ${issue.title}`
-          : taskPreview;
-
-        // For an issue PR: generate a unique working branch and build the
-        // instructional (commit-and-open-PR) framing here. For issue output we
-        // skip both — the harness frames the read-only analysis and opens the
-        // issue itself. Either way the issue context (with the operator's task as
-        // additional context) is the user message stored as CLAUDE_TASK.
-        let agentBranch: string | undefined;
-        let systemPrompt: string | undefined;
-        if (issue && !issueOutput) {
-          agentBranch = makeIssueBranch(issue.number, issue.title);
-          systemPrompt = buildIssueSystemPrompt(issue, agentBranch);
-        }
-        const task = issue
-          ? buildIssueUserMessage(issue, input.task)
-          : input.task;
 
         // PR-producing runs (repo or issue mode) get their PR title/description
         // written out-of-band of the (possibly larger) task model by a cheap
@@ -1586,58 +861,8 @@ export const agentsRouter = createTRPCRouter({
           }
         }
 
-        // Per-repo harness image override (falls back to DEFAULT_HARNESS_IMAGE
-        // when unset) and the repo-attached system prompt appended to every run.
-        // Best-effort: a lookup failure must not block the deploy.
-        let agentImage: string | undefined;
-        let imagePullSecret:
-          | { registry: string; dockerConfigJson: string }
-          | undefined;
-        let repoSystemPrompt: string | undefined;
-        // Per-repo network-policy config (egress toggles / custom policy YAML,
-        // all unset by default, keeping the locked-down baseline). Best-effort
-        // like the other repo lookups.
-        let networkPolicy: RepoNetworkPolicy | undefined;
-        if (input.repoFullName) {
-          try {
-            agentImage =
-              (await getRepoAgentImage(ctx.db, input.repoFullName)) ??
-              undefined;
-          } catch (err) {
-            console.warn("[bandolier:deploy] agent image lookup failed", {
-              error: err instanceof Error ? err.message : String(err),
-            });
-          }
-          // A custom image on a private ghcr.io package needs pull credentials —
-          // use the deploying user's GitHub OAuth token (GHCR rejects App
-          // installation tokens). Best-effort: no token leaves the cluster to
-          // pull with its own node credentials.
-          if (agentImage) {
-            imagePullSecret =
-              getRegistryPullSecret(agentImage, githubToken) ?? undefined;
-          }
-          try {
-            repoSystemPrompt =
-              (await getRepoSystemPrompt(ctx.db, input.repoFullName)) ??
-              undefined;
-          } catch (err) {
-            console.warn(
-              "[bandolier:deploy] repo system prompt lookup failed",
-              {
-                error: err instanceof Error ? err.message : String(err),
-              },
-            );
-          }
-          try {
-            networkPolicy =
-              (await getRepoNetworkPolicy(ctx.db, input.repoFullName)) ??
-              undefined;
-          } catch (err) {
-            console.warn("[bandolier:deploy] network policy lookup failed", {
-              error: err instanceof Error ? err.message : String(err),
-            });
-          }
-        }
+        const { agentImage, imagePullSecret, repoSystemPrompt, networkPolicy } =
+          await loadRepoRunConfig(ctx.db, input.repoFullName, githubToken);
 
         const jobName = await createAgentJob({
           namespace: input.namespace,

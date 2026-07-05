@@ -780,26 +780,51 @@ func openPR(ctx context.Context, cfg config, branchName, title, body string) err
 			log.Printf("[harness] %s", line)
 		}
 	}
-	if err != nil {
-		// gh exits non-zero when a PR for this branch already exists — that's
-		// idempotent success. Any other failure (auth, rate limit, branch
-		// protection) is propagated so the run doesn't report a false success.
-		if strings.Contains(strings.ToLower(out), "already exists") {
-			log.Printf("[harness] pull request already exists for %s", branchName)
-		} else {
-			return fmt.Errorf("gh pr create: %w", err)
-		}
+
+	res := classifyPRCreate(out, err)
+	if res.err != nil {
+		return res.err
+	}
+	if res.alreadyExists {
+		log.Printf("[harness] pull request already exists for %s", branchName)
 	}
 
 	// Emit the PR URL with a stable marker so the dashboard can surface it, and
 	// record it for the ingest callback so it outlives the pod logs.
-	if url := prURLRe.FindString(out); url != "" {
-		outputPRURL = url
-		log.Printf("[harness] PR_URL=%s", url)
+	if res.url != "" {
+		outputPRURL = res.url
+		log.Printf("[harness] PR_URL=%s", res.url)
 	} else {
 		log.Printf("[harness] pull request created (no URL parsed)")
 	}
 	return nil
+}
+
+// prCreateResult is the decision classifyPRCreate derives from a `gh pr create`
+// invocation: the scraped PR URL, whether the failure was an idempotent
+// "already exists", and the error to propagate for a genuine failure.
+type prCreateResult struct {
+	url           string
+	alreadyExists bool
+	err           error
+}
+
+// classifyPRCreate turns the combined output and exit error of `gh pr create`
+// into a decision. gh exits non-zero when a PR for this branch already exists —
+// that's idempotent success. Any other failure (auth, rate limit, branch
+// protection) is propagated so the run doesn't report a false success. The PR
+// URL is scraped regardless, since gh prints it on both the created and the
+// already-exists paths.
+func classifyPRCreate(out string, err error) prCreateResult {
+	res := prCreateResult{url: prURLRe.FindString(out)}
+	if err != nil {
+		if strings.Contains(strings.ToLower(out), "already exists") {
+			res.alreadyExists = true
+		} else {
+			res.err = fmt.Errorf("gh pr create: %w", err)
+		}
+	}
+	return res
 }
 
 var prURLRe = regexp.MustCompile(`https://github\.com/\S+/pull/\d+`)

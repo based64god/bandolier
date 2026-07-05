@@ -1,0 +1,1 @@
+ALTER TABLE "repo_webhook_config" ADD COLUMN "auto_merge_bandolier_prs" boolean DEFAULT false NOT NULL;

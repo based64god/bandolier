@@ -842,6 +842,82 @@ function RepoResumeSection({ repoFullName }: { repoFullName: string }) {
   );
 }
 
+// Auto-merge: enable GitHub's native auto-merge on every pull request a Bandolier
+// run reports as its output, so it lands once its required checks pass — no human
+// click. Off by default — it lets an agent's work merge on its own. Auto-merge
+// still respects the branch's protection rules, so a repo relies on its own
+// required reviews/checks as the gate; a repo with none would merge immediately.
+function RepoAutoMergeSection({ repoFullName }: { repoFullName: string }) {
+  const utils = api.useUtils();
+  const { data: config, isLoading } = api.webhooks.getConfig.useQuery({
+    repoFullName,
+  });
+  const setAutoMerge = api.webhooks.setAutoMergeBandolierPrs.useMutation({
+    onSuccess: () => utils.webhooks.getConfig.invalidate({ repoFullName }),
+  });
+
+  const enabled = config?.autoMergeBandolierPrs ?? false;
+
+  return (
+    <div className="space-y-3 border-t border-white/10 pt-5">
+      <div className="space-y-1">
+        <h3 className="text-xs font-semibold tracking-wider text-white/50 uppercase">
+          Auto-merge Bandolier PRs
+        </h3>
+        <p className="text-xs text-white/40">
+          When a Bandolier run opens a pull request, automatically enable GitHub
+          auto-merge on it, so it merges itself once its required checks pass
+          and it&apos;s mergeable. Auto-merge still honors the branch&apos;s
+          protection rules (required reviews / status checks) — this only lands
+          what the repo&apos;s own gates already allow, so a branch with no
+          protection would merge right away. The merge method is the first of
+          merge / squash / rebase the repo permits.
+        </p>
+      </div>
+      {isLoading ? (
+        <p className="text-xs text-white/30">Loading…</p>
+      ) : (
+        <div className="space-y-2">
+          <div className="flex items-start justify-between gap-3 rounded-lg border border-white/10 bg-white/[0.03] p-3">
+            <div className="min-w-0 space-y-1">
+              <h4 className="text-xs font-semibold text-white/70">
+                Auto-merge on passing checks
+              </h4>
+              <p className="text-[11px] text-white/40">
+                Lets an agent&apos;s PR merge without a human pressing the
+                button — enable only if your branch protection is the gate you
+                trust.
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={enabled}
+              aria-label="Auto-merge Bandolier PRs"
+              onClick={() =>
+                setAutoMerge.mutate({ repoFullName, enabled: !enabled })
+              }
+              disabled={setAutoMerge.isPending}
+              className={`relative h-5 w-9 shrink-0 rounded-full transition-colors disabled:opacity-50 ${
+                enabled ? "bg-purple-500/70" : "bg-white/15"
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white transition-transform ${
+                  enabled ? "translate-x-4" : ""
+                }`}
+              />
+            </button>
+          </div>
+          {setAutoMerge.error && (
+            <p className="text-xs text-red-400">{setAutoMerge.error.message}</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Default agent compute (CPU / memory limit) for every run on this repo —
 // dashboard, issue, and webhook alike. Ordered against a user's own default by
 // the prefer-repo-credentials toggle; a per-task override (deploy form, or an
@@ -1531,6 +1607,8 @@ export function RepoConfigModal({
           <RepoDefaultEffortSection repoFullName={repoFullName} />
 
           <RepoResumeSection repoFullName={repoFullName} />
+
+          <RepoAutoMergeSection repoFullName={repoFullName} />
 
           <RepoDefaultComputeSection repoFullName={repoFullName} />
 

@@ -19,6 +19,7 @@ import {
 } from "~/server/agents/network-policy";
 import { isRepoAdmin } from "~/server/agents/github-repos";
 import { parseComputeInput } from "~/server/agents/compute";
+import { type Validation } from "~/server/agents/validation";
 import { EFFORT_LEVELS } from "~/lib/effort";
 import { type db } from "~/server/db";
 import { repoWebhookConfig } from "~/server/db/schema";
@@ -89,6 +90,105 @@ async function requireRepoAdmin(
         "You need admin permission on this repository to change its configuration.",
     });
   }
+}
+
+/**
+ * Builds the `set`/`delete` procedure pair for one repo-scoped credential. Every
+ * setter is the same shape — require repo admin, validate the input, store the
+ * columns (or reject with the validation error) — and every deleter just clears
+ * a fixed column list, so the per-provider procedures differ only in their
+ * schema, validator, and columns. `toResult` surfaces any success details the UI
+ * shows (a cluster version, an STS ARN) alongside the `{ valid: true }` result.
+ */
+/**
+ * Builds the `set<Name>`/`delete<Name>` procedure pair for one repo-scoped
+ * credential, ready to spread into the router. Every setter is the same shape —
+ * require repo admin, validate the input, store the columns (or reject with the
+ * validation error) — and every deleter just clears a fixed column list, so the
+ * per-provider procedures differ only in their schema, validator, and columns.
+ * `toResult` surfaces any success details the UI shows (a cluster version, an
+ * STS ARN) alongside the `{ valid: true }` result.
+ */
+/**
+ * Builds the `set<Name>`/`delete<Name>` procedure pair for one repo-scoped
+ * credential, ready to spread into the router. Every setter is the same shape —
+ * require repo admin, validate the input, store the columns (or reject with the
+ * validation error) — and every deleter just clears a fixed column list, so the
+ * per-provider procedures differ only in their schema, validator, and columns.
+ * `toResult` surfaces any success details the UI shows (a cluster version, an
+ * STS ARN) alongside the `{ valid: true }` result.
+ */
+/**
+ * Builds the `set<Name>`/`delete<Name>` procedure pair for one repo-scoped
+ * credential, ready to spread into the router. Every setter is the same shape —
+ * require repo admin, validate the input, store the columns (or reject with the
+ * validation error) — and every deleter just clears a fixed column list, so the
+ * per-provider procedures differ only in their schema, validator, and columns.
+ * `toResult` surfaces any success details the UI shows (a cluster version, an
+ * STS ARN) alongside the `{ valid: true }` result.
+ */
+function repoCredentialPair<
+  Name extends string,
+  TSchema extends z.ZodType<{ repoFullName: string }>,
+  TValidation extends Validation,
+  TResult extends Record<string, unknown> = Record<string, never>,
+>(
+  name: Name,
+  config: {
+    inputSchema: TSchema;
+    validate: (input: z.infer<TSchema>) => Promise<TValidation> | TValidation;
+    toColumns: (
+      input: z.infer<TSchema>,
+    ) => Partial<typeof repoWebhookConfig.$inferInsert>;
+    clearColumns: (keyof typeof repoWebhookConfig.$inferInsert)[];
+    invalidMessage: string;
+    toResult?: (validation: Extract<TValidation, { valid: true }>) => TResult;
+  },
+) {
+  const set = protectedProcedure
+    .input(config.inputSchema)
+    .mutation(async ({ ctx, input }) => {
+      const parsed = input as z.infer<TSchema>;
+      await requireRepoAdmin(ctx, parsed.repoFullName);
+      const validation = await config.validate(parsed);
+      if (!validation.valid) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: validation.error || config.invalidMessage,
+        });
+      }
+      await upsertRepoConfig(
+        ctx.db,
+        parsed.repoFullName,
+        ctx.session.user.id,
+        config.toColumns(parsed),
+      );
+      const extra = config.toResult?.(
+        validation as Extract<TValidation, { valid: true }>,
+      );
+      return { valid: true as const, ...(extra ?? ({} as Partial<TResult>)) };
+    });
+
+  const del = protectedProcedure
+    .input(z.object({ repoFullName: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      await requireRepoAdmin(ctx, input.repoFullName);
+      await clearRepoConfigColumns(
+        ctx.db,
+        input.repoFullName,
+        ctx.session.user.id,
+        config.clearColumns,
+      );
+      return { success: true };
+    });
+
+  const cap = (name.charAt(0).toUpperCase() +
+    name.slice(1)) as Capitalize<Name>;
+  return {
+    [`set${cap}`]: set,
+    [`delete${cap}`]: del,
+  } as Record<`set${Capitalize<Name>}`, typeof set> &
+    Record<`delete${Capitalize<Name>}`, typeof del>;
 }
 
 export const webhooksRouter = createTRPCRouter({
@@ -429,205 +529,90 @@ export const webhooksRouter = createTRPCRouter({
     }),
 
   // Validate then store a repo-scoped kubeconfig.
-  setKubeconfig: protectedProcedure
-    .input(
-      z.object({
-        repoFullName: z.string().min(1),
-        kubeconfig: z.string().min(1),
-      }),
-    )
-    .mutation(async ({ ctx, input }) => {
-      await requireRepoAdmin(ctx, input.repoFullName);
-      const validation = await validateKubeconfig(input.kubeconfig);
-      if (!validation.valid) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: validation.error ?? "Kubeconfig is invalid.",
-        });
-      }
-      await upsertRepoConfig(ctx.db, input.repoFullName, ctx.session.user.id, {
-        kubeconfig: input.kubeconfig,
-      });
-      return { valid: true as const, version: validation.version };
+  ...repoCredentialPair("kubeconfig", {
+    inputSchema: z.object({
+      repoFullName: z.string().min(1),
+      kubeconfig: z.string().min(1),
     }),
-
-  deleteKubeconfig: protectedProcedure
-    .input(z.object({ repoFullName: z.string().min(1) }))
-    .mutation(async ({ ctx, input }) => {
-      await requireRepoAdmin(ctx, input.repoFullName);
-      await clearRepoConfigColumns(
-        ctx.db,
-        input.repoFullName,
-        ctx.session.user.id,
-        ["kubeconfig"],
-      );
-      return { success: true };
-    }),
+    validate: (input) => validateKubeconfig(input.kubeconfig),
+    toColumns: (input) => ({ kubeconfig: input.kubeconfig }),
+    clearColumns: ["kubeconfig"],
+    invalidMessage: "Kubeconfig is invalid.",
+    toResult: (validation) => ({ version: validation.version }),
+  }),
 
   // Validate then store a repo-scoped Anthropic API key.
-  setAnthropic: protectedProcedure
-    .input(
-      z.object({
-        repoFullName: z.string().min(1),
-        // Strip ALL whitespace, not just the ends: a key pasted from a wrapped
-        // terminal line arrives with interior spaces/newlines that survive trim().
-        apiKey: stripWhitespace.pipe(z.string().min(1)),
-      }),
-    )
-    .mutation(async ({ ctx, input }) => {
-      await requireRepoAdmin(ctx, input.repoFullName);
-      const validation = await validateAnthropicKey(input.apiKey);
-      if (!validation.valid) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: validation.error ?? "Anthropic API key is invalid.",
-        });
-      }
-      await upsertRepoConfig(ctx.db, input.repoFullName, ctx.session.user.id, {
-        anthropicApiKey: input.apiKey,
-      });
-      return { valid: true as const };
+  ...repoCredentialPair("anthropic", {
+    inputSchema: z.object({
+      repoFullName: z.string().min(1),
+      // Strip ALL whitespace, not just the ends: a key pasted from a wrapped
+      // terminal line arrives with interior spaces/newlines that survive trim().
+      apiKey: stripWhitespace.pipe(z.string().min(1)),
     }),
-
-  deleteAnthropic: protectedProcedure
-    .input(z.object({ repoFullName: z.string().min(1) }))
-    .mutation(async ({ ctx, input }) => {
-      await requireRepoAdmin(ctx, input.repoFullName);
-      await clearRepoConfigColumns(
-        ctx.db,
-        input.repoFullName,
-        ctx.session.user.id,
-        ["anthropicApiKey"],
-      );
-      return { success: true };
-    }),
+    validate: (input) => validateAnthropicKey(input.apiKey),
+    toColumns: (input) => ({ anthropicApiKey: input.apiKey }),
+    clearColumns: ["anthropicApiKey"],
+    invalidMessage: "Anthropic API key is invalid.",
+  }),
 
   // Validate then store a repo-scoped OpenAI API key (used via the Codex CLI).
-  setOpenai: protectedProcedure
-    .input(
-      z.object({
-        repoFullName: z.string().min(1),
-        // Strip ALL whitespace, not just the ends: a key pasted from a wrapped
-        // terminal line arrives with interior spaces/newlines that survive trim().
-        apiKey: stripWhitespace.pipe(z.string().min(1)),
-      }),
-    )
-    .mutation(async ({ ctx, input }) => {
-      await requireRepoAdmin(ctx, input.repoFullName);
-      const validation = await validateOpenaiKey(input.apiKey);
-      if (!validation.valid) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: validation.error ?? "OpenAI API key is invalid.",
-        });
-      }
-      await upsertRepoConfig(ctx.db, input.repoFullName, ctx.session.user.id, {
-        openaiApiKey: input.apiKey,
-      });
-      return { valid: true as const };
+  ...repoCredentialPair("openai", {
+    inputSchema: z.object({
+      repoFullName: z.string().min(1),
+      // Strip ALL whitespace, not just the ends: a key pasted from a wrapped
+      // terminal line arrives with interior spaces/newlines that survive trim().
+      apiKey: stripWhitespace.pipe(z.string().min(1)),
     }),
-
-  deleteOpenai: protectedProcedure
-    .input(z.object({ repoFullName: z.string().min(1) }))
-    .mutation(async ({ ctx, input }) => {
-      await requireRepoAdmin(ctx, input.repoFullName);
-      await clearRepoConfigColumns(
-        ctx.db,
-        input.repoFullName,
-        ctx.session.user.id,
-        ["openaiApiKey"],
-      );
-      return { success: true };
-    }),
+    validate: (input) => validateOpenaiKey(input.apiKey),
+    toColumns: (input) => ({ openaiApiKey: input.apiKey }),
+    clearColumns: ["openaiApiKey"],
+    invalidMessage: "OpenAI API key is invalid.",
+  }),
 
   // Validate then store repo-scoped Gemini project credentials (a Google Cloud
   // service-account key JSON, used via the Antigravity CLI).
-  setGemini: protectedProcedure
-    .input(
-      z.object({
-        repoFullName: z.string().min(1),
-        credentials: z.string().min(1),
-      }),
-    )
-    .mutation(async ({ ctx, input }) => {
-      await requireRepoAdmin(ctx, input.repoFullName);
-      const validation = await validateGeminiCredentials(input.credentials);
-      if (!validation.valid) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: validation.error ?? "Gemini credentials are invalid.",
-        });
-      }
-      await upsertRepoConfig(ctx.db, input.repoFullName, ctx.session.user.id, {
-        geminiApiKey: input.credentials,
-      });
-      return { valid: true as const };
+  ...repoCredentialPair("gemini", {
+    inputSchema: z.object({
+      repoFullName: z.string().min(1),
+      credentials: z.string().min(1),
     }),
-
-  deleteGemini: protectedProcedure
-    .input(z.object({ repoFullName: z.string().min(1) }))
-    .mutation(async ({ ctx, input }) => {
-      await requireRepoAdmin(ctx, input.repoFullName);
-      await clearRepoConfigColumns(
-        ctx.db,
-        input.repoFullName,
-        ctx.session.user.id,
-        ["geminiApiKey"],
-      );
-      return { success: true };
-    }),
+    validate: (input) => validateGeminiCredentials(input.credentials),
+    toColumns: (input) => ({ geminiApiKey: input.credentials }),
+    clearColumns: ["geminiApiKey"],
+    invalidMessage: "Gemini credentials are invalid.",
+  }),
 
   // Validate then store repo-scoped AWS Bedrock credentials.
-  setAws: protectedProcedure
-    .input(
-      z.object({
-        repoFullName: z.string().min(1),
-        accessKeyId: z.string().trim().min(16),
-        secretAccessKey: z.string().trim().min(1),
-        sessionToken: z.string().optional().transform(cleanSessionToken),
-        region: z.string().trim().min(1).default("us-east-1"),
-      }),
-    )
-    .mutation(async ({ ctx, input }) => {
-      await requireRepoAdmin(ctx, input.repoFullName);
-      const validation = await validateAwsCredentials({
+  ...repoCredentialPair("aws", {
+    inputSchema: z.object({
+      repoFullName: z.string().min(1),
+      accessKeyId: z.string().trim().min(16),
+      secretAccessKey: z.string().trim().min(1),
+      sessionToken: z.string().optional().transform(cleanSessionToken),
+      region: z.string().trim().min(1).default("us-east-1"),
+    }),
+    validate: (input) =>
+      validateAwsCredentials({
         accessKeyId: input.accessKeyId,
         secretAccessKey: input.secretAccessKey,
         sessionToken: input.sessionToken,
         region: input.region,
-      });
-      if (!validation.valid) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: validation.error ?? "AWS credentials are invalid.",
-        });
-      }
-      await upsertRepoConfig(ctx.db, input.repoFullName, ctx.session.user.id, {
-        awsAccessKeyId: input.accessKeyId,
-        awsSecretAccessKey: input.secretAccessKey,
-        awsSessionToken: input.sessionToken ?? null,
-        awsRegion: input.region,
-      });
-      return { valid: true as const, arn: validation.arn };
+      }),
+    toColumns: (input) => ({
+      awsAccessKeyId: input.accessKeyId,
+      awsSecretAccessKey: input.secretAccessKey,
+      awsSessionToken: input.sessionToken ?? null,
+      awsRegion: input.region,
     }),
-
-  deleteAws: protectedProcedure
-    .input(z.object({ repoFullName: z.string().min(1) }))
-    .mutation(async ({ ctx, input }) => {
-      await requireRepoAdmin(ctx, input.repoFullName);
-      await clearRepoConfigColumns(
-        ctx.db,
-        input.repoFullName,
-        ctx.session.user.id,
-        [
-          "awsAccessKeyId",
-          "awsSecretAccessKey",
-          "awsSessionToken",
-          "awsRegion",
-        ],
-      );
-      return { success: true };
-    }),
+    clearColumns: [
+      "awsAccessKeyId",
+      "awsSecretAccessKey",
+      "awsSessionToken",
+      "awsRegion",
+    ],
+    invalidMessage: "AWS credentials are invalid.",
+    toResult: (validation) => ({ arn: validation.arn }),
+  }),
 
   // Validate then store the repo's run-artifact store (an S3 bucket the repo
   // owns). This is the only place run transcripts (and, later, historical
@@ -636,68 +621,48 @@ export const webhooksRouter = createTRPCRouter({
   // required — the server has no business reaching a repo-owned bucket through
   // its own ambient credentials — and should be scoped to just this bucket.
   // They stay server-side; they are never injected into agent pods.
-  setArtifacts: protectedProcedure
-    .input(
-      z.object({
-        repoFullName: z.string().min(1),
-        bucket: z.string().trim().min(1),
-        region: z.string().trim().min(1).default("us-east-1"),
-        // Custom endpoint for MinIO / S3-compatible stores; blank = AWS S3.
-        endpoint: z.string().trim().optional(),
-        accessKeyId: z.string().trim().min(1),
-        secretAccessKey: z.string().trim().min(1),
-      }),
-    )
-    .mutation(async ({ ctx, input }) => {
-      await requireRepoAdmin(ctx, input.repoFullName);
-      // Blank endpoint means AWS S3 proper, not an empty custom endpoint.
-      const endpoint = input.endpoint === "" ? undefined : input.endpoint;
-      const validation = await validateArtifactStore({
+  //
+  // Clearing it (deleteArtifacts) leaves already-uploaded artifacts in the
+  // repo's bucket (they're the repo's data); future runs are simply not
+  // persisted until a new bucket is configured.
+  ...repoCredentialPair("artifacts", {
+    inputSchema: z.object({
+      repoFullName: z.string().min(1),
+      bucket: z.string().trim().min(1),
+      region: z.string().trim().min(1).default("us-east-1"),
+      // Custom endpoint for MinIO / S3-compatible stores; blank = AWS S3.
+      endpoint: z.string().trim().optional(),
+      accessKeyId: z.string().trim().min(1),
+      secretAccessKey: z.string().trim().min(1),
+    }),
+    validate: (input) =>
+      validateArtifactStore({
         bucket: input.bucket,
         region: input.region,
-        endpoint,
+        // Blank endpoint means AWS S3 proper, not an empty custom endpoint.
+        endpoint: input.endpoint === "" ? undefined : input.endpoint,
         credentials: {
           accessKeyId: input.accessKeyId,
           secretAccessKey: input.secretAccessKey,
         },
-      });
-      if (!validation.valid) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: validation.error ?? "Artifact storage is unreachable.",
-        });
-      }
-      await upsertRepoConfig(ctx.db, input.repoFullName, ctx.session.user.id, {
-        artifactsS3Bucket: input.bucket,
-        artifactsS3Region: input.region,
-        artifactsS3Endpoint: endpoint ?? null,
-        artifactsAccessKeyId: input.accessKeyId,
-        artifactsSecretAccessKey: input.secretAccessKey,
-      });
-      return { valid: true as const };
+      }),
+    toColumns: (input) => ({
+      artifactsS3Bucket: input.bucket,
+      artifactsS3Region: input.region,
+      artifactsS3Endpoint:
+        input.endpoint === "" ? null : (input.endpoint ?? null),
+      artifactsAccessKeyId: input.accessKeyId,
+      artifactsSecretAccessKey: input.secretAccessKey,
     }),
-
-  // Clear the repo's artifact store. Already-uploaded artifacts stay in the
-  // repo's bucket (they're the repo's data); future runs are simply not
-  // persisted until a new bucket is configured.
-  deleteArtifacts: protectedProcedure
-    .input(z.object({ repoFullName: z.string().min(1) }))
-    .mutation(async ({ ctx, input }) => {
-      await requireRepoAdmin(ctx, input.repoFullName);
-      await clearRepoConfigColumns(
-        ctx.db,
-        input.repoFullName,
-        ctx.session.user.id,
-        [
-          "artifactsS3Bucket",
-          "artifactsS3Region",
-          "artifactsS3Endpoint",
-          "artifactsAccessKeyId",
-          "artifactsSecretAccessKey",
-        ],
-      );
-      return { success: true };
-    }),
+    clearColumns: [
+      "artifactsS3Bucket",
+      "artifactsS3Region",
+      "artifactsS3Endpoint",
+      "artifactsAccessKeyId",
+      "artifactsSecretAccessKey",
+    ],
+    invalidMessage: "Artifact storage is unreachable.",
+  }),
 
   // Toggle whether the repo's shared credentials win over a user's own when both
   // are set (applies to kubeconfig and model credentials alike).

@@ -184,6 +184,15 @@ export function DeployModal({
     return () => window.removeEventListener("keydown", handler);
   }, [onClose]);
 
+  // Lock background scrolling while the modal is open so only the form scrolls.
+  useEffect(() => {
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prevOverflow;
+    };
+  }, []);
+
   // Clicking outside a pinned context tooltip dismisses it.
   useEffect(() => {
     if (!contextPinned) return;

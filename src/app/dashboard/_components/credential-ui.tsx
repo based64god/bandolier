@@ -3,6 +3,8 @@
 import { useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 
+import type { ProviderColor } from "./provider-tag";
+
 // Owns the `result` string and the invalidate/clear/message dance that every
 // credential section repeated in its save & remove mutations. Pass the scope's
 // cache-invalidation callback; wire the returned `onSave`/`onRemove` into the
@@ -26,7 +28,11 @@ export function useCredentialMutations(invalidate: () => Promise<unknown>) {
 // every provider section duplicated the same masked-row / input-form / feedback
 // markup twice over; these primitives are the single source of truth.
 
-type Accent = "purple" | "teal" | "blue" | "orange" | "sky" | "emerald";
+// Provider sections use the same accent color as their badge (see
+// PROVIDER_ACCENT in provider-tag), so the provider colors are named from that
+// shared convention rather than re-listed here; "sky"/"emerald" are extras used
+// by the non-provider sections (kubeconfig, compute).
+type Accent = ProviderColor | "sky" | "emerald";
 
 const ACCENTS: Record<Accent, { focus: string; button: string }> = {
   purple: {

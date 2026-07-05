@@ -780,26 +780,51 @@ func openPR(ctx context.Context, cfg config, branchName, title, body string) err
 			log.Printf("[harness] %s", line)
 		}
 	}
-	if err != nil {
-		// gh exits non-zero when a PR for this branch already exists — that's
-		// idempotent success. Any other failure (auth, rate limit, branch
-		// protection) is propagated so the run doesn't report a false success.
-		if strings.Contains(strings.ToLower(out), "already exists") {
-			log.Printf("[harness] pull request already exists for %s", branchName)
-		} else {
-			return fmt.Errorf("gh pr create: %w", err)
-		}
+
+	res := classifyPRCreate(out, err)
+	if res.err != nil {
+		return res.err
+	}
+	if res.alreadyExists {
+		log.Printf("[harness] pull request already exists for %s", branchName)
 	}
 
 	// Emit the PR URL with a stable marker so the dashboard can surface it, and
 	// record it for the ingest callback so it outlives the pod logs.
-	if url := prURLRe.FindString(out); url != "" {
-		outputPRURL = url
-		log.Printf("[harness] PR_URL=%s", url)
+	if res.url != "" {
+		outputPRURL = res.url
+		log.Printf("[harness] PR_URL=%s", res.url)
 	} else {
 		log.Printf("[harness] pull request created (no URL parsed)")
 	}
 	return nil
+}
+
+// prCreateResult is the decision classifyPRCreate derives from a `gh pr create`
+// invocation: the scraped PR URL, whether the failure was an idempotent
+// "already exists", and the error to propagate for a genuine failure.
+type prCreateResult struct {
+	url           string
+	alreadyExists bool
+	err           error
+}
+
+// classifyPRCreate turns the combined output and exit error of `gh pr create`
+// into a decision. gh exits non-zero when a PR for this branch already exists —
+// that's idempotent success. Any other failure (auth, rate limit, branch
+// protection) is propagated so the run doesn't report a false success. The PR
+// URL is scraped regardless, since gh prints it on both the created and the
+// already-exists paths.
+func classifyPRCreate(out string, err error) prCreateResult {
+	res := prCreateResult{url: prURLRe.FindString(out)}
+	if err != nil {
+		if strings.Contains(strings.ToLower(out), "already exists") {
+			res.alreadyExists = true
+		} else {
+			res.err = fmt.Errorf("gh pr create: %w", err)
+		}
+	}
+	return res
 }
 
 var prURLRe = regexp.MustCompile(`https://github\.com/\S+/pull/\d+`)
@@ -960,11 +985,32 @@ func buildEnv(provider providerKind) []string {
 // (injected as CODEX_AUTH_JSON) — ~/.codex/auth.json, where the Codex CLI
 // looks for its ChatGPT-subscription session.
 func codexAuthPath() string {
+	return filepath.Join(homeDir(), ".codex", "auth.json")
+}
+
+// homeDir returns the current user's home directory, falling back to /root when
+// it can't be determined (the harness runs as root in its container).
+func homeDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
-		home = "/root"
+		return "/root"
 	}
-	return filepath.Join(home, ".codex", "auth.json")
+	return home
+}
+
+// materializeSecret writes secret contents to path, creating the parent
+// directory 0700 and the file 0600. On any failure it logs a warning naming
+// what failed via label and returns false so callers can warn-and-continue.
+func materializeSecret(path, contents, label string) bool {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		log.Printf("[harness] warn: could not create %s: %v", filepath.Dir(path), err)
+		return false
+	}
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		log.Printf("[harness] warn: could not write %s: %v", label, err)
+		return false
+	}
+	return true
 }
 
 // setupCodexCredentials prepares Codex CLI authentication. With OPENAI_API_KEY
@@ -981,15 +1027,7 @@ func setupCodexCredentials(env []string) []string {
 	if authJSON == "" {
 		return env
 	}
-	path := codexAuthPath()
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		log.Printf("[harness] warn: could not create %s: %v", filepath.Dir(path), err)
-		return env
-	}
-	if err := os.WriteFile(path, []byte(authJSON), 0o600); err != nil {
-		log.Printf("[harness] warn: could not write Codex auth.json: %v", err)
-		return env
-	}
+	materializeSecret(codexAuthPath(), authJSON, "Codex auth.json")
 	return env
 }
 
@@ -997,11 +1035,7 @@ func setupCodexCredentials(env []string) []string {
 // credentials JSON. It lives under ~/.gemini so agy finds it alongside its own
 // config; GOOGLE_APPLICATION_CREDENTIALS points the google-genai auth at it.
 func geminiCredentialsPath() string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		home = "/root"
-	}
-	return filepath.Join(home, ".gemini", "credentials.json")
+	return filepath.Join(homeDir(), ".gemini", "credentials.json")
 }
 
 // setupGeminiCredentials writes the Google project credentials JSON (injected as
@@ -1024,12 +1058,7 @@ func setupGeminiCredentials(env []string) []string {
 	}
 
 	path := geminiCredentialsPath()
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		log.Printf("[harness] warn: could not create %s: %v", filepath.Dir(path), err)
-		return env
-	}
-	if err := os.WriteFile(path, []byte(creds), 0o600); err != nil {
-		log.Printf("[harness] warn: could not write Gemini credentials: %v", err)
+	if !materializeSecret(path, creds, "Gemini credentials") {
 		return env
 	}
 
@@ -1781,11 +1810,7 @@ func setupSerenaAntigravity(cfg *config) {
 // MCP server definitions from. It lives under ~/.gemini/config alongside agy's
 // other config.
 func antigravityMCPConfigPath() string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		home = "/root"
-	}
-	return filepath.Join(home, ".gemini", "config", "mcp_config.json")
+	return filepath.Join(homeDir(), ".gemini", "config", "mcp_config.json")
 }
 
 // withRepoPrompt layers the repo-attached system prompt (REPO_SYSTEM_PROMPT)

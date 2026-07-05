@@ -2186,30 +2186,24 @@ func interactiveFraming(issueOutput bool, branchName string) string {
 // awaitInput polls Bandolier for the next user message. It returns ended=true on
 // the end sentinel, the idle timeout, or context cancellation.
 func awaitInput(ctx context.Context, cfg config, idle time.Duration) (string, bool) {
-	deadline := time.Now().Add(idle)
-	for {
-		if ctx.Err() != nil {
-			return "", true
-		}
-		content, ok, err := pollInput(ctx, cfg)
+	var content string
+	var got bool
+	pollLoop(ctx, "input", idle, func(ctx context.Context) (bool, bool) {
+		msg, ok, err := pollInput(ctx, cfg)
 		if err != nil {
 			log.Printf("[harness] warn: input poll failed: %v", err)
-		} else if ok {
-			if content == endSessionSentinel {
-				return "", true
-			}
-			return content, false
+			return false, false
 		}
-		if time.Now().After(deadline) {
-			log.Printf("[harness] no input for %s — ending interactive session", idle)
-			return "", true
+		if !ok {
+			return false, false
 		}
-		select {
-		case <-ctx.Done():
-			return "", true
-		case <-time.After(2 * time.Second):
+		if msg == endSessionSentinel {
+			return false, true
 		}
-	}
+		content, got = msg, true
+		return true, true
+	})
+	return content, !got
 }
 
 // pollInput fetches the next queued user message from Bandolier, returning
@@ -2218,21 +2212,11 @@ func pollInput(ctx context.Context, cfg config) (string, bool, error) {
 	if cfg.inputURL == "" {
 		return "", false, fmt.Errorf("no input URL configured")
 	}
-	resp, err := bando.get(ctx, cfg.inputURL)
-	if err != nil {
-		return "", false, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNoContent {
-		return "", false, nil
-	}
-	if resp.StatusCode != http.StatusOK {
-		return "", false, fmt.Errorf("input poll status %d", resp.StatusCode)
-	}
 	var body struct {
 		Content string `json:"content"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+	ok, err := bando.getJSON(ctx, "input poll", cfg.inputURL, &body)
+	if err != nil || !ok {
 		return "", false, err
 	}
 	return body.Content, true, nil

@@ -515,7 +515,34 @@ curl -H "Authorization: Bearer bnd_…" \
 # Launch a task
 curl -X POST -H "Authorization: Bearer bnd_…" -H "Content-Type: application/json" \
   -d '{"task":"Fix the flaky test in auth.spec.ts"}' \
-  https://&lt;your-host&gt;/api/v1/repos/&lt;owner&gt;/&lt;repo&gt;/tasks</code></pre>
+  https://&lt;your-host&gt;/api/v1/repos/&lt;owner&gt;/&lt;repo&gt;/tasks
+
+# Read one task
+curl -H "Authorization: Bearer bnd_…" \
+  https://&lt;your-host&gt;/api/v1/repos/&lt;owner&gt;/&lt;repo&gt;/tasks/&lt;id&gt;
+
+# Rename a task
+curl -X PATCH -H "Authorization: Bearer bnd_…" -H "Content-Type: application/json" \
+  -d '{"displayName":"New name"}' \
+  https://&lt;your-host&gt;/api/v1/repos/&lt;owner&gt;/&lt;repo&gt;/tasks/&lt;id&gt;
+
+# Terminate a task
+curl -X DELETE -H "Authorization: Bearer bnd_…" \
+  https://&lt;your-host&gt;/api/v1/repos/&lt;owner&gt;/&lt;repo&gt;/tasks/&lt;id&gt;</code></pre>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Method</th><th>Path</th><th>Body</th><th>Purpose</th></tr>
+              </thead>
+              <tbody>
+                <tr><td><code>GET</code></td><td><code>/api/v1/repos/{owner}/{repo}/tasks</code></td><td>—</td><td>List tasks for a repo</td></tr>
+                <tr><td><code>POST</code></td><td><code>/api/v1/repos/{owner}/{repo}/tasks</code></td><td>launch fields (below)</td><td>Launch a task</td></tr>
+                <tr><td><code>GET</code></td><td><code>/api/v1/repos/{owner}/{repo}/tasks/{id}</code></td><td>—</td><td>Read one task</td></tr>
+                <tr><td><code>PATCH</code></td><td><code>/api/v1/repos/{owner}/{repo}/tasks/{id}</code></td><td><code>{ "displayName": … }</code></td><td>Rename a task</td></tr>
+                <tr><td><code>DELETE</code></td><td><code>/api/v1/repos/{owner}/{repo}/tasks/{id}</code></td><td>—</td><td>Terminate a task</td></tr>
+              </tbody>
+            </table>
           </div>
           <p>
             The launch endpoint accepts everything the dashboard's deploy dialog

@@ -1,4 +1,10 @@
 <!doctype html>
+<!--
+  This page mirrors README.md — the two are kept in sync by hand. When you
+  change a feature description here, update the matching section in README.md
+  (and vice versa). The docs-site deploy workflow only triggers on
+  docs-site/** changes, so a README edit will not remind you to sync this file.
+-->
 <html lang="en" data-theme="dark">
   <head>
     <meta charset="utf-8" />
@@ -69,6 +75,7 @@
             <li><a href="#github-app">GitHub App &amp; webhooks</a></li>
             <li><a href="#resuming">Resuming runs</a></li>
             <li><a href="#system-prompt">Repo system prompt</a></li>
+            <li><a href="#auto-merge">Auto-merge PRs</a></li>
             <li><a href="#maintainer-gate">Maintainer gate</a></li>
             <li><a href="#isolation">Agent isolation</a></li>
             <li><a href="#artifacts">Run artifacts</a></li>
@@ -424,6 +431,29 @@ curl -fsSL https://&lt;your-host&gt;/setup.sh | bash -s -- --scoped</code></pre>
             replacing it, so you don't need to repeat guidance in each task. Leave
             it blank for none.
           </p>
+        </section>
+
+        <section id="auto-merge">
+          <h2>Auto-merging Bandolier PRs</h2>
+          <p>
+            A repo admin can toggle <strong>Auto-merge Bandolier PRs</strong> in
+            the repo-config UI. When on, every pull request a Bandolier run
+            reports as its output has GitHub's native auto-merge enabled the
+            moment the run finishes, so the PR merges itself once its required
+            checks pass and it's mergeable — no human click. The merge method is
+            the first of merge / squash / rebase the repo permits.
+          </p>
+          <p>
+            Auto-merge still honors the branch's protection rules (required
+            reviews / status checks), so this only lands what the repo's own
+            gates already allow; a branch with no protection would merge right
+            away.
+          </p>
+          <div class="callout">
+            <strong>Off by default.</strong> It lets an agent's work merge
+            without a human pressing the button, so enable it only when your
+            branch protection is the gate you trust.
+          </div>
         </section>
 
         <section id="maintainer-gate">

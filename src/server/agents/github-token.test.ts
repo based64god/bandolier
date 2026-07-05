@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { db } from "~/server/db";
 import {
   getGithubAccountByGithubId,
+  getGithubAccountByUserId,
   getGithubIdentity,
   getUserGithubToken,
   githubGitIdentity,
@@ -130,5 +131,20 @@ describe("getGithubAccountByGithubId", () => {
         "12345",
       ),
     ).toEqual({ userId: "u1", accessToken: null });
+  });
+});
+
+describe("getGithubAccountByUserId", () => {
+  it("returns the linked GitHub account id and token", async () => {
+    expect(
+      await getGithubAccountByUserId(
+        fakeDb([{ githubId: "12345", accessToken: "gho_abc" }]),
+        "u1",
+      ),
+    ).toEqual({ githubId: "12345", accessToken: "gho_abc" });
+  });
+
+  it("returns null when the user has no linked GitHub account", async () => {
+    expect(await getGithubAccountByUserId(fakeDb([]), "u1")).toBeNull();
   });
 });

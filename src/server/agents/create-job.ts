@@ -216,6 +216,13 @@ export interface JobSpec {
   /** The parent run's display name, surfaced in the UI next to the lineage. */
   parentDisplayName?: string;
   /**
+   * Head commit SHA of the pull request whose failing CI auto-resumed this run.
+   * Recorded on the run row (task_run.ci_resume_sha) so the webhook's CI-failure
+   * handler can de-duplicate failure events for the same commit and cap how many
+   * times a PR auto-resumes. Only set on CI-triggered resumes; unset otherwise.
+   */
+  ciResumeSha?: string;
+  /**
    * Existing remote branch the run resumes work on (RESUME_BRANCH): the harness
    * clones it instead of cutting a fresh branch, measures new work against its
    * remote tip, and pushes follow-up commits to the parent's open PR. Callers
@@ -734,6 +741,7 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
     repoFullName: spec.repoFullName ?? null,
     issueNumber: spec.issueNumber ?? null,
     parentJobName: spec.parentJobName ?? null,
+    ciResumeSha: spec.ciResumeSha ?? null,
   });
 
   console.log("[bandolier:deploy] job created", {

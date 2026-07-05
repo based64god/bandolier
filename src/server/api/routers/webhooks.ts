@@ -92,6 +92,7 @@ export const webhooksRouter = createTRPCRouter({
           computeCpu: repoWebhookConfig.computeCpu,
           computeMemory: repoWebhookConfig.computeMemory,
           systemPrompt: repoWebhookConfig.systemPrompt,
+          resumeOnCiFailure: repoWebhookConfig.resumeOnCiFailure,
           allowPrivateEgress: repoWebhookConfig.allowPrivateEgress,
           allowAllPortsEgress: repoWebhookConfig.allowAllPortsEgress,
           networkPolicyYaml: repoWebhookConfig.networkPolicyYaml,
@@ -114,6 +115,9 @@ export const webhooksRouter = createTRPCRouter({
         computeCpu: row?.computeCpu ?? "",
         computeMemory: row?.computeMemory ?? "",
         systemPrompt: row?.systemPrompt ?? "",
+        // Whether a failing CI pipeline auto-resumes the run that produced the
+        // PR (off unless a row turns it on).
+        resumeOnCiFailure: row?.resumeOnCiFailure ?? false,
         // Network-policy egress toggles (both off unless a row turns them on).
         allowPrivateEgress,
         allowAllPortsEgress,
@@ -264,6 +268,25 @@ export const webhooksRouter = createTRPCRouter({
       const value = input.effort ? input.effort : null;
       await upsertRepoConfig(ctx.db, input.repoFullName, ctx.session.user.id, {
         defaultWebhookEffort: value,
+      });
+      return { success: true };
+    }),
+
+  // Toggle whether a failing CI pipeline auto-resumes the run that produced the
+  // pull request it ran on (resumeable tasks). Admin-only; off by default since
+  // it spends the run owner's credentials without a human in the loop. Partial
+  // upsert so it doesn't clobber other config.
+  setResumeOnCiFailure: protectedProcedure
+    .input(
+      z.object({
+        repoFullName: z.string().min(1),
+        enabled: z.boolean(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await requireRepoAdmin(ctx, input.repoFullName);
+      await upsertRepoConfig(ctx.db, input.repoFullName, ctx.session.user.id, {
+        resumeOnCiFailure: input.enabled,
       });
       return { success: true };
     }),

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildCiResumeUserMessage,
   buildIssueSystemPrompt,
   buildIssueUserMessage,
   buildResumeSystemPrompt,
@@ -134,5 +135,31 @@ describe("buildResumeUserMessage", () => {
       comment: "   ",
     });
     expect(message).toContain("(empty comment)");
+  });
+});
+
+describe("buildCiResumeUserMessage", () => {
+  it("names the failing pipeline, PR, and links the run", () => {
+    const message = buildCiResumeUserMessage({
+      prNumber: 42,
+      title: "Add login",
+      workflowName: "CI",
+      runUrl: "https://github.com/o/r/actions/runs/9",
+    });
+    expect(message).toContain("## CI failed on pull request #42: Add login");
+    expect(message).toContain("**CI** pipeline failed");
+    expect(message).toContain("https://github.com/o/r/actions/runs/9");
+    expect(message).toContain("push a fix");
+  });
+
+  it("omits the run link when there is no URL", () => {
+    const message = buildCiResumeUserMessage({
+      prNumber: 1,
+      title: "Bug",
+      workflowName: "tests",
+      runUrl: null,
+    });
+    expect(message).not.toContain("Failed run:");
+    expect(message).toContain("**tests** pipeline failed");
   });
 });

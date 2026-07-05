@@ -141,6 +141,42 @@ export async function getGithubItemState(
 }
 
 /**
+ * Resolves the open/closed/merged state of a created PR, created issue, and
+ * source issue for a task. Best-effort: without a GitHub token (or on an API
+ * failure) the states stay null and the badges render without an indicator.
+ */
+export async function resolveItemStates(
+  githubToken: string | null,
+  urls: {
+    pullRequestUrl: string | null;
+    createdIssueUrl: string | null;
+    issueUrl: string | null;
+  },
+): Promise<{
+  pullRequestState: GithubItemState | null;
+  createdIssueState: GithubItemState | null;
+  issueState: GithubItemState | null;
+}> {
+  if (!githubToken) {
+    return {
+      pullRequestState: null,
+      createdIssueState: null,
+      issueState: null,
+    };
+  }
+  const [pullRequestState, createdIssueState, issueState] = await Promise.all([
+    urls.pullRequestUrl
+      ? getGithubItemState(githubToken, urls.pullRequestUrl)
+      : null,
+    urls.createdIssueUrl
+      ? getGithubItemState(githubToken, urls.createdIssueUrl)
+      : null,
+    urls.issueUrl ? getGithubItemState(githubToken, urls.issueUrl) : null,
+  ]);
+  return { pullRequestState, createdIssueState, issueState };
+}
+
+/**
  * The refs a resumed run needs to continue a pull request: the head branch to
  * push follow-up commits to and the base its PR targets. `headRepoFullName`
  * lets callers refuse cross-fork PRs (we can't push to a fork the run's token

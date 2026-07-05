@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 
 import { totalTokens, type TokenUsage } from "~/lib/tokens";
 import { resolveApiKey } from "~/server/agents/api-keys";
+import { getRepoAccess } from "~/server/agents/github-api";
 import { getUserGithubToken } from "~/server/agents/github-token";
 import { auth } from "~/server/better-auth";
 import { db } from "~/server/db";
@@ -100,20 +101,13 @@ export async function getAccessibleRepo(
   const token = await getUserGithubToken(db, userId);
   if (!token) return null;
 
-  const res = await fetch(`https://api.github.com/repos/${fullName}`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: "application/vnd.github.v3+json",
-      "X-GitHub-Api-Version": "2022-11-28",
-    },
-  });
-  if (!res.ok) return null;
+  const access = await getRepoAccess(token, fullName);
+  if (!access.accessible) return null;
 
-  const data = (await res.json()) as {
-    clone_url: string;
-    default_branch: string;
+  return {
+    cloneUrl: access.cloneUrl!,
+    defaultBranch: access.defaultBranch!,
   };
-  return { cloneUrl: data.clone_url, defaultBranch: data.default_branch };
 }
 
 /** Maps a tRPC error to an HTTP status for the REST surface. */

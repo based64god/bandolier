@@ -18,16 +18,12 @@ import {
   validateNetworkPolicyYaml,
 } from "~/server/agents/network-policy";
 import { isRepoAdmin } from "~/server/agents/webhook-config";
-import { validateCpuQuantity, validateMemoryQuantity } from "~/lib/compute";
+import { parseComputeInput } from "~/server/agents/compute";
 import { EFFORT_LEVELS } from "~/lib/effort";
 import { type db } from "~/server/db";
 import { repoWebhookConfig } from "~/server/db/schema";
+import { maskKey, stripWhitespace } from "../credentials";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
-
-function maskKey(key: string): string {
-  if (key.length <= 8) return key;
-  return `${key.slice(0, 4)}…${key.slice(-4)}`;
-}
 
 /**
  * Upserts a partial set of columns onto a repo's config row, stamping who made
@@ -47,6 +43,25 @@ async function upsertRepoConfig(
       target: repoWebhookConfig.repoFullName,
       set: { ...values, configuredBy: userId, updatedAt: new Date() },
     });
+}
+
+/**
+ * Nulls a set of columns on a repo's config row, stamping who made the change.
+ * Used by the credential `delete*` mutations, which differ only in which
+ * columns they clear. Operates on the existing row (no upsert): with no config
+ * row there's nothing to clear.
+ */
+async function clearRepoConfigColumns(
+  database: typeof db,
+  repoFullName: string,
+  userId: string,
+  columns: (keyof typeof repoWebhookConfig.$inferInsert)[],
+): Promise<void> {
+  const nulls = Object.fromEntries(columns.map((c) => [c, null]));
+  await database
+    .update(repoWebhookConfig)
+    .set({ ...nulls, configuredBy: userId, updatedAt: new Date() })
+    .where(eq(repoWebhookConfig.repoFullName, repoFullName));
 }
 
 /**
@@ -330,22 +345,7 @@ export const webhooksRouter = createTRPCRouter({
     )
     .mutation(async ({ ctx, input }) => {
       await requireRepoAdmin(ctx, input.repoFullName);
-      let cpu: string | null = null;
-      if (input.cpu.trim()) {
-        const v = validateCpuQuantity(input.cpu);
-        if (!v.valid) {
-          throw new TRPCError({ code: "BAD_REQUEST", message: v.error });
-        }
-        cpu = v.normalized;
-      }
-      let memory: string | null = null;
-      if (input.memory.trim()) {
-        const v = validateMemoryQuantity(input.memory);
-        if (!v.valid) {
-          throw new TRPCError({ code: "BAD_REQUEST", message: v.error });
-        }
-        memory = v.normalized;
-      }
+      const { cpu, memory } = parseComputeInput(input.cpu, input.memory);
       await upsertRepoConfig(ctx.db, input.repoFullName, ctx.session.user.id, {
         computeCpu: cpu,
         computeMemory: memory,
@@ -455,14 +455,12 @@ export const webhooksRouter = createTRPCRouter({
     .input(z.object({ repoFullName: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       await requireRepoAdmin(ctx, input.repoFullName);
-      await ctx.db
-        .update(repoWebhookConfig)
-        .set({
-          kubeconfig: null,
-          configuredBy: ctx.session.user.id,
-          updatedAt: new Date(),
-        })
-        .where(eq(repoWebhookConfig.repoFullName, input.repoFullName));
+      await clearRepoConfigColumns(
+        ctx.db,
+        input.repoFullName,
+        ctx.session.user.id,
+        ["kubeconfig"],
+      );
       return { success: true };
     }),
 
@@ -471,7 +469,9 @@ export const webhooksRouter = createTRPCRouter({
     .input(
       z.object({
         repoFullName: z.string().min(1),
-        apiKey: z.string().min(1),
+        // Strip ALL whitespace, not just the ends: a key pasted from a wrapped
+        // terminal line arrives with interior spaces/newlines that survive trim().
+        apiKey: stripWhitespace.pipe(z.string().min(1)),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -493,14 +493,12 @@ export const webhooksRouter = createTRPCRouter({
     .input(z.object({ repoFullName: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       await requireRepoAdmin(ctx, input.repoFullName);
-      await ctx.db
-        .update(repoWebhookConfig)
-        .set({
-          anthropicApiKey: null,
-          configuredBy: ctx.session.user.id,
-          updatedAt: new Date(),
-        })
-        .where(eq(repoWebhookConfig.repoFullName, input.repoFullName));
+      await clearRepoConfigColumns(
+        ctx.db,
+        input.repoFullName,
+        ctx.session.user.id,
+        ["anthropicApiKey"],
+      );
       return { success: true };
     }),
 
@@ -509,7 +507,9 @@ export const webhooksRouter = createTRPCRouter({
     .input(
       z.object({
         repoFullName: z.string().min(1),
-        apiKey: z.string().min(1),
+        // Strip ALL whitespace, not just the ends: a key pasted from a wrapped
+        // terminal line arrives with interior spaces/newlines that survive trim().
+        apiKey: stripWhitespace.pipe(z.string().min(1)),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -531,14 +531,12 @@ export const webhooksRouter = createTRPCRouter({
     .input(z.object({ repoFullName: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       await requireRepoAdmin(ctx, input.repoFullName);
-      await ctx.db
-        .update(repoWebhookConfig)
-        .set({
-          openaiApiKey: null,
-          configuredBy: ctx.session.user.id,
-          updatedAt: new Date(),
-        })
-        .where(eq(repoWebhookConfig.repoFullName, input.repoFullName));
+      await clearRepoConfigColumns(
+        ctx.db,
+        input.repoFullName,
+        ctx.session.user.id,
+        ["openaiApiKey"],
+      );
       return { success: true };
     }),
 
@@ -570,14 +568,12 @@ export const webhooksRouter = createTRPCRouter({
     .input(z.object({ repoFullName: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       await requireRepoAdmin(ctx, input.repoFullName);
-      await ctx.db
-        .update(repoWebhookConfig)
-        .set({
-          geminiApiKey: null,
-          configuredBy: ctx.session.user.id,
-          updatedAt: new Date(),
-        })
-        .where(eq(repoWebhookConfig.repoFullName, input.repoFullName));
+      await clearRepoConfigColumns(
+        ctx.db,
+        input.repoFullName,
+        ctx.session.user.id,
+        ["geminiApiKey"],
+      );
       return { success: true };
     }),
 
@@ -619,17 +615,17 @@ export const webhooksRouter = createTRPCRouter({
     .input(z.object({ repoFullName: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       await requireRepoAdmin(ctx, input.repoFullName);
-      await ctx.db
-        .update(repoWebhookConfig)
-        .set({
-          awsAccessKeyId: null,
-          awsSecretAccessKey: null,
-          awsSessionToken: null,
-          awsRegion: null,
-          configuredBy: ctx.session.user.id,
-          updatedAt: new Date(),
-        })
-        .where(eq(repoWebhookConfig.repoFullName, input.repoFullName));
+      await clearRepoConfigColumns(
+        ctx.db,
+        input.repoFullName,
+        ctx.session.user.id,
+        [
+          "awsAccessKeyId",
+          "awsSecretAccessKey",
+          "awsSessionToken",
+          "awsRegion",
+        ],
+      );
       return { success: true };
     }),
 
@@ -688,18 +684,18 @@ export const webhooksRouter = createTRPCRouter({
     .input(z.object({ repoFullName: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       await requireRepoAdmin(ctx, input.repoFullName);
-      await ctx.db
-        .update(repoWebhookConfig)
-        .set({
-          artifactsS3Bucket: null,
-          artifactsS3Region: null,
-          artifactsS3Endpoint: null,
-          artifactsAccessKeyId: null,
-          artifactsSecretAccessKey: null,
-          configuredBy: ctx.session.user.id,
-          updatedAt: new Date(),
-        })
-        .where(eq(repoWebhookConfig.repoFullName, input.repoFullName));
+      await clearRepoConfigColumns(
+        ctx.db,
+        input.repoFullName,
+        ctx.session.user.id,
+        [
+          "artifactsS3Bucket",
+          "artifactsS3Region",
+          "artifactsS3Endpoint",
+          "artifactsAccessKeyId",
+          "artifactsSecretAccessKey",
+        ],
+      );
       return { success: true };
     }),
 

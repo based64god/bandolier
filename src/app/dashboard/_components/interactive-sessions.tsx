@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { groupTimeline, type TimelineItem } from "~/lib/acp/timeline";
 import { api } from "~/trpc/react";
@@ -70,6 +70,7 @@ export function InteractiveRow({
   namespace,
   repoFullName,
   focusSignal,
+  awaitingCount = 0,
 }: {
   agent: Task;
   namespace: string;
@@ -80,6 +81,12 @@ export function InteractiveRow({
    * keyboard focus into its textarea. `null`/`0` means "not the target".
    */
   focusSignal?: number | null;
+  /**
+   * How many of the viewer's sessions are currently awaiting input. Used to
+   * decide whether the awaiting transition should grab the viewport: with more
+   * than one waiting, auto-scrolling would fight between rows, so we hold back.
+   */
+  awaitingCount?: number;
 }) {
   const [ending, setEnding] = useState(false);
   const [confirmEnd, setConfirmEnd] = useState(false);
@@ -115,14 +122,40 @@ export function InteractiveRow({
     enabled: !collapsed,
   });
 
+  // A local signal forwarded to the composer's `focusSignal`: both the
+  // Tab-cycle path (below) and the awaiting transition bump it to move keyboard
+  // focus into the textarea. `scrollBump` likewise nudges the conversation to
+  // snap back to the bottom so the prompt the agent is waiting on is in view.
+  // A monotonic counter feeds both so we set a plain literal (never a
+  // previous-state updater) from inside the effects below.
+  const bumpSeq = useRef(0);
+  const [focusBump, setFocusBump] = useState(0);
+  const [scrollBump, setScrollBump] = useState(0);
+
   // An agent that starts waiting for input pops back open even if the user had
   // collapsed it — that's the moment they need to see it. We expand only on the
   // false→true transition so the user can re-collapse while it keeps waiting.
+  // On that same transition we actively surface the prompt: scroll the row into
+  // view (even when it was already expanded and off-screen), snap the
+  // conversation to the bottom, and focus the composer — the awaiting moment is
+  // the one time the agent is blocked on the user. To avoid fighting over the
+  // viewport we hold the scroll/focus back when more than one session is
+  // awaiting at once, and when the user is mid-type in a composer.
   const wasAwaiting = useRef(awaiting);
   useEffect(() => {
-    if (awaiting && !wasAwaiting.current) setCollapsed(false);
+    if (awaiting && !wasAwaiting.current) {
+      setCollapsed(false);
+      const composerFocused =
+        document.activeElement instanceof HTMLTextAreaElement;
+      if (awaitingCount <= 1 && !composerFocused) {
+        revealSession();
+        const next = (bumpSeq.current += 1);
+        setScrollBump(next);
+        setFocusBump(next);
+      }
+    }
     wasAwaiting.current = awaiting;
-  }, [awaiting]);
+  }, [awaiting, awaitingCount]);
 
   // When a session finishes (running→done) there's nothing left to interact
   // with, so we collapse it to get it out of the way. Mirror of the expand
@@ -155,6 +188,7 @@ export function InteractiveRow({
     if (focusSignal && focusSignal !== lastFocusSignal.current) {
       setCollapsed(false);
       revealSession();
+      setFocusBump((bumpSeq.current += 1));
     }
     lastFocusSignal.current = focusSignal;
   }, [focusSignal]);
@@ -477,7 +511,11 @@ export function InteractiveRow({
               <div className="shrink-0">
                 <SessionHeader podName={agent.name} tokens={agent.tokens} />
               </div>
-              <Conversation items={session.items} running={running} />
+              <Conversation
+                items={session.items}
+                running={running}
+                scrollSignal={scrollBump}
+              />
               <div className="shrink-0">
                 <SessionComposer
                   running={running}
@@ -487,7 +525,7 @@ export function InteractiveRow({
                   sendError={session.sendError}
                   commands={session.commands}
                   onSend={session.sendPrompt}
-                  focusSignal={focusSignal}
+                  focusSignal={focusBump}
                 />
               </div>
             </div>
@@ -524,12 +562,20 @@ function SessionHeader({
  * messages plus structured tool-call rows. Auto-sticks to the bottom as new
  * items stream in.
  */
-function Conversation({
+export function Conversation({
   items,
   running,
+  scrollSignal,
 }: {
   items: TimelineItem[];
   running: boolean;
+  /**
+   * Bumped by the parent when the session starts awaiting input: snap to the
+   * bottom and re-pin (equivalent to pressing "Scroll to bottom") so the prompt
+   * the agent is waiting on is visible even if the user had scrolled up. `0` is
+   * inert; only a fresh value fires, so the user can scroll away again after.
+   */
+  scrollSignal?: number;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   // Whether the view is pinned to the bottom. Mirrored into state so the
@@ -542,13 +588,20 @@ function Conversation({
     if (el && stick.current) el.scrollTop = el.scrollHeight;
   }, [items]);
 
-  function scrollToBottom() {
+  const scrollToBottom = useCallback(() => {
     const el = ref.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
     stick.current = true;
     setPinned(true);
-  }
+  }, []);
+
+  // Re-pin to the bottom whenever the parent signals an awaiting transition.
+  // Skips the mount default (0) so an already-scrolled-up user isn't yanked
+  // down on first render.
+  useEffect(() => {
+    if (scrollSignal) scrollToBottom();
+  }, [scrollSignal, scrollToBottom]);
 
   return (
     // Grow to fill the expanded session's flex column; `min-h-0` overrides the

@@ -173,6 +173,180 @@ func TestACPProxyRelays(t *testing.T) {
 	_ = agentStdoutW.Close()
 }
 
+// TestACPProxyIdleTimeout drives serve against a fake agent with no queued
+// client frames; the c2aPump must end the session once the idle timeout elapses.
+func TestACPProxyIdleTimeout(t *testing.T) {
+	t.Setenv("INTERACTIVE_IDLE_TIMEOUT", "100ms")
+
+	relay := &fakeRelay{}
+	srv := httptest.NewServer(relay)
+	defer srv.Close()
+
+	agentStdinR, agentStdinW := io.Pipe()
+	agentStdoutR, agentStdoutW := io.Pipe()
+	go fakeAgent(t, agentStdinR, agentStdoutW)
+
+	p := &acpProxy{
+		cfg:   config{acpURL: srv.URL, workDir: t.TempDir(), task: "build the feature"},
+		stdin: agentStdinW,
+		ended: make(chan struct{}),
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() { done <- p.serve(ctx, agentStdoutR) }()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("serve returned error: %v", err)
+		}
+		if ctx.Err() != nil {
+			t.Fatal("serve ended via ctx, not the idle path")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("serve did not end via the idle timeout")
+	}
+
+	_ = agentStdinW.Close()
+	_ = agentStdoutW.Close()
+}
+
+// TestACPProxyAgentExit exercises the a2cPump agent-exit branch: when the agent's
+// stdout closes, serve must end the session rather than waiting on the idle timeout.
+func TestACPProxyAgentExit(t *testing.T) {
+	relay := &fakeRelay{}
+	srv := httptest.NewServer(relay)
+	defer srv.Close()
+
+	agentStdinR, agentStdinW := io.Pipe()
+	agentStdoutR, agentStdoutW := io.Pipe()
+	go fakeAgent(t, agentStdinR, agentStdoutW)
+
+	p := &acpProxy{
+		cfg:   config{acpURL: srv.URL, workDir: t.TempDir(), task: "build the feature"},
+		stdin: agentStdinW,
+		ended: make(chan struct{}),
+	}
+
+	// A long idle timeout so a passing test can only end via the agent-exit path.
+	t.Setenv("INTERACTIVE_IDLE_TIMEOUT", "1h")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() { done <- p.serve(ctx, agentStdoutR) }()
+
+	// Wait until the seed round-trip completed, then close the agent's stdout to
+	// simulate the agent exiting.
+	waitFor(t, func() bool {
+		for _, f := range relay.pushed() {
+			if strings.Contains(f, "agent_message_chunk") {
+				return true
+			}
+		}
+		return false
+	})
+	_ = agentStdoutW.Close()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("serve returned error: %v", err)
+		}
+		if ctx.Err() != nil {
+			t.Fatal("serve ended via ctx, not the agent-exit path")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("serve did not end after the agent exited")
+	}
+
+	_ = agentStdinW.Close()
+}
+
+// toggleWriter forwards writes to an inner writer until fail is flipped, after
+// which every write errors — lets a test make the c2aPump's stdin write fail
+// only after the handshake writes have gone through.
+type toggleWriter struct {
+	mu   sync.Mutex
+	w    io.Writer
+	fail bool
+}
+
+func (t *toggleWriter) setFail() {
+	t.mu.Lock()
+	t.fail = true
+	t.mu.Unlock()
+}
+
+func (t *toggleWriter) Write(p []byte) (int, error) {
+	t.mu.Lock()
+	fail := t.fail
+	t.mu.Unlock()
+	if fail {
+		return 0, io.ErrClosedPipe
+	}
+	return t.w.Write(p)
+}
+
+// TestACPProxyStdinWriteFailure exercises the c2aPump stdin-write-failure branch:
+// when forwarding a client frame to the agent fails, serve must end the session.
+func TestACPProxyStdinWriteFailure(t *testing.T) {
+	t.Setenv("INTERACTIVE_IDLE_TIMEOUT", "1h")
+
+	relay := &fakeRelay{}
+	srv := httptest.NewServer(relay)
+	defer srv.Close()
+
+	agentStdinR, agentStdinW := io.Pipe()
+	agentStdoutR, agentStdoutW := io.Pipe()
+	go fakeAgent(t, agentStdinR, agentStdoutW)
+
+	stdin := &toggleWriter{w: agentStdinW}
+	p := &acpProxy{
+		cfg:   config{acpURL: srv.URL, workDir: t.TempDir(), task: "build the feature"},
+		stdin: stdin,
+		ended: make(chan struct{}),
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() { done <- p.serve(ctx, agentStdoutR) }()
+
+	// Let the handshake and seed complete, then make subsequent stdin writes fail
+	// and enqueue a client frame the pump will try to forward.
+	waitFor(t, func() bool {
+		for _, f := range relay.pushed() {
+			if strings.Contains(f, "agent_message_chunk") {
+				return true
+			}
+		}
+		return false
+	})
+	stdin.setFail()
+	relay.enqueue(`{"jsonrpc":"2.0","id":2,"method":"session/cancel","params":{"sessionId":"sess-1"}}`)
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("serve returned error: %v", err)
+		}
+		if ctx.Err() != nil {
+			t.Fatal("serve ended via ctx, not the stdin-write-failure path")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("serve did not end after the stdin write failed")
+	}
+
+	_ = agentStdinW.Close()
+	_ = agentStdoutW.Close()
+}
+
 func TestFramePromptText(t *testing.T) {
 	cases := []struct {
 		name, frame, want string

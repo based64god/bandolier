@@ -189,6 +189,26 @@ export async function getRepoBotToken(
   }
 }
 
+/**
+ * The token to read PR/issue state with. Prefers the repo's GitHub App
+ * installation token (a bot-voice read that doesn't depend on the viewer having
+ * a GitHub account or spend their rate limit), falling back to the viewer's own
+ * token when the App isn't installed on the repo. Returns null when neither is
+ * available, so polling degrades to no state badge rather than failing.
+ */
+export async function resolvePollToken(
+  database: typeof db,
+  repoFullName: string | null,
+  userGithubToken: string | null,
+  nowMs: number,
+): Promise<string | null> {
+  if (repoFullName) {
+    const botToken = await getRepoBotToken(database, repoFullName, nowMs);
+    if (botToken) return botToken;
+  }
+  return userGithubToken;
+}
+
 // ── Installation tracking (webhook-maintained) ────────────────────────────────
 
 /** Records (or refreshes) the installation mapping for a repo. */

@@ -22,4 +22,11 @@ resource "digitalocean_kubernetes_cluster" "this" {
     min_nodes  = var.min_nodes
     max_nodes  = var.max_nodes
   }
+
+  lifecycle {
+    precondition {
+      condition     = !(var.agent_only && var.dns_zone != "")
+      error_message = "dns_zone cannot be set when agent_only=true — the ingress/DNS stack exists to serve the app, which an agent-only cluster does not run."
+    }
+  }
 }

@@ -11,6 +11,9 @@ DigitalOcean and installs the [Helm chart](../../helm/bandolier):
 | Public HTTPS entrypoint               | ingress-nginx + cert-manager (Let's Encrypt) + DO DNS record  | `dns_zone` (default off → port-forward) |
 | The app                               | `helm_release` of `deploy/helm/bandolier`                     | `install_app` (default on)              |
 
+`agent_only = true` collapses this to just the cluster (plus Spaces, unless
+disabled) — see [Agent-only cluster](#agent-only-cluster).
+
 DOKS ships Cilium, which enforces NetworkPolicy — so the chart's agent-pod
 isolation (`config.agentNetworkPolicy=true`, the default) works without extra
 setup.
@@ -74,6 +77,24 @@ Apply, then update the OAuth callback to
 `https://bandolier.example.com/api/auth/callback/github`. The certificate is
 issued via HTTP-01 right after the A record propagates — allow a few minutes on
 first apply; cert-manager retries automatically.
+
+## Agent-only cluster
+
+When Bandolier itself runs elsewhere (another cluster, another cloud) and this
+cluster should only execute agent Jobs:
+
+```hcl
+agent_only = true
+```
+
+This provisions the DOKS cluster (and the Spaces bucket, unless
+`spaces_enabled = false`) but no database of any kind and no Bandolier Helm
+release — `managed_database` and `install_app` are ignored, and `dns_zone`
+must stay unset. The GitHub OAuth variables aren't needed in this mode.
+
+After the apply, create the long-lived ServiceAccount kubeconfig (see
+[Agent-cluster kubeconfig](#agent-cluster-kubeconfig)) and paste it into your
+Bandolier instance's Kubernetes settings.
 
 ## After the apply
 

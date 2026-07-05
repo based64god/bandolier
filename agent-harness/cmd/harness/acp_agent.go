@@ -1,8 +1,6 @@
 package main
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -212,107 +210,92 @@ func startClaudeDriver(a *acpAgent) (*claudeDriver, error) {
 }
 
 func (d *claudeDriver) read(stdout io.Reader) {
-	reader := bufio.NewReaderSize(stdout, 1<<20)
-	for {
-		line, err := reader.ReadBytes('\n')
-		if len(bytes.TrimSpace(line)) > 0 {
-			d.handle(line)
-		}
-		if err != nil {
-			// Process exited: unblock any turn still waiting on a result event.
-			select {
-			case d.turnDone <- acp.PromptResult{StopReason: acp.StopEndTurn}:
-			default:
-			}
-			return
-		}
+	// dispatchClaudeEvent parses each line once and drives this driver as the ACP
+	// sink; the one-shot log path uses the same parser with a log sink, so the two
+	// can't drift on which events they understand.
+	forEachLine(stdout, d.handle)
+	// Process exited: unblock any turn still waiting on a result event.
+	select {
+	case d.turnDone <- acp.PromptResult{StopReason: acp.StopEndTurn}:
+	default:
 	}
 }
 
-func (d *claudeDriver) handle(raw []byte) {
-	var ev claudeEvent
-	if json.Unmarshal(raw, &ev) != nil {
-		return
-	}
+// handle parses one Claude stream-json line and drives the driver as the ACP
+// sink — the same dispatchClaudeEvent the one-shot log path uses.
+func (d *claudeDriver) handle(raw []byte) { dispatchClaudeEvent(raw, d) }
+
+// claudeDriver implements claudeEventSink, forwarding each normalized event to
+// the ACP client as a session/update frame.
+
+// onSlashCommands forwards the session's slash commands so the client can offer
+// a typeahead menu.
+func (d *claudeDriver) onSlashCommands(names []string) { d.agent.emitAvailableCommands(names) }
+
+func (d *claudeDriver) onText(text string) {
 	a := d.agent
-	switch ev.Type {
-	case "system":
-		// The init event (emitted once at startup) lists the session's slash
-		// commands. Forward them so the client can offer a typeahead menu.
-		if ev.Subtype == "init" && len(ev.SlashCommands) > 0 {
-			a.emitAvailableCommands(ev.SlashCommands)
-		}
-	case "assistant":
-		for _, c := range ev.Message.Content {
-			switch c.Type {
-			case "text":
-				if t := strings.TrimSpace(c.Text); t != "" {
-					a.emit(acp.AgentMessageChunk{SessionUpdate: acp.UpdateAgentMessageChunk, MessageID: a.curMsgID, Content: acp.TextBlock(t)})
-				}
-			case "thinking":
-				if t := strings.TrimSpace(c.Thinking); t != "" {
-					a.emit(acp.AgentThoughtChunk{SessionUpdate: acp.UpdateAgentThoughtChunk, MessageID: a.curMsgID, Content: acp.TextBlock(t)})
-				}
-			case "tool_use":
-				// Reuse Claude's own tool_use id as the ACP toolCallId so the
-				// follow-up tool_result (a `user` event) can be matched back to
-				// this call via a tool_call_update.
-				id := c.ID
-				if id == "" {
-					id = c.Name + "-" + shortUnique()
-				}
-				a.emit(acp.ToolCall{
-					SessionUpdate: acp.UpdateToolCall,
-					ToolCallID:    id,
-					Title:         toolSummary(c.Name, c.Input),
-					Kind:          toolKind(c.Name),
-					Status:        acp.ToolStatusPending,
-					RawInput:      c.Input,
-				})
-			}
-		}
-	case "user":
-		// Claude reports each tool's output as a tool_result block on a `user`
-		// event. Forward it as a tool_call_update so the transcript (and the UI)
-		// can attach the output — expandable — to the originating tool call.
-		for _, c := range ev.Message.Content {
-			if c.Type != "tool_result" || c.ToolUseID == "" {
-				continue
-			}
-			status := acp.ToolStatusCompleted
-			if c.IsError {
-				status = acp.ToolStatusFailed
-			}
-			up := acp.ToolCallUpdate{
-				SessionUpdate: acp.UpdateToolCallUpdate,
-				ToolCallID:    c.ToolUseID,
-				Status:        status,
-			}
-			if t := toolResultText(c.ToolResult); t != "" {
-				up.Content = []acp.ToolCallContent{{Type: "content", Content: acp.TextBlock(t)}}
-			}
-			a.emit(up)
-		}
-	case "result":
-		// Accumulate this turn's usage into the session total and re-emit the
-		// running total as the token marker. The agent's stderr is teed into the
-		// proxy's transcript, so the marker rides the pod log like the one-shot
-		// path's.
-		if !ev.Usage.empty() {
-			a.mu.Lock()
-			a.tokens.add(ev.Usage)
-			total := a.tokens
-			a.mu.Unlock()
-			logTokenUsage(total)
-		}
-		reason := acp.StopEndTurn
-		if ev.IsError {
-			reason = acp.StopRefusal
-		}
-		select {
-		case d.turnDone <- acp.PromptResult{StopReason: reason}:
-		default:
-		}
+	a.emit(acp.AgentMessageChunk{SessionUpdate: acp.UpdateAgentMessageChunk, MessageID: a.curMsgID, Content: acp.TextBlock(text)})
+}
+
+func (d *claudeDriver) onThinking(text string) {
+	a := d.agent
+	a.emit(acp.AgentThoughtChunk{SessionUpdate: acp.UpdateAgentThoughtChunk, MessageID: a.curMsgID, Content: acp.TextBlock(text)})
+}
+
+func (d *claudeDriver) onToolUse(id, name string, input json.RawMessage) {
+	// Reuse Claude's own tool_use id as the ACP toolCallId so the follow-up
+	// tool_result (a `user` event) can be matched back to this call via a
+	// tool_call_update.
+	if id == "" {
+		id = name + "-" + shortUnique()
+	}
+	d.agent.emit(acp.ToolCall{
+		SessionUpdate: acp.UpdateToolCall,
+		ToolCallID:    id,
+		Title:         toolSummary(name, input),
+		Kind:          toolKind(name),
+		Status:        acp.ToolStatusPending,
+		RawInput:      input,
+	})
+}
+
+// onToolResult forwards a tool's output as a tool_call_update so the transcript
+// (and the UI) can attach it — expandable — to the originating tool call.
+func (d *claudeDriver) onToolResult(id string, isError bool, content json.RawMessage) {
+	status := acp.ToolStatusCompleted
+	if isError {
+		status = acp.ToolStatusFailed
+	}
+	up := acp.ToolCallUpdate{
+		SessionUpdate: acp.UpdateToolCallUpdate,
+		ToolCallID:    id,
+		Status:        status,
+	}
+	if t := toolResultText(content); t != "" {
+		up.Content = []acp.ToolCallContent{{Type: "content", Content: acp.TextBlock(t)}}
+	}
+	d.agent.emit(up)
+}
+
+func (d *claudeDriver) onResult(ev claudeEvent) {
+	a := d.agent
+	// Accumulate this turn's usage into the session total and re-emit the running
+	// total as the token marker. The agent's stderr is teed into the proxy's
+	// transcript, so the marker rides the pod log like the one-shot path's.
+	if !ev.Usage.empty() {
+		a.mu.Lock()
+		a.tokens.add(ev.Usage)
+		total := a.tokens
+		a.mu.Unlock()
+		logTokenUsage(total)
+	}
+	reason := acp.StopEndTurn
+	if ev.IsError {
+		reason = acp.StopRefusal
+	}
+	select {
+	case d.turnDone <- acp.PromptResult{StopReason: reason}:
+	default:
 	}
 }
 
@@ -357,16 +340,7 @@ func (a *acpAgent) promptCodex(ctx context.Context, text string) (any, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, &acp.RPCError{Code: acp.CodeInternalError, Message: err.Error()}
 	}
-	reader := bufio.NewReaderSize(stdout, 1<<20)
-	for {
-		line, readErr := reader.ReadBytes('\n')
-		if len(bytes.TrimSpace(line)) > 0 {
-			a.handleCodexEvent(line)
-		}
-		if readErr != nil {
-			break
-		}
-	}
+	forEachLine(stdout, func(line []byte) { dispatchCodexEvent(line, a) })
 	waitErr := cmd.Wait()
 	a.codexBegun = true
 	if ctx.Err() != nil {
@@ -378,32 +352,35 @@ func (a *acpAgent) promptCodex(ctx context.Context, text string) (any, error) {
 	return acp.PromptResult{StopReason: acp.StopEndTurn}, nil
 }
 
-func (a *acpAgent) handleCodexEvent(raw []byte) {
-	var ev codexEvent
-	if json.Unmarshal(raw, &ev) != nil || ev.Type != "item.completed" || ev.Item == nil {
-		return
-	}
-	switch ev.Item.Type {
-	case "agent_message":
-		if t := strings.TrimSpace(ev.Item.Text); t != "" {
-			a.emit(acp.AgentMessageChunk{SessionUpdate: acp.UpdateAgentMessageChunk, MessageID: a.curMsgID, Content: acp.TextBlock(t)})
-		}
-	case "command_execution":
-		if c := strings.TrimSpace(ev.Item.Command); c != "" {
-			a.emitToolCall("exec", acp.ToolKindExecute, "exec: "+strings.SplitN(c, "\n", 2)[0])
-		}
-	case "file_change":
-		a.emitToolCall("edit", acp.ToolKindEdit, "file change")
-	case "web_search":
-		if q := strings.TrimSpace(ev.Item.Query); q != "" {
-			a.emitToolCall("search", acp.ToolKindFetch, "search: "+q)
-		}
-	case "mcp_tool_call":
-		if n := strings.TrimSpace(ev.Item.Name); n != "" {
-			a.emitToolCall("tool", acp.ToolKindOther, "tool: "+n)
-		}
-	}
+// handleCodexEvent parses one Codex NDJSON line and drives the agent as the ACP
+// sink — the same dispatchCodexEvent the one-shot log path uses.
+func (a *acpAgent) handleCodexEvent(raw []byte) { dispatchCodexEvent(raw, a) }
+
+// acpAgent implements codexEventSink, forwarding each normalized Codex event to
+// the ACP client. Lifecycle events (turn.failed/completed) drive the prompt
+// result rather than the transcript, so they're no-ops here.
+
+func (a *acpAgent) onMessage(text string) {
+	a.emit(acp.AgentMessageChunk{SessionUpdate: acp.UpdateAgentMessageChunk, MessageID: a.curMsgID, Content: acp.TextBlock(text)})
 }
+
+func (a *acpAgent) onCommand(command string) {
+	a.emitToolCall("exec", acp.ToolKindExecute, "exec: "+strings.SplitN(command, "\n", 2)[0])
+}
+
+func (a *acpAgent) onFileChange() { a.emitToolCall("edit", acp.ToolKindEdit, "file change") }
+
+func (a *acpAgent) onWebSearch(query string) {
+	a.emitToolCall("search", acp.ToolKindFetch, "search: "+query)
+}
+
+func (a *acpAgent) onMCPToolCall(name string) {
+	a.emitToolCall("tool", acp.ToolKindOther, "tool: "+name)
+}
+
+func (a *acpAgent) onTurnFailed(string) {}
+
+func (a *acpAgent) onTurnCompleted() {}
 
 // emitAvailableCommands forwards the session's slash-command names to the client
 // as an available_commands_update. The claude CLI reports only names (no
@@ -463,28 +440,5 @@ func toolKind(name string) string {
 		return acp.ToolKindFetch
 	default:
 		return acp.ToolKindOther
-	}
-}
-
-func getenvDefault(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
-}
-
-// String renders a providerKind for diagnostics.
-func (p providerKind) String() string {
-	switch p {
-	case providerAnthropic:
-		return "anthropic"
-	case providerBedrock:
-		return "bedrock"
-	case providerOpenAI:
-		return "openai"
-	case providerGemini:
-		return "gemini"
-	default:
-		return "none"
 	}
 }

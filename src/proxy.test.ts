@@ -4,11 +4,41 @@
 // header/URL logic, so no network is involved — and vi.stubEnv to control
 // APP_PASSWORD / BETTER_AUTH_SECRET per test.
 
+import { readFileSync, readdirSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+
 import { NextRequest } from "next/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { GATE_COOKIE, gateToken } from "~/lib/gate";
-import { proxy } from "~/proxy";
+import { EXEMPT_EXACT, proxy } from "~/proxy";
+
+const SRC_DIR = dirname(fileURLToPath(import.meta.url));
+
+/**
+ * Walks src/app/api for every route.ts and returns the URL pathnames of those
+ * that authenticate via the harness's per-job HMAC token (verifyIngestToken).
+ * These MUST be gate-exempt — the in-pod harness has no session to present.
+ */
+function harnessCallbackPaths(): string[] {
+  const apiDir = join(SRC_DIR, "app", "api");
+  const paths: string[] = [];
+  const walk = (dir: string, segments: string[]) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(full, [...segments, entry.name]);
+      } else if (entry.name === "route.ts") {
+        if (readFileSync(full, "utf8").includes("verifyIngestToken")) {
+          paths.push(`/api/${segments.join("/")}`);
+        }
+      }
+    }
+  };
+  walk(apiDir, []);
+  return paths;
+}
 
 const PASSWORD = "pw";
 // The placeholder secret vitest.config.ts injects for every test.
@@ -88,6 +118,24 @@ describe("proxy", () => {
       const res = await proxy(request("/gate2"));
       expect(res.status).toBe(307);
       expect(new URL(res.headers.get("location")!).pathname).toBe("/gate");
+    });
+
+    // Guards the recurring failure mode: a new harness-callback route that
+    // forgets to add itself to EXEMPT_EXACT silently 401s behind the gate.
+    // Every route authenticating via the per-job HMAC token must be exempt.
+    it("exempts every harness-callback route (verifyIngestToken)", () => {
+      const callbacks = harnessCallbackPaths();
+      // Sanity check that discovery actually found the known callbacks.
+      expect(callbacks).toEqual(
+        expect.arrayContaining([
+          "/api/agent-runs",
+          "/api/agent-input",
+          "/api/acp",
+        ]),
+      );
+      for (const path of callbacks) {
+        expect(EXEMPT_EXACT.has(path)).toBe(true);
+      }
     });
   });
 

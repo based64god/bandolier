@@ -85,3 +85,23 @@ export async function getGithubAccountByGithubId(
     .limit(1);
   return row ?? null;
 }
+
+/**
+ * The reverse of `getGithubAccountByGithubId`: given a Bandolier user id, return
+ * the GitHub numeric account id linked to it (and the stored OAuth token). Used
+ * by the CI-failure resume path, which knows the owning run's user id (from
+ * `task_run.spawned_by`) and needs to drive the shared webhook-run resolver,
+ * which is keyed off the GitHub account id. Null when the user has no linked
+ * GitHub account.
+ */
+export async function getGithubAccountByUserId(
+  database: typeof db,
+  userId: string,
+): Promise<{ githubId: string; accessToken: string | null } | null> {
+  const [row] = await database
+    .select({ githubId: account.accountId, accessToken: account.accessToken })
+    .from(account)
+    .where(and(eq(account.userId, userId), eq(account.providerId, "github")))
+    .limit(1);
+  return row ?? null;
+}

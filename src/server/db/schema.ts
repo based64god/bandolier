@@ -135,6 +135,14 @@ export const taskRun = pgTable("task_run", {
    * Null for runs that aren't resumptions.
    */
   parentJobName: text("parent_job_name"),
+  /**
+   * Head commit SHA of the pull request whose CI failure auto-resumed this run
+   * (see the webhook's `workflow_run` handler). Recorded so the handler can
+   * both de-duplicate redelivered / multi-workflow failure events for the same
+   * commit and cap how many times a single PR auto-resumes, preventing an
+   * endless resume→push→fail→resume loop. Null for every non-CI-triggered run.
+   */
+  ciResumeSha: text("ci_resume_sha"),
   /** Object-storage key for the rendered transcript, set on harness callback. */
   transcriptKey: text("transcript_key"),
   /**
@@ -244,6 +252,14 @@ export const repoWebhookConfig = pgTable("repo_webhook_config", {
   // It is layered on top of the harness's own framing, never replacing it. Null
   // = no repo-wide prompt.
   systemPrompt: text("system_prompt"),
+  // When true, a failing CI pipeline on a pull request whose head branch a
+  // Bandolier run produced auto-resumes that run so the agent can investigate
+  // and push a fix — the same resume flow a human comment triggers, but driven
+  // by the `workflow_run` webhook instead. Off by default: opt-in, since it
+  // spends the run owner's credentials without a human in the loop. The
+  // handler bounds itself (one resume per failing commit, capped per PR) to
+  // avoid an endless resume→push→fail loop.
+  resumeOnCiFailure: boolean("resume_on_ci_failure").notNull().default(false),
   // ── Repo-scoped credentials (admin-only) ──────────────────────────────────
   // Shared infrastructure for everyone working on this repo: a kubeconfig the
   // repo's agents run on and model credentials they authenticate with. Only a

@@ -315,9 +315,25 @@ pnpm db:push            # creates the tables (no migration files are used)</code
             </li>
             <li>
               <strong>A kubeconfig</strong> — the cluster your agents deploy into
-              (a repo can also provide a shared one).
+              (a repo can also provide a shared one). Bandolier runs the
+              Kubernetes client on its server, so exec-plugin kubeconfigs (the
+              <code>aws</code>/<code>gcloud</code> credential plugins EKS/GKE
+              emit) and ones that reference cert/key files on your laptop won't
+              work — the server has neither those binaries nor those files.
+              Generate a self-contained, token-based kubeconfig from your current
+              cluster and paste that instead:
             </li>
           </ul>
+          <div class="code-block" data-lang="bash">
+            <pre><code># hosted — no checkout needed
+curl -fsSL https://&lt;your-host&gt;/setup.sh | bash
+
+# from a local checkout
+./scripts/create-bandolier-kubeconfig.sh
+
+# add --scoped for a least-privilege ClusterRole instead of cluster-admin
+curl -fsSL https://&lt;your-host&gt;/setup.sh | bash -s -- --scoped</code></pre>
+          </div>
           <div class="callout success">
             You can now select a repo, deploy an agent, and watch it work. 🎉
           </div>

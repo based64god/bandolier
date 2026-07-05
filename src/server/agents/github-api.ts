@@ -47,15 +47,20 @@ export interface RepoAccess {
   accessible: boolean;
   /** Whether the token grants admin on the repo. */
   isAdmin: boolean;
+  /** The repo's clone URL — present only when accessible. */
+  cloneUrl?: string;
+  /** The repo's default branch — present only when accessible. */
+  defaultBranch?: string;
 }
 
 /**
  * Probes a repo through a GitHub token in one `GET /repos/{repo}` call: whether
- * the token can reach the repo at all and whether it grants admin. This is the
- * single source for both the "can this user touch this repo's shared
- * resources?" gate and the "is this user a repo admin?" gate. Fails closed —
- * `{ accessible: false, isAdmin: false }` — on any API or transport error, and
- * never reads the body on a non-2xx response.
+ * the token can reach the repo at all, whether it grants admin, and — when
+ * reachable — its clone URL and default branch. This is the single source for
+ * the "can this user touch this repo's shared resources?" gate, the "is this
+ * user a repo admin?" gate, and the clone-URL/default-branch lookup. Fails
+ * closed — `{ accessible: false, isAdmin: false }` — on any API or transport
+ * error, and never reads the body on a non-2xx response.
  */
 export async function getRepoAccess(
   token: string,
@@ -66,8 +71,17 @@ export async function getRepoAccess(
       headers: ghHeaders(token),
     });
     if (!res.ok) return { accessible: false, isAdmin: false };
-    const repo = (await res.json()) as { permissions?: { admin?: boolean } };
-    return { accessible: true, isAdmin: repo.permissions?.admin === true };
+    const repo = (await res.json()) as {
+      permissions?: { admin?: boolean };
+      clone_url?: string;
+      default_branch?: string;
+    };
+    return {
+      accessible: true,
+      isAdmin: repo.permissions?.admin === true,
+      cloneUrl: repo.clone_url,
+      defaultBranch: repo.default_branch,
+    };
   } catch {
     return { accessible: false, isAdmin: false };
   }

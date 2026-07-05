@@ -1,34 +1,12 @@
 // Browser smoke test for the shared credential building blocks
 // (SecretForm → MaskedCredentialRow → Remove, and ToggleSection).
-// Playwright is installed globally in this environment; resolve it locally
-// first, else fall back to the global install.
 //
 // Run against a dev server serving the harness route:
 //   pnpm next dev --port 3137 &
 //   node e2e/credential-ui.spec.mjs
-import { createRequire } from "node:module";
-const require = createRequire(import.meta.url);
-let chromium;
-try {
-  ({ chromium } = require("playwright"));
-} catch {
-  ({ chromium } = require("/usr/local/lib/node_modules/playwright/index.js"));
-}
+import { BASE, check, launch, finish } from "./helpers.mjs";
 
-const BASE = process.env.CREDENTIAL_UI_BASE_URL ?? "http://localhost:3137";
-let passed = 0;
-let failed = 0;
-function check(name, cond) {
-  if (cond) {
-    passed++;
-    console.log(`  ✓ ${name}`);
-  } else {
-    failed++;
-    console.log(`  ✗ ${name}`);
-  }
-}
-
-const browser = await chromium.launch();
+const browser = await launch();
 const page = await browser.newPage();
 
 await page.goto(`${BASE}/dev/credential-ui`);
@@ -77,6 +55,4 @@ check(
   (await page.getByTestId("toggle").innerText()) === "on",
 );
 
-await browser.close();
-console.log(`\n${passed} passed, ${failed} failed`);
-process.exit(failed ? 1 : 0);
+await finish(browser);

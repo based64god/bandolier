@@ -59,9 +59,7 @@ import {
   runUsesRepoCredentials,
 } from "~/server/agents/repo-permissions";
 import {
-  getRepoAgentImage,
-  getRepoNetworkPolicy,
-  getRepoSystemPrompt,
+  getRepoWebhookConfig,
   type RepoNetworkPolicy,
 } from "~/server/agents/webhook-config";
 import { type db } from "~/server/db";
@@ -1600,11 +1598,15 @@ export const agentsRouter = createTRPCRouter({
         let networkPolicy: RepoNetworkPolicy | undefined;
         if (input.repoFullName) {
           try {
-            agentImage =
-              (await getRepoAgentImage(ctx.db, input.repoFullName)) ??
-              undefined;
+            const repoConfig = await getRepoWebhookConfig(
+              ctx.db,
+              input.repoFullName,
+            );
+            agentImage = repoConfig?.agentImage ?? undefined;
+            repoSystemPrompt = repoConfig?.systemPrompt ?? undefined;
+            networkPolicy = repoConfig?.networkPolicy;
           } catch (err) {
-            console.warn("[bandolier:deploy] agent image lookup failed", {
+            console.warn("[bandolier:deploy] repo config lookup failed", {
               error: err instanceof Error ? err.message : String(err),
             });
           }
@@ -1615,27 +1617,6 @@ export const agentsRouter = createTRPCRouter({
           if (agentImage) {
             imagePullSecret =
               getRegistryPullSecret(agentImage, githubToken) ?? undefined;
-          }
-          try {
-            repoSystemPrompt =
-              (await getRepoSystemPrompt(ctx.db, input.repoFullName)) ??
-              undefined;
-          } catch (err) {
-            console.warn(
-              "[bandolier:deploy] repo system prompt lookup failed",
-              {
-                error: err instanceof Error ? err.message : String(err),
-              },
-            );
-          }
-          try {
-            networkPolicy =
-              (await getRepoNetworkPolicy(ctx.db, input.repoFullName)) ??
-              undefined;
-          } catch (err) {
-            console.warn("[bandolier:deploy] network policy lookup failed", {
-              error: err instanceof Error ? err.message : String(err),
-            });
           }
         }
 

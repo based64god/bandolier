@@ -131,6 +131,7 @@ describe("getRepoWebhookConfig", () => {
         defaultWebhookModel: "claude-sonnet-4-5",
         defaultWebhookEffort: "high",
         systemPrompt: "be terse",
+        resumeOnCiFailure: true,
         allowPrivateEgress: true,
         allowAllPortsEgress: false,
         networkPolicyYaml: "kind: NetworkPolicy",
@@ -143,6 +144,7 @@ describe("getRepoWebhookConfig", () => {
       defaultWebhookModel: "claude-sonnet-4-5",
       defaultWebhookEffort: "high",
       systemPrompt: "be terse",
+      resumeOnCiFailure: true,
       networkPolicy: {
         allowPrivateEgress: true,
         allowAllPortsEgress: false,
@@ -160,6 +162,7 @@ describe("getRepoWebhookConfig", () => {
         defaultWebhookModel: null,
         defaultWebhookEffort: null,
         systemPrompt: null,
+        resumeOnCiFailure: false,
         allowPrivateEgress: false,
         allowAllPortsEgress: false,
         networkPolicyYaml: null,
@@ -172,6 +175,7 @@ describe("getRepoWebhookConfig", () => {
       defaultWebhookModel: null,
       defaultWebhookEffort: null,
       systemPrompt: null,
+      resumeOnCiFailure: false,
       networkPolicy: {
         allowPrivateEgress: false,
         allowAllPortsEgress: false,

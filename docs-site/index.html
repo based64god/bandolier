@@ -343,10 +343,13 @@ pnpm db:push            # creates the tables (no migration files are used)</code
               <code>https://&lt;your-host&gt;/api/webhooks/github</code>, a webhook
               secret, and these repository permissions: <strong>Issues</strong>
               (read &amp; write), <strong>Pull requests</strong> (read &amp;
-              write), <strong>Contents</strong> (read), and
+              write), <strong>Contents</strong> (read),
+              <strong>Actions</strong> (read), and
               <strong>Metadata</strong> (read). Subscribe to the
-              <strong>Issues</strong> and <strong>Issue comment</strong> events.
-              Generate a private key.
+              <strong>Issues</strong>, <strong>Issue comment</strong>, and
+              <strong>Workflow run</strong> events (the last powers auto-resuming
+              a run when a CI pipeline fails on the pull request it produced, for
+              repos that opt in). Generate a private key.
             </li>
             <li>
               Set <code>GITHUB_APP_ID</code>,

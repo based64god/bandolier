@@ -29,6 +29,11 @@ export interface RepoWebhookConfig {
    * use on the deploy/webhook paths.
    */
   systemPrompt: string | null;
+  /**
+   * Whether a failing CI pipeline on a PR should auto-resume the run that
+   * produced its branch (the webhook's `workflow_run` handler). Off by default.
+   */
+  resumeOnCiFailure: boolean;
   /** Per-repo network-policy egress toggles. See `RepoNetworkPolicy`. */
   networkPolicy: RepoNetworkPolicy;
 }
@@ -120,6 +125,7 @@ export async function getRepoWebhookConfig(
       defaultWebhookModel: repoWebhookConfig.defaultWebhookModel,
       defaultWebhookEffort: repoWebhookConfig.defaultWebhookEffort,
       systemPrompt: repoWebhookConfig.systemPrompt,
+      resumeOnCiFailure: repoWebhookConfig.resumeOnCiFailure,
       allowPrivateEgress: repoWebhookConfig.allowPrivateEgress,
       allowAllPortsEgress: repoWebhookConfig.allowAllPortsEgress,
       networkPolicyYaml: repoWebhookConfig.networkPolicyYaml,
@@ -135,6 +141,7 @@ export async function getRepoWebhookConfig(
     defaultWebhookModel: row.defaultWebhookModel ?? null,
     defaultWebhookEffort: row.defaultWebhookEffort ?? null,
     systemPrompt: row.systemPrompt ?? null,
+    resumeOnCiFailure: row.resumeOnCiFailure,
     networkPolicy: {
       allowPrivateEgress: row.allowPrivateEgress,
       allowAllPortsEgress: row.allowAllPortsEgress,

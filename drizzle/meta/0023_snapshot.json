@@ -1,6 +1,6 @@
 {
-  "id": "051d1dde-ed1d-4514-8fb0-52c23cdbdb1f",
-  "prevId": "99d31026-e087-4d5c-9fad-3f02282bc3ab",
+  "id": "9f7fc6dc-9774-4b19-ae4e-f5b3a34b8fd5",
+  "prevId": "051d1dde-ed1d-4514-8fb0-52c23cdbdb1f",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -662,6 +662,13 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "allow_resume": {
+          "name": "allow_resume",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         },
         "agent_image": {
           "name": "agent_image",

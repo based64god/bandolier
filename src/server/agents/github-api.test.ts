@@ -71,16 +71,23 @@ describe("getRepoAccess", () => {
     return fetchMock;
   }
 
-  it("reports accessible + admin from a single repo probe", async () => {
+  it("reports accessible + admin and repo metadata from a single probe", async () => {
     const fetchMock = stubFetch({
       ok: true,
       status: 200,
       statusText: "OK",
-      json: () => Promise.resolve({ permissions: { admin: true } }),
+      json: () =>
+        Promise.resolve({
+          permissions: { admin: true },
+          clone_url: "https://github.com/o/r.git",
+          default_branch: "main",
+        }),
     });
     expect(await getRepoAccess("tok", "o/r")).toEqual({
       accessible: true,
       isAdmin: true,
+      cloneUrl: "https://github.com/o/r.git",
+      defaultBranch: "main",
     });
     expect(fetchMock.mock.calls[0]![0]).toBe(
       "https://api.github.com/repos/o/r",
@@ -92,11 +99,18 @@ describe("getRepoAccess", () => {
       ok: true,
       status: 200,
       statusText: "OK",
-      json: () => Promise.resolve({ permissions: { admin: 1 } }),
+      json: () =>
+        Promise.resolve({
+          permissions: { admin: 1 },
+          clone_url: "https://github.com/o/r.git",
+          default_branch: "main",
+        }),
     });
     expect(await getRepoAccess("tok", "o/r")).toEqual({
       accessible: true,
       isAdmin: false,
+      cloneUrl: "https://github.com/o/r.git",
+      defaultBranch: "main",
     });
   });
 

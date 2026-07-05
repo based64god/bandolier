@@ -169,6 +169,13 @@
       "when": 1783233741851,
       "tag": "0023_grey_ink",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1783236436506,
+      "tag": "0024_wild_trish_tilby",
+      "breakpoints": true
     }
   ]
 }

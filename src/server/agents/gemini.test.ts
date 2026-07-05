@@ -226,7 +226,7 @@ describe("validateGeminiCredentials", () => {
     vi.stubGlobal("fetch", fetchMock);
     const r = await validateGeminiCredentials("not json");
     expect(r.valid).toBe(false);
-    expect(r.error).toMatch(/JSON/);
+    if (!r.valid) expect(r.error).toMatch(/JSON/);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -254,7 +254,7 @@ describe("validateGeminiCredentials", () => {
     );
     const r = await validateGeminiCredentials(JSON.stringify(signingAccount));
     expect(r.valid).toBe(false);
-    expect(r.error).toContain("Token exchange failed (403)");
+    if (!r.valid) expect(r.error).toContain("Token exchange failed (403)");
   });
 
   it("uses a generic message for non-Error failures", async () => {

@@ -1,9 +1,12 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
+import { TRPCError } from "@trpc/server";
+
 import {
   getRepoCompute,
   getUserCompute,
   mergeCompute,
+  parseComputeInput,
   resolveCompute,
 } from "~/server/agents/compute";
 import { type db as Database } from "~/server/db";
@@ -11,11 +14,12 @@ import { repoWebhookConfig, userCompute } from "~/server/db/schema";
 
 // Both loaders run a single select().from().where().limit() chain; a stub that
 // keys the resolved rows on the table passed to from() drives every branch
-// without real drizzle/pg.
+// without real drizzle/pg. The repo compute default is read off the full
+// repo-config row (loadRepoConfig), hence the computeCpu/computeMemory columns.
 let userRows: { cpu: string | null; memory: string | null }[] = [];
 let repoRows: {
-  cpu: string | null;
-  memory: string | null;
+  computeCpu: string | null;
+  computeMemory: string | null;
   preferRepoCredentials: boolean;
 }[] = [];
 const db = {
@@ -46,7 +50,9 @@ describe("getUserCompute / getRepoCompute", () => {
     await expect(getRepoCompute(db, "o/r")).resolves.toBeNull();
 
     userRows = [{ cpu: "4", memory: null }];
-    repoRows = [{ cpu: null, memory: "8Gi", preferRepoCredentials: true }];
+    repoRows = [
+      { computeCpu: null, computeMemory: "8Gi", preferRepoCredentials: true },
+    ];
     await expect(getUserCompute(db, "u1")).resolves.toEqual({
       cpu: "4",
       memory: null,
@@ -77,7 +83,9 @@ describe("resolveCompute", () => {
 
   it("prefers the user's default over the repo's by default", async () => {
     userRows = [{ cpu: "4", memory: "8Gi" }];
-    repoRows = [{ cpu: "2", memory: "2Gi", preferRepoCredentials: false }];
+    repoRows = [
+      { computeCpu: "2", computeMemory: "2Gi", preferRepoCredentials: false },
+    ];
     await expect(resolveCompute(db, "u1", "o/r")).resolves.toEqual({
       cpu: "4",
       memory: "8Gi",
@@ -86,7 +94,9 @@ describe("resolveCompute", () => {
 
   it("prefers the repo's default when its prefer flag is set", async () => {
     userRows = [{ cpu: "4", memory: "8Gi" }];
-    repoRows = [{ cpu: "2", memory: "2Gi", preferRepoCredentials: true }];
+    repoRows = [
+      { computeCpu: "2", computeMemory: "2Gi", preferRepoCredentials: true },
+    ];
     await expect(resolveCompute(db, "u1", "o/r")).resolves.toEqual({
       cpu: "2",
       memory: "2Gi",
@@ -95,7 +105,9 @@ describe("resolveCompute", () => {
 
   it("resolves per field: a source missing one field falls through for just that field", async () => {
     userRows = [{ cpu: "4", memory: "8Gi" }];
-    repoRows = [{ cpu: null, memory: "16Gi", preferRepoCredentials: true }];
+    repoRows = [
+      { computeCpu: null, computeMemory: "16Gi", preferRepoCredentials: true },
+    ];
     await expect(resolveCompute(db, "u1", "o/r")).resolves.toEqual({
       cpu: "4",
       memory: "16Gi",
@@ -104,7 +116,9 @@ describe("resolveCompute", () => {
 
   it("only considers the user's default for repo-less runs", async () => {
     userRows = [{ cpu: "4", memory: null }];
-    repoRows = [{ cpu: "2", memory: "2Gi", preferRepoCredentials: true }];
+    repoRows = [
+      { computeCpu: "2", computeMemory: "2Gi", preferRepoCredentials: true },
+    ];
     await expect(resolveCompute(db, "u1")).resolves.toEqual({
       cpu: "4",
       memory: null,
@@ -129,5 +143,39 @@ describe("mergeCompute", () => {
     expect(
       mergeCompute({ cpu: "4", memory: "8Gi" }, { memory: "16Gi" }),
     ).toEqual({ cpu: "4", memory: "16Gi" });
+  });
+});
+
+describe("parseComputeInput", () => {
+  it("returns null for blank / whitespace-only / omitted fields", () => {
+    expect(parseComputeInput()).toEqual({ cpu: null, memory: null });
+    expect(parseComputeInput("", "  ")).toEqual({ cpu: null, memory: null });
+  });
+
+  it("returns normalized quantities for valid input", () => {
+    expect(parseComputeInput(" 500m ", "4")).toEqual({
+      cpu: "500m",
+      memory: "4Gi",
+    });
+  });
+
+  it("throws BAD_REQUEST on an invalid CPU quantity", () => {
+    try {
+      parseComputeInput("banana", "4Gi");
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(TRPCError);
+      expect((err as TRPCError).code).toBe("BAD_REQUEST");
+    }
+  });
+
+  it("throws BAD_REQUEST on an invalid memory quantity", () => {
+    try {
+      parseComputeInput("2", "64Mi");
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(TRPCError);
+      expect((err as TRPCError).code).toBe("BAD_REQUEST");
+    }
   });
 });

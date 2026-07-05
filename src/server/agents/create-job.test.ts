@@ -215,10 +215,13 @@ vi.mock("~/server/agents/network-policy", () => ({
 
 const {
   createAgentJob,
+  resolveProvider,
+  buildEnvVars,
   ensureNamespace,
   ensureServiceAccount,
   podResources,
   DEFAULT_HARNESS_IMAGE,
+  DEFAULT_MAX_TURNS,
   JOB_TTL_SECONDS,
 } = await import("~/server/agents/create-job");
 
@@ -812,6 +815,163 @@ describe("createAgentJob", () => {
         expect.objectContaining({ namespace: "custom-ns" }),
       );
     });
+  });
+});
+
+// ── resolveProvider ───────────────────────────────────────────────────────────
+
+// The provider descriptor is the single source of truth for the per-provider
+// credential mapping: env refs and secret payload both derive from it, so these
+// unit tests pin the mapping directly without going through the whole monolith.
+
+describe("resolveProvider", () => {
+  const aws = {
+    accessKeyId: "AKIA1",
+    secretAccessKey: "aws-secret",
+    sessionToken: "sess-tok",
+    region: "us-east-1",
+  };
+
+  it("throws when the spec carries no model credentials", () => {
+    expect(() =>
+      resolveProvider(baseSpec({ anthropicApiKey: undefined })),
+    ).toThrow(/No model credentials available/);
+  });
+
+  it("prefers AWS Bedrock over Anthropic", () => {
+    const p = resolveProvider(baseSpec({ awsCredentials: aws }));
+    expect(p.type).toBe("bedrock");
+    expect(p.isClaude).toBe(true);
+    expect(p.plainEnv).toContainEqual({
+      name: "CLAUDE_CODE_USE_BEDROCK",
+      value: "1",
+    });
+    expect(p.plainEnv).toContainEqual({
+      name: "AWS_REGION",
+      value: "us-east-1",
+    });
+    expect(p.secretRefs).toEqual([
+      { key: "AWS_ACCESS_KEY_ID" },
+      { key: "AWS_SECRET_ACCESS_KEY" },
+      { key: "AWS_SESSION_TOKEN", optional: true },
+    ]);
+    expect(p.secretData).toEqual({
+      AWS_ACCESS_KEY_ID: "AKIA1",
+      AWS_SECRET_ACCESS_KEY: "aws-secret",
+      AWS_SESSION_TOKEN: "sess-tok",
+    });
+  });
+
+  it("omits the AWS session token from the secret for permanent credentials", () => {
+    const p = resolveProvider(
+      baseSpec({ awsCredentials: { ...aws, sessionToken: null } }),
+    );
+    expect(p.secretData).not.toHaveProperty("AWS_SESSION_TOKEN");
+    // The env ref stays present-but-optional so the manifest shape is stable.
+    expect(p.secretRefs).toContainEqual({
+      key: "AWS_SESSION_TOKEN",
+      optional: true,
+    });
+  });
+
+  it("maps an Anthropic API key to a single secret key", () => {
+    const p = resolveProvider(baseSpec());
+    expect(p.type).toBe("anthropic");
+    expect(p.isClaude).toBe(true);
+    expect(p.secretRefs).toEqual([{ key: "ANTHROPIC_API_KEY" }]);
+    expect(p.secretData).toEqual({ ANTHROPIC_API_KEY: "sk-a" });
+  });
+
+  it("maps a subscription OAuth token when no API key is set", () => {
+    const p = resolveProvider(
+      baseSpec({ anthropicApiKey: undefined, anthropicOauthToken: "oat-1" }),
+    );
+    expect(p.secretRefs).toEqual([{ key: "CLAUDE_CODE_OAUTH_TOKEN" }]);
+    expect(p.secretData).toEqual({ CLAUDE_CODE_OAUTH_TOKEN: "oat-1" });
+  });
+
+  it("prefers the Anthropic API key over the OAuth token", () => {
+    const p = resolveProvider(baseSpec({ anthropicOauthToken: "oat-1" }));
+    expect(p.secretData).toEqual({ ANTHROPIC_API_KEY: "sk-a" });
+  });
+
+  it("maps OpenAI and Codex credentials, key first", () => {
+    expect(
+      resolveProvider(
+        baseSpec({ anthropicApiKey: undefined, openaiApiKey: "sk-o" }),
+      ).secretData,
+    ).toEqual({ OPENAI_API_KEY: "sk-o" });
+    const codex = resolveProvider(
+      baseSpec({ anthropicApiKey: undefined, codexAuthJson: '{"tokens":{}}' }),
+    );
+    expect(codex.type).toBe("openai");
+    expect(codex.isClaude).toBe(false);
+    expect(codex.secretData).toEqual({ CODEX_AUTH_JSON: '{"tokens":{}}' });
+  });
+
+  it("maps a Gemini key to GOOGLE_PROJECT_CREDENTIALS", () => {
+    const p = resolveProvider(
+      baseSpec({ anthropicApiKey: undefined, geminiApiKey: '{"project":1}' }),
+    );
+    expect(p.type).toBe("gemini");
+    expect(p.isClaude).toBe(false);
+    expect(p.secretRefs).toEqual([{ key: "GOOGLE_PROJECT_CREDENTIALS" }]);
+    expect(p.secretData).toEqual({
+      GOOGLE_PROJECT_CREDENTIALS: '{"project":1}',
+    });
+  });
+});
+
+// ── buildEnvVars ──────────────────────────────────────────────────────────────
+
+describe("buildEnvVars", () => {
+  it("derives every provider env ref from the descriptor's secretRefs", () => {
+    const provider = resolveProvider(baseSpec());
+    const env = buildEnvVars(baseSpec(), "job-1", provider);
+    expect(env).toContainEqual({
+      name: "ANTHROPIC_API_KEY",
+      valueFrom: {
+        secretKeyRef: {
+          name: "job-1-creds",
+          key: "ANTHROPIC_API_KEY",
+          optional: false,
+        },
+      },
+    });
+    // GITHUB_TOKEN is always an optional ref so tokenless runs share the shape.
+    expect(env).toContainEqual({
+      name: "GITHUB_TOKEN",
+      valueFrom: {
+        secretKeyRef: {
+          name: "job-1-creds",
+          key: "GITHUB_TOKEN",
+          optional: true,
+        },
+      },
+    });
+  });
+
+  it("forwards effort only for a Claude provider", () => {
+    const claude = buildEnvVars(
+      baseSpec({ effort: "high" }),
+      "j",
+      resolveProvider(baseSpec()),
+    );
+    expect(claude.find((e) => e.name === "CLAUDE_EFFORT")?.value).toBe("high");
+    const openaiSpec = baseSpec({
+      anthropicApiKey: undefined,
+      openaiApiKey: "sk-o",
+      effort: "high",
+    });
+    const openai = buildEnvVars(openaiSpec, "j", resolveProvider(openaiSpec));
+    expect(openai.map((e) => e.name)).not.toContain("CLAUDE_EFFORT");
+  });
+
+  it("defaults MAX_TURNS to unlimited", () => {
+    const env = buildEnvVars(baseSpec(), "j", resolveProvider(baseSpec()));
+    expect(env.find((e) => e.name === "MAX_TURNS")?.value).toBe(
+      String(DEFAULT_MAX_TURNS),
+    );
   });
 });
 

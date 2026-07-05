@@ -11,8 +11,9 @@ import type { ModelProvider } from "~/server/agents/models";
 
 /**
  * The effort levels the `claude` CLI accepts for `--effort`, lowest to highest.
- * Kept in sync with the harness's allow-list (agent-harness/cmd/harness/main.go)
- * and the CLI itself.
+ * This is a wire value shared with the harness's allow-list, so it's pinned in
+ * wire-contract.json and asserted by both test suites — see
+ * src/lib/wire-contract.test.ts. Also matches the CLI itself.
  */
 export const EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"] as const;
 

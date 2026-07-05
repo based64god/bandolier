@@ -1,3 +1,5 @@
+import type * as k8s from "@kubernetes/client-node";
+
 import type { AwsCredentials } from "~/server/agents/aws";
 import { env } from "~/env";
 import {
@@ -148,7 +150,13 @@ export async function ensureServiceAccount(
 
 // ── Job creation ─────────────────────────────────────────────────────────────
 
-type EnvVar = { name: string; value?: string; valueFrom?: object };
+type EnvVar = {
+  name: string;
+  value?: string;
+  valueFrom?: {
+    secretKeyRef: { name: string; key: string; optional: boolean };
+  };
+};
 
 export interface JobSpec {
   task: string;
@@ -371,15 +379,43 @@ function pdbName(jobName: string): string {
   return `${jobName}-pdb`;
 }
 
-export async function createAgentJob(spec: JobSpec): Promise<string> {
-  const ns = spec.namespace ?? DEFAULT_NAMESPACE;
-  const jobName = `bandolier-agent-${Date.now()}`;
+/**
+ * A resolved model provider: its type/model plus the credential wiring for the
+ * run, derived from the spec in one place. `secretRefs` and `secretData` are the
+ * single source of truth for the per-provider credential mapping — the pod's env
+ * refs and the secret payload both come from this descriptor, so they can't drift
+ * out of sync the way the two hand-kept copies used to.
+ */
+export interface ProviderDescriptor {
+  type: "bedrock" | "anthropic" | "openai" | "gemini";
+  model: string;
+  /** Whether this is a Claude provider (Bedrock / Anthropic) — gates --effort. */
+  isClaude: boolean;
+  /** Non-secret provider env vars (e.g. CLAUDE_CODE_USE_BEDROCK, AWS_REGION). */
+  plainEnv: EnvVar[];
+  /**
+   * Credential env vars sourced from the per-job secret. `optional` mirrors the
+   * secret ref's `optional` flag (an absent key doesn't fail the pod).
+   */
+  secretRefs: { key: string; optional?: boolean }[];
+  /** Credential values that land in the per-job secret's stringData. */
+  secretData: Record<string, string>;
+}
 
-  // Route by the single provider precedence the registry defines (Bedrock >
-  // Anthropic > OpenAI > Gemini), so this path can't drift from the resolver.
-  // The spec spells the Bedrock field `awsCredentials`; adapt it to the
-  // registry's `aws`. An API key and a subscription credential are two routes to
-  // the same provider; a spec carries at most one of each pair.
+/**
+ * Picks the run's provider from the spec's credentials and derives its full
+ * credential wiring (env refs + secret payload) once. Precedence comes from
+ * the provider registry in resolve-credentials.ts (Bedrock beats Anthropic,
+ * which beats OpenAI, which beats Gemini; within a provider an API key beats
+ * a subscription credential). Throws when the spec carries no model
+ * credentials at all — there is no server fallback.
+ */
+export function resolveProvider(spec: JobSpec): ProviderDescriptor {
+  const model = spec.model;
+
+  // Route by the single provider precedence the registry defines, so this
+  // path can't drift from the resolver. The spec spells the Bedrock field
+  // `awsCredentials`; adapt it to the registry's `aws`.
   const provider = providerForCredentials({
     aws: spec.awsCredentials ?? null,
     anthropicApiKey: spec.anthropicApiKey ?? null,
@@ -388,69 +424,107 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
     codexAuthJson: spec.codexAuthJson ?? null,
     geminiApiKey: spec.geminiApiKey ?? null,
   });
-  const useUserAws = provider === "bedrock";
-  const useUserAnthropic = provider === "anthropic";
-  const useUserOpenai = provider === "openai";
-  const useUserGemini = provider === "gemini";
-  const useUserToken = !!spec.githubToken;
+
+  if (provider === "bedrock") {
+    const aws = spec.awsCredentials!;
+    const secretData: Record<string, string> = {
+      AWS_ACCESS_KEY_ID: aws.accessKeyId,
+      AWS_SECRET_ACCESS_KEY: aws.secretAccessKey,
+    };
+    // Only include a session token for temporary credentials; an empty value
+    // would break SigV4 for permanent IAM keys.
+    if (aws.sessionToken) secretData.AWS_SESSION_TOKEN = aws.sessionToken;
+    return {
+      type: "bedrock",
+      model,
+      isClaude: true,
+      plainEnv: [
+        { name: "CLAUDE_CODE_USE_BEDROCK", value: "1" },
+        { name: "AWS_REGION", value: aws.region },
+      ],
+      // The session token ref is always present but optional, so permanent and
+      // temporary credentials produce the same pod manifest shape.
+      secretRefs: [
+        { key: "AWS_ACCESS_KEY_ID" },
+        { key: "AWS_SECRET_ACCESS_KEY" },
+        { key: "AWS_SESSION_TOKEN", optional: true },
+      ],
+      secretData,
+    };
+  }
+
+  if (provider === "anthropic") {
+    // An API key and a subscription OAuth token are two routes to the same
+    // provider; the key takes precedence, so exactly one lands in the secret
+    // (matching the env var the pod references).
+    const [key, value] = spec.anthropicApiKey
+      ? (["ANTHROPIC_API_KEY", spec.anthropicApiKey] as const)
+      : (["CLAUDE_CODE_OAUTH_TOKEN", spec.anthropicOauthToken!] as const);
+    return {
+      type: "anthropic",
+      model,
+      isClaude: true,
+      plainEnv: [],
+      secretRefs: [{ key }],
+      secretData: { [key]: value },
+    };
+  }
+
+  if (provider === "openai") {
+    // The harness writes CODEX_AUTH_JSON to ~/.codex/auth.json for
+    // ChatGPT-subscription auth; the API key takes precedence over it.
+    const [key, value] = spec.openaiApiKey
+      ? (["OPENAI_API_KEY", spec.openaiApiKey] as const)
+      : (["CODEX_AUTH_JSON", spec.codexAuthJson!] as const);
+    return {
+      type: "openai",
+      model,
+      isClaude: false,
+      plainEnv: [],
+      secretRefs: [{ key }],
+      secretData: { [key]: value },
+    };
+  }
+
+  if (provider === "gemini") {
+    // agy (Antigravity CLI) authenticates via Application Default Credentials;
+    // the harness writes this project credentials JSON to
+    // ~/.gemini/credentials.json.
+    return {
+      type: "gemini",
+      model,
+      isClaude: false,
+      plainEnv: [],
+      secretRefs: [{ key: "GOOGLE_PROJECT_CREDENTIALS" }],
+      secretData: { GOOGLE_PROJECT_CREDENTIALS: spec.geminiApiKey! },
+    };
+  }
 
   // Only user-provided credentials are ever used — there is no server fallback.
-  if (!provider) {
-    throw new Error(
-      "No model credentials available. Configure AWS, Anthropic, OpenAI, or Gemini credentials in account settings.",
-    );
-  }
+  throw new Error(
+    "No model credentials available. Configure AWS, Anthropic, OpenAI, or Gemini credentials in account settings.",
+  );
+}
 
-  const kc = spec.kubeconfig;
-  if (!kc) {
-    throw new Error("No kubeconfig available. Add one in account settings.");
-  }
-
-  // Bootstrap shared (non-secret) resources.
-  const [nsCreated, saCreated] = await Promise.all([
-    ensureNamespace(ns, kc, spec.networkPolicy),
-    ensureServiceAccount(ns, "bandolier-agent", kc),
-  ]);
-  console.log("[bandolier:deploy] resources", {
-    namespace: nsCreated ? "created" : "exists",
-    serviceAccount: saCreated ? "created" : "exists",
-  });
-
-  // The model id is chosen by the user from their provider's live model list.
-  console.log("[bandolier:deploy] provider", {
-    type: provider,
-    model: spec.model,
-  });
-
-  // All credentials come from the per-job secret created below.
+/**
+ * The pod's full env var list for a run: provider credentials (from the resolved
+ * descriptor), the task/repo/git context, the run's optional feature toggles, and
+ * the ingest/interactive callback URLs. `userRef` sources a value from the
+ * per-job secret; the GitHub token ref is always emitted (optional) so tokenless
+ * runs share the same manifest shape.
+ */
+export function buildEnvVars(
+  spec: JobSpec,
+  jobName: string,
+  provider: ProviderDescriptor,
+): EnvVar[] {
+  // All credentials come from the per-job secret created alongside the job.
   const userRef = (key: string, optional = false): EnvVar => ({
     name: key,
     valueFrom: {
       secretKeyRef: { name: userSecretName(jobName), key, optional },
     },
   });
-
-  const providerEnvVars: EnvVar[] = useUserAws
-    ? [
-        { name: "CLAUDE_CODE_USE_BEDROCK", value: "1" },
-        { name: "AWS_REGION", value: spec.awsCredentials!.region },
-        userRef("AWS_ACCESS_KEY_ID"),
-        userRef("AWS_SECRET_ACCESS_KEY"),
-        userRef("AWS_SESSION_TOKEN", true),
-      ]
-    : useUserAnthropic
-      ? [
-          spec.anthropicApiKey
-            ? userRef("ANTHROPIC_API_KEY")
-            : userRef("CLAUDE_CODE_OAUTH_TOKEN"),
-        ]
-      : useUserOpenai
-        ? [
-            spec.openaiApiKey
-              ? userRef("OPENAI_API_KEY")
-              : userRef("CODEX_AUTH_JSON"),
-          ]
-        : [userRef("GOOGLE_PROJECT_CREDENTIALS")];
 
   const envVars: EnvVar[] = [
     { name: "CLAUDE_TASK", value: spec.task },
@@ -463,7 +537,8 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
       name: "GIT_EMAIL",
       value: spec.gitEmail ?? "bandolier-agent@bandolier.local",
     },
-    ...providerEnvVars,
+    ...provider.plainEnv,
+    ...provider.secretRefs.map((r) => userRef(r.key, r.optional)),
     userRef("GITHUB_TOKEN", true),
   ];
 
@@ -475,7 +550,7 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
   // Reasoning effort is Claude-only (the `claude` CLI's --effort). Only forward it
   // on a Claude provider run; the Codex/Antigravity CLIs don't take it. The
   // harness validates the value and ignores an unknown one.
-  if (spec.effort && (useUserAws || useUserAnthropic)) {
+  if (spec.effort && provider.isClaude) {
     envVars.push({ name: "CLAUDE_EFFORT", value: spec.effort });
   }
   if (spec.prWriterModel) {
@@ -556,6 +631,30 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
     );
   }
 
+  return envVars;
+}
+
+/** Owner reference tying a dependent resource's lifecycle to the given Job. */
+type JobOwnerRef = {
+  apiVersion: string;
+  kind: string;
+  name: string;
+  uid: string;
+  blockOwnerDeletion: boolean;
+};
+
+/**
+ * The Job manifest for a run: metadata labels/annotations (mirrored onto the pod
+ * template, which the dashboard reads), the locked-down pod spec (root user, no
+ * retries, isolated workspace), and the resolved env vars. Pure — it constructs
+ * the body but performs no cluster calls.
+ */
+export function buildJobManifest(
+  spec: JobSpec,
+  jobName: string,
+  ns: string,
+  envVars: EnvVar[],
+): k8s.V1Job {
   // Annotations carried on both the Job and the pod (the dashboard reads pods).
   // The repo is an annotation (it contains "/", invalid in a label) and is used
   // by the overview to show which repository an agent belongs to.
@@ -587,76 +686,189 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
     ? { "bandolier.io/interactive": "true" }
     : {};
 
-  const job = await getBatchV1Api(kc).createNamespacedJob({
-    namespace: ns,
-    body: {
-      apiVersion: "batch/v1",
-      kind: "Job",
-      metadata: {
-        name: jobName,
-        namespace: ns,
-        labels: {
-          app: "bandolier-agent",
-          "app.kubernetes.io/managed-by": "bandolier",
-          [SPAWNED_BY_LABEL]: spawnedBy,
-          ...interactiveLabels,
-        },
-        annotations,
+  return {
+    apiVersion: "batch/v1",
+    kind: "Job",
+    metadata: {
+      name: jobName,
+      namespace: ns,
+      labels: {
+        app: "bandolier-agent",
+        "app.kubernetes.io/managed-by": "bandolier",
+        [SPAWNED_BY_LABEL]: spawnedBy,
+        ...interactiveLabels,
       },
-      spec: {
-        ttlSecondsAfterFinished: JOB_TTL_SECONDS,
-        backoffLimit: 0,
-        template: {
-          metadata: {
-            labels: {
-              app: "bandolier-agent",
-              "app.kubernetes.io/managed-by": "bandolier",
-              "bandolier.io/job": jobName,
-              [SPAWNED_BY_LABEL]: spawnedBy,
-              ...interactiveLabels,
-              "bandolier.io/source": spec.issueNumber
-                ? "github-issue"
-                : "dashboard",
-            },
-            annotations,
+      annotations,
+    },
+    spec: {
+      ttlSecondsAfterFinished: JOB_TTL_SECONDS,
+      backoffLimit: 0,
+      template: {
+        metadata: {
+          labels: {
+            app: "bandolier-agent",
+            "app.kubernetes.io/managed-by": "bandolier",
+            "bandolier.io/job": jobName,
+            [SPAWNED_BY_LABEL]: spawnedBy,
+            ...interactiveLabels,
+            "bandolier.io/source": spec.issueNumber
+              ? "github-issue"
+              : "dashboard",
           },
-          spec: {
-            serviceAccountName: "bandolier-agent",
-            restartPolicy: "Never",
-            // Pull a private custom image via the per-job dockerconfigjson secret
-            // created below (e.g. a private ghcr.io package authenticated with the
-            // GitHub App installation token). Omitted entirely for public images.
-            ...(spec.imagePullSecret && {
-              imagePullSecrets: [{ name: pullSecretName(jobName) }],
-            }),
-            // Run as root: the harness image is built around HOME=/root with the
-            // agent CLIs in /root/.local/bin (see agent-harness/Dockerfile), so a
-            // non-root uid can't read its tools or write $HOME (e.g. ~/.gemini).
-            securityContext: {
-              runAsUser: 0,
-              runAsGroup: 0,
-              fsGroup: 0,
-            },
-            containers: [
-              {
-                name: "harness",
-                image: spec.agentImage ?? DEFAULT_HARNESS_IMAGE,
-                imagePullPolicy: "Always",
-                env: envVars,
-                resources: podResources(spec.compute),
-                volumeMounts: [{ name: "workspace", mountPath: "/workspace" }],
-              },
-            ],
-            volumes: [{ name: "workspace", emptyDir: {} }],
+          annotations,
+        },
+        spec: {
+          serviceAccountName: "bandolier-agent",
+          restartPolicy: "Never",
+          // Pull a private custom image via the per-job dockerconfigjson secret
+          // created below (e.g. a private ghcr.io package authenticated with the
+          // GitHub App installation token). Omitted entirely for public images.
+          ...(spec.imagePullSecret && {
+            imagePullSecrets: [{ name: pullSecretName(jobName) }],
+          }),
+          // Run as root: the harness image is built around HOME=/root with the
+          // agent CLIs in /root/.local/bin (see agent-harness/Dockerfile), so a
+          // non-root uid can't read its tools or write $HOME (e.g. ~/.gemini).
+          securityContext: {
+            runAsUser: 0,
+            runAsGroup: 0,
+            fsGroup: 0,
           },
+          containers: [
+            {
+              name: "harness",
+              image: spec.agentImage ?? DEFAULT_HARNESS_IMAGE,
+              imagePullPolicy: "Always",
+              env: envVars,
+              resources: podResources(spec.compute),
+              volumeMounts: [{ name: "workspace", mountPath: "/workspace" }],
+            },
+          ],
+          volumes: [{ name: "workspace", emptyDir: {} }],
         },
       },
     },
+  };
+}
+
+/**
+ * Creates the per-job secrets owned by the Job (so they're GC'd with it): the
+ * creds secret holding the resolved provider's credentials plus the GitHub token,
+ * and — for a private custom image — the dockerconfigjson pull secret the pod's
+ * imagePullSecrets reference.
+ */
+export async function createSecrets(
+  spec: JobSpec,
+  jobName: string,
+  ns: string,
+  provider: ProviderDescriptor,
+  jobOwnerRef: JobOwnerRef,
+): Promise<void> {
+  const kc = spec.kubeconfig;
+
+  // The provider descriptor is the single source of truth for which credential
+  // keys land in the secret; the pod's env refs come from the same descriptor,
+  // so the two can't drift apart.
+  const stringData: Record<string, string> = { ...provider.secretData };
+  if (spec.githubToken) stringData.GITHUB_TOKEN = spec.githubToken;
+
+  await getCoreV1Api(kc).createNamespacedSecret({
+    namespace: ns,
+    body: {
+      metadata: {
+        name: userSecretName(jobName),
+        namespace: ns,
+        labels: { "app.kubernetes.io/managed-by": "bandolier" },
+        ownerReferences: [jobOwnerRef],
+      },
+      type: "Opaque",
+      stringData,
+    },
+  });
+
+  // When the custom image lives on a private registry, create the dockerconfigjson
+  // secret the pod's imagePullSecrets reference. Owned by the Job like the creds
+  // secret, so it's GC'd together with the run.
+  if (spec.imagePullSecret) {
+    await getCoreV1Api(kc).createNamespacedSecret({
+      namespace: ns,
+      body: {
+        metadata: {
+          name: pullSecretName(jobName),
+          namespace: ns,
+          labels: { "app.kubernetes.io/managed-by": "bandolier" },
+          ownerReferences: [jobOwnerRef],
+        },
+        type: "kubernetes.io/dockerconfigjson",
+        stringData: {
+          ".dockerconfigjson": spec.imagePullSecret.dockerConfigJson,
+        },
+      },
+    });
+  }
+}
+
+/**
+ * Records the run so it can be listed/inspected after the Job's TTL deletes the
+ * pod. Inserted for every run, not just when S3 is configured: the harness
+ * reports the run's structured output (PR/issue URL) into this row via the
+ * ingest callback, and that output must outlive the pod logs regardless of
+ * whether transcript artifacts are also being stored. The transcriptKey column
+ * stays null when there's no bucket to upload to.
+ */
+export async function recordRun(spec: JobSpec, jobName: string, ns: string) {
+  await db.insert(taskRun).values({
+    jobName,
+    namespace: ns,
+    displayName: spec.displayName,
+    createdBy: spec.createdBy ?? null,
+    // The canonical owner id (same value tagged on the pod via SPAWNED_BY_LABEL),
+    // so the run's transcript stays ownership-checkable after the pod is gone.
+    spawnedBy: spec.userId,
+    repoFullName: spec.repoFullName ?? null,
+    issueNumber: spec.issueNumber ?? null,
+    parentJobName: spec.parentJobName ?? null,
+    ciResumeSha: spec.ciResumeSha ?? null,
+  });
+}
+
+export async function createAgentJob(spec: JobSpec): Promise<string> {
+  const ns = spec.namespace ?? DEFAULT_NAMESPACE;
+  const jobName = `bandolier-agent-${Date.now()}`;
+
+  // Resolves the provider (and its credential wiring) or throws when the spec
+  // carries no model credentials — there is no server fallback.
+  const provider = resolveProvider(spec);
+
+  const kc = spec.kubeconfig;
+  if (!kc) {
+    throw new Error("No kubeconfig available. Add one in account settings.");
+  }
+
+  // Bootstrap shared (non-secret) resources.
+  const [nsCreated, saCreated] = await Promise.all([
+    ensureNamespace(ns, kc, spec.networkPolicy),
+    ensureServiceAccount(ns, "bandolier-agent", kc),
+  ]);
+  console.log("[bandolier:deploy] resources", {
+    namespace: nsCreated ? "created" : "exists",
+    serviceAccount: saCreated ? "created" : "exists",
+  });
+  console.log("[bandolier:deploy] provider", {
+    type: provider.type,
+    model: provider.model,
+  });
+
+  const envVars = buildEnvVars(spec, jobName, provider);
+
+  const job = await getBatchV1Api(kc).createNamespacedJob({
+    namespace: ns,
+    body: buildJobManifest(spec, jobName, ns, envVars),
   });
 
   // Owner reference tying a dependent resource's lifecycle to the Job, so
   // Kubernetes garbage-collects it when the Job is deleted (manually or via TTL).
-  const jobOwnerRef = {
+  const jobOwnerRef: JobOwnerRef = {
     apiVersion: "batch/v1",
     kind: "Job",
     name: jobName,
@@ -695,98 +907,17 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
     );
   }
 
-  // Store the acting user's credentials in a per-job secret owned by the Job, so
-  // they're garbage-collected when the Job is deleted (manually or via TTL).
-  const stringData: Record<string, string> = {};
-  if (useUserToken) stringData.GITHUB_TOKEN = spec.githubToken!;
-  // An API key and a subscription credential can both be configured; the key
-  // takes precedence, so exactly one lands in the secret (matching the env var
-  // the pod references).
-  if (useUserAnthropic && spec.anthropicApiKey)
-    stringData.ANTHROPIC_API_KEY = spec.anthropicApiKey;
-  else if (useUserAnthropic && spec.anthropicOauthToken)
-    stringData.CLAUDE_CODE_OAUTH_TOKEN = spec.anthropicOauthToken;
-  if (useUserOpenai && spec.openaiApiKey)
-    stringData.OPENAI_API_KEY = spec.openaiApiKey;
-  // The harness writes this to ~/.codex/auth.json for ChatGPT-subscription auth.
-  else if (useUserOpenai && spec.codexAuthJson)
-    stringData.CODEX_AUTH_JSON = spec.codexAuthJson;
-  // agy (Antigravity CLI) authenticates via Application Default Credentials; the
-  // harness writes this project credentials JSON to ~/.gemini/credentials.json.
-  if (useUserGemini) stringData.GOOGLE_PROJECT_CREDENTIALS = spec.geminiApiKey!;
-  if (useUserAws) {
-    stringData.AWS_ACCESS_KEY_ID = spec.awsCredentials!.accessKeyId;
-    stringData.AWS_SECRET_ACCESS_KEY = spec.awsCredentials!.secretAccessKey;
-    // Only include a session token for temporary credentials; an empty value
-    // would break SigV4 for permanent IAM keys.
-    if (spec.awsCredentials!.sessionToken) {
-      stringData.AWS_SESSION_TOKEN = spec.awsCredentials!.sessionToken;
-    }
-  }
+  // Store the acting user's credentials (and, for a private image, the pull
+  // secret) in per-job secrets owned by the Job, so they're GC'd with it.
+  await createSecrets(spec, jobName, ns, provider, jobOwnerRef);
 
-  await getCoreV1Api(kc).createNamespacedSecret({
-    namespace: ns,
-    body: {
-      metadata: {
-        name: userSecretName(jobName),
-        namespace: ns,
-        labels: { "app.kubernetes.io/managed-by": "bandolier" },
-        ownerReferences: [jobOwnerRef],
-      },
-      type: "Opaque",
-      stringData,
-    },
-  });
-
-  // When the custom image lives on a private registry, create the dockerconfigjson
-  // secret the pod's imagePullSecrets reference. Owned by the Job like the creds
-  // secret, so it's GC'd together with the run.
-  if (spec.imagePullSecret) {
-    await getCoreV1Api(kc).createNamespacedSecret({
-      namespace: ns,
-      body: {
-        metadata: {
-          name: pullSecretName(jobName),
-          namespace: ns,
-          labels: { "app.kubernetes.io/managed-by": "bandolier" },
-          ownerReferences: [jobOwnerRef],
-        },
-        type: "kubernetes.io/dockerconfigjson",
-        stringData: {
-          ".dockerconfigjson": spec.imagePullSecret.dockerConfigJson,
-        },
-      },
-    });
-  }
-
-  // Record the run so it can be listed/inspected after the Job's TTL deletes the
-  // pod. Inserted for every run, not just when S3 is configured: the harness
-  // reports the run's structured output (PR/issue URL) into this row via the
-  // ingest callback, and that output must outlive the pod logs regardless of
-  // whether transcript artifacts are also being stored. The transcriptKey column
-  // stays null when there's no bucket to upload to.
-  await db.insert(taskRun).values({
-    jobName,
-    namespace: ns,
-    displayName: spec.displayName,
-    createdBy: spec.createdBy ?? null,
-    // The canonical owner id (same value tagged on the pod via SPAWNED_BY_LABEL),
-    // so the run's transcript stays ownership-checkable after the pod is gone.
-    spawnedBy: spec.userId,
-    repoFullName: spec.repoFullName ?? null,
-    issueNumber: spec.issueNumber ?? null,
-    parentJobName: spec.parentJobName ?? null,
-    ciResumeSha: spec.ciResumeSha ?? null,
-  });
+  await recordRun(spec, jobName, ns);
 
   console.log("[bandolier:deploy] job created", {
     job: jobName,
     namespace: ns,
-    github: useUserToken,
-    aws: useUserAws,
-    anthropic: useUserAnthropic,
-    openai: useUserOpenai,
-    gemini: useUserGemini,
+    github: !!spec.githubToken,
+    provider: provider.type,
   });
   return jobName;
 }

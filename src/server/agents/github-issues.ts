@@ -1,3 +1,5 @@
+import { ghFetch, ghHeaders, TtlMap } from "./github-api";
+
 export interface GithubIssue {
   number: number;
   title: string;
@@ -15,14 +17,6 @@ interface RawIssue {
   pull_request?: unknown;
 }
 
-function ghHeaders(token: string) {
-  return {
-    Authorization: `Bearer ${token}`,
-    Accept: "application/vnd.github.v3+json",
-    "X-GitHub-Api-Version": "2022-11-28",
-  };
-}
-
 /** Lists open issues (excluding pull requests) for a repo. */
 export async function listOpenIssues(
   token: string,
@@ -33,10 +27,7 @@ export async function listOpenIssues(
   url.searchParams.set("per_page", "100");
   url.searchParams.set("sort", "updated");
 
-  const res = await fetch(url, { headers: ghHeaders(token) });
-  if (!res.ok) {
-    throw new Error(`GitHub API ${res.status}: ${res.statusText}`);
-  }
+  const res = await ghFetch(url, token);
   const raw = (await res.json()) as RawIssue[];
   return raw
     .filter((i) => !i.pull_request)
@@ -78,8 +69,11 @@ function parseGithubRef(url: string): GithubRef | null {
 
 // The dashboard polls every few seconds; cache item states briefly to keep the
 // GitHub API call count bounded. Merged PRs are terminal, so they never expire.
+// Bounded so a long-lived server polling many distinct PRs/issues can't grow the
+// map without limit.
 const STATE_CACHE_TTL_MS = 60_000;
-const stateCache = new Map<string, { state: GithubItemState; at: number }>();
+const STATE_CACHE_MAX = 5_000;
+const stateCache = new TtlMap<string, GithubItemState>(STATE_CACHE_MAX);
 
 interface RawPull {
   state: string;
@@ -107,13 +101,9 @@ export async function getGithubItemState(
   const ref = parseGithubRef(url);
   if (!ref) return null;
 
-  const cached = stateCache.get(url);
-  if (
-    cached &&
-    (cached.state === "merged" || Date.now() - cached.at < STATE_CACHE_TTL_MS)
-  ) {
-    return cached.state;
-  }
+  const now = Date.now();
+  const fresh = stateCache.get(url, now);
+  if (fresh) return fresh;
 
   try {
     const endpoint = ref.kind === "pull" ? "pulls" : "issues";
@@ -122,7 +112,7 @@ export async function getGithubItemState(
       { headers: ghHeaders(token) },
     );
     // On a failed lookup, keep showing the last known state if we have one.
-    if (!res.ok) return cached?.state ?? null;
+    if (!res.ok) return stateCache.peek(url)?.value ?? null;
 
     let state: GithubItemState;
     if (ref.kind === "pull") {
@@ -141,10 +131,12 @@ export async function getGithubItemState(
             : "closed"
           : "open";
     }
-    stateCache.set(url, { state, at: Date.now() });
+    // Merged is terminal — cache it forever so it's never refetched.
+    const expiresAt = state === "merged" ? Infinity : now + STATE_CACHE_TTL_MS;
+    stateCache.set(url, state, now, expiresAt);
     return state;
   } catch {
-    return cached?.state ?? null;
+    return stateCache.peek(url)?.value ?? null;
   }
 }
 
@@ -296,20 +288,7 @@ export async function postIssueComment(
   issueNumber: number,
   body: string,
 ): Promise<void> {
-  const res = await fetch(
-    `https://api.github.com/repos/${repoFullName}/issues/${issueNumber}/comments`,
-    {
-      method: "POST",
-      headers: {
-        ...ghHeaders(token),
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ body }),
-    },
-  );
-  if (!res.ok) {
-    throw new Error(`GitHub API ${res.status}: ${res.statusText}`);
-  }
+  await postIssueCommentReturningId(token, repoFullName, issueNumber, body);
 }
 
 /**
@@ -323,20 +302,15 @@ export async function postIssueCommentReturningId(
   issueNumber: number,
   body: string,
 ): Promise<number> {
-  const res = await fetch(
+  const res = await ghFetch(
     `https://api.github.com/repos/${repoFullName}/issues/${issueNumber}/comments`,
+    token,
     {
       method: "POST",
-      headers: {
-        ...ghHeaders(token),
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ body }),
     },
   );
-  if (!res.ok) {
-    throw new Error(`GitHub API ${res.status}: ${res.statusText}`);
-  }
   const data = (await res.json()) as { id: number };
   return data.id;
 }
@@ -357,18 +331,13 @@ export async function listCommentReactions(
   repoFullName: string,
   commentId: number,
 ): Promise<CommentReaction[]> {
-  const res = await fetch(
+  const res = await ghFetch(
     `https://api.github.com/repos/${repoFullName}/issues/comments/${commentId}/reactions`,
+    token,
     {
-      headers: {
-        ...ghHeaders(token),
-        Accept: "application/vnd.github.squirrel-girl-preview+json",
-      },
+      headers: { Accept: "application/vnd.github.squirrel-girl-preview+json" },
     },
   );
-  if (!res.ok) {
-    throw new Error(`GitHub API ${res.status}: ${res.statusText}`);
-  }
   return (await res.json()) as CommentReaction[];
 }
 

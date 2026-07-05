@@ -1,4 +1,5 @@
 import { type AwsCredentials } from "~/server/agents/aws";
+import { ghFetch } from "~/server/agents/github-api";
 import {
   type ModelCredentials,
   resolveModelCredentials,
@@ -79,17 +80,10 @@ export async function getUserRepoPermission(
   username: string,
 ): Promise<RepoPermission> {
   try {
-    const res = await fetch(
+    const res = await ghFetch(
       `https://api.github.com/repos/${repoFullName}/collaborators/${username}/permission`,
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          Accept: "application/vnd.github.v3+json",
-          "X-GitHub-Api-Version": "2022-11-28",
-        },
-      },
+      token,
     );
-    if (!res.ok) return "none";
     const data = (await res.json()) as RawPermission;
     const coarse = normalizePermission(data.permission);
     const role = normalizePermission(data.role_name);

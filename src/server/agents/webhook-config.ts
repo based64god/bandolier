@@ -143,28 +143,3 @@ export async function getRepoWebhookConfig(
     },
   };
 }
-
-/**
- * Whether the user (via their GitHub token) has admin on the repo. Gates the
- * repo-scoped configuration (trigger prefix, agent image, shared credentials).
- * Returns false on any API error so callers fail closed.
- */
-export async function isRepoAdmin(
-  token: string,
-  repoFullName: string,
-): Promise<boolean> {
-  try {
-    const res = await fetch(`https://api.github.com/repos/${repoFullName}`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: "application/vnd.github.v3+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-      },
-    });
-    if (!res.ok) return false;
-    const repo = (await res.json()) as { permissions?: { admin?: boolean } };
-    return repo.permissions?.admin === true;
-  } catch {
-    return false;
-  }
-}

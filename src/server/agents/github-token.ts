@@ -1,5 +1,6 @@
 import { and, eq } from "drizzle-orm";
 
+import { ghFetch } from "~/server/agents/github-api";
 import { type db } from "~/server/db";
 import { account } from "~/server/db/schema";
 
@@ -33,16 +34,7 @@ export function githubGitIdentity(
 export async function getGithubIdentity(
   accessToken: string,
 ): Promise<{ id: number; login: string }> {
-  const res = await fetch("https://api.github.com/user", {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      Accept: "application/vnd.github.v3+json",
-      "X-GitHub-Api-Version": "2022-11-28",
-    },
-  });
-  if (!res.ok) {
-    throw new Error(`GitHub API ${res.status}: ${res.statusText}`);
-  }
+  const res = await ghFetch("https://api.github.com/user", accessToken);
   const data = (await res.json()) as { id: number; login: string };
   return { id: data.id, login: data.login };
 }

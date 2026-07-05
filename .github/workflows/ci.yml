@@ -84,18 +84,23 @@ jobs:
           name: web-coverage
           path: coverage
 
+      # Vercel must not deploy this push: vercel.json's git.deploymentEnabled
+      # only takes effect if the file exists on the pushed branch (this one is
+      # built from scratch, so copy it in), and "[vercel skip]" in the commit
+      # message skips the deployment regardless.
       - name: Publish badge JSON to the badges branch
         run: |
           set -euo pipefail
           mkdir -p /tmp/badges
           node scripts/coverage-badge.mjs > /tmp/badges/coverage.json
           cat /tmp/badges/coverage.json
+          cp vercel.json /tmp/badges/vercel.json
           cd /tmp/badges
           git init -q -b badges
-          git add coverage.json
+          git add coverage.json vercel.json
           git -c user.name="github-actions[bot]" \
               -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-              commit -qm "Update coverage badge"
+              commit -qm "Update coverage badge [vercel skip]"
           git push -f \
             "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
             badges

@@ -2,41 +2,50 @@ import { type NextRequest, NextResponse } from "next/server";
 
 import { GATE_COOKIE, gateToken, timingSafeEqual } from "~/lib/gate";
 
-// Paths reachable without passing the gate:
-//  - the GitHub webhook (authenticates via HMAC signature; GitHub can't log in)
-//  - the harness callbacks — run output ingest, interactive input, and the ACP
-//    relay — which authenticate via a per-job HMAC token (the in-pod harness has
-//    no session/password to present)
+// Prefix-matched exemptions: any path under one of these passes the gate.
+//  - the GitHub webhooks (authenticate via HMAC signature; GitHub can't log in)
 //  - the public REST API (authenticates via API key or session of its own)
-//  - the version endpoint (just a build id; clients poll it to detect deploys)
-//  - the health endpoint (liveness/readiness for k8s probes; no secrets)
-//  - the gate page + its submit endpoint
-//  - the app icon / OG image (only reveal the logo + tagline; lets unfurls work)
-//  - the PWA manifest, service worker, and install icons — the browser must be
-//    able to fetch these (as JSON/JS/PNG, not the gate's HTML) for the app to be
-//    installable, even before the user passes the gate. They expose no secrets.
-//  - the kubeconfig setup script (no secrets; meant for `curl … | bash`)
-function isExempt(pathname: string): boolean {
-  return (
-    pathname.startsWith("/api/webhooks/") ||
-    pathname.startsWith("/api/v1/") ||
-    pathname === "/api/agent-runs" ||
-    pathname === "/api/agent-input" ||
-    pathname === "/api/acp" ||
-    pathname === "/api/version" ||
-    pathname === "/api/health" ||
-    pathname === "/setup.sh" ||
-    pathname === "/gate" ||
-    pathname === "/api/gate" ||
-    pathname === "/icon.svg" ||
-    pathname === "/apple-icon" ||
-    pathname === "/opengraph-image" ||
-    pathname === "/favicon.ico" ||
-    pathname === "/manifest.webmanifest" ||
-    pathname === "/sw.js" ||
-    pathname === "/icon-192.png" ||
-    pathname === "/icon-512.png"
-  );
+export const EXEMPT_PREFIXES: readonly string[] = [
+  "/api/webhooks/",
+  "/api/v1/",
+];
+
+// Exact-matched exemptions: only these precise paths pass the gate. Kept as
+// exact matches (not prefixes) so, e.g., /api/agent-runs/<anything> still 401s.
+export const EXEMPT_EXACT: ReadonlySet<string> = new Set([
+  // Harness callbacks — run output ingest, interactive input, and the ACP
+  // relay — which authenticate via a per-job HMAC token (the in-pod harness has
+  // no session/password to present). Every route under src/app/api that calls
+  // verifyIngestToken must be represented here; proxy.test.ts asserts this.
+  "/api/agent-runs",
+  "/api/agent-input",
+  "/api/acp",
+  // The version endpoint (just a build id; clients poll it to detect deploys).
+  "/api/version",
+  // The health endpoint (liveness/readiness for k8s probes; no secrets).
+  "/api/health",
+  // The kubeconfig setup script (no secrets; meant for `curl … | bash`).
+  "/setup.sh",
+  // The gate page + its submit endpoint.
+  "/gate",
+  "/api/gate",
+  // The app icon / OG image (only reveal the logo + tagline; lets unfurls work).
+  "/icon.svg",
+  "/apple-icon",
+  "/opengraph-image",
+  "/favicon.ico",
+  // The PWA manifest, service worker, and install icons — the browser must be
+  // able to fetch these (as JSON/JS/PNG, not the gate's HTML) for the app to be
+  // installable, even before the user passes the gate. They expose no secrets.
+  "/manifest.webmanifest",
+  "/sw.js",
+  "/icon-192.png",
+  "/icon-512.png",
+]);
+
+export function isExempt(pathname: string): boolean {
+  if (EXEMPT_EXACT.has(pathname)) return true;
+  return EXEMPT_PREFIXES.some((prefix) => pathname.startsWith(prefix));
 }
 
 export async function proxy(req: NextRequest) {

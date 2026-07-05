@@ -197,7 +197,7 @@ Browser ──▶ Next.js app ──▶ Kubernetes API ──▶ Job (harness po
           <h2>Prerequisites</h2>
           <div class="prereq-grid">
             <div class="prereq">
-              <h4>Node.js 20+ &amp; pnpm 10</h4>
+              <h4>Node.js 24 &amp; pnpm 11</h4>
               <p><code>corepack enable</code> picks up the pinned version.</p>
             </div>
             <div class="prereq">
@@ -284,7 +284,14 @@ DATABASE_URL="postgresql://postgres:password@localhost:5432/bandolier"</code></p
           <h2><span class="step-dot">4</span> Start Postgres &amp; apply the schema</h2>
           <div class="code-block" data-lang="bash">
             <pre><code>./start-database.sh     # starts a Postgres container from DATABASE_URL
-pnpm db:push            # creates the tables (no migration files are used)</code></pre>
+pnpm db:push            # syncs the schema straight to your local database</code></pre>
+          </div>
+          <div class="callout">
+            <code>db:push</code> is for local development only. Self-host deploys
+            apply the checked-in SQL migrations under <code>drizzle/</code> (via
+            the migrator image, run as a Helm hook). After changing
+            <code>src/server/db/schema.ts</code>, run <code>pnpm db:generate</code>
+            to emit a new migration and commit it.
           </div>
         </section>
 

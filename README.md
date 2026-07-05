@@ -44,7 +44,7 @@ Browser ──▶ Next.js app ──▶ Kubernetes API ──▶ Job (harness po
 
 ## Prerequisites
 
-- **Node.js 20+** and **pnpm 10** (`corepack enable` will pick up the pinned version).
+- **Node.js 24** and **pnpm 11** (`corepack enable` picks up the pinned version).
 - **Docker** or **Podman** — for the local Postgres database (and for building the harness image).
 - **A PostgreSQL database** — the included script starts one in a container.
 - **A Kubernetes cluster** the web app can reach and create Jobs in. For local development, [kind](https://kind.sigs.k8s.io/), [k3d](https://k3d.io/), or minikube all work. The cluster must be able to pull the harness image (see [The agent harness image](#the-agent-harness-image)).
@@ -100,8 +100,13 @@ See [Configuration reference](#configuration-reference) for every variable.
 
 ```bash
 ./start-database.sh     # starts a Postgres container from DATABASE_URL
-pnpm db:push            # creates the tables (no migration files are used)
+pnpm db:push            # syncs the schema straight to your local database
 ```
+
+`db:push` is for local development only. Self-host deploys apply the checked-in
+SQL migrations under `drizzle/` instead (via the migrator image, run as a Helm
+hook). If you change `src/server/db/schema.ts`, run `pnpm db:generate` to emit a
+new migration and commit it, or self-host upgrades won't pick up your change.
 
 ### 5. Run the app
 
@@ -371,7 +376,9 @@ deploy/
 | ----------------------------------------- | -------------------------------------------------------------------------- |
 | `pnpm dev`                                | Run the app in development (Turbopack).                                    |
 | `pnpm build` / `pnpm start`               | Production build / serve.                                                  |
-| `pnpm db:push`                            | Sync the Drizzle schema to the database (used instead of migration files). |
+| `pnpm db:push`                            | Sync the Drizzle schema straight to the database (local development).      |
+| `pnpm db:generate`                        | Emit a new SQL migration under `drizzle/` from schema changes.             |
+| `pnpm db:migrate`                         | Apply the checked-in `drizzle/` migrations (what self-host deploys run).   |
 | `pnpm db:studio`                          | Open Drizzle Studio.                                                       |
 | `pnpm typecheck`                          | `tsc --noEmit`.                                                            |
 | `pnpm lint` / `pnpm lint:fix`             | ESLint.                                                                    |

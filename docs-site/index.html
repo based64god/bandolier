@@ -1,0 +1,788 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Bandolier — Setup, Workflows &amp; Self-Hosting</title>
+    <meta
+      name="description"
+      content="Get Bandolier running for your own projects: local setup, GitHub App and webhook workflows, and self-hosting on Kubernetes."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#content">Skip to content</a>
+
+    <header class="topbar">
+      <button
+        class="nav-toggle"
+        aria-label="Toggle navigation"
+        aria-expanded="false"
+      >
+        <span></span><span></span><span></span>
+      </button>
+      <a class="brand" href="#top">
+        <span class="brand-mark">▚</span>
+        <span class="brand-name">Bandolier</span>
+        <span class="brand-sub">docs</span>
+      </a>
+      <div class="topbar-actions">
+        <a
+          class="ghost-btn"
+          href="https://github.com/based64god/bandolier"
+          target="_blank"
+          rel="noopener"
+          >GitHub ↗</a
+        >
+        <button class="theme-toggle" aria-label="Toggle color theme">
+          <span class="theme-icon">◐</span>
+        </button>
+      </div>
+    </header>
+
+    <div class="layout">
+      <nav class="sidebar" aria-label="Documentation navigation">
+        <div class="sidebar-inner">
+          <p class="nav-heading">Start here</p>
+          <ul>
+            <li><a href="#overview">What is Bandolier?</a></li>
+            <li><a href="#how-it-works">How it works</a></li>
+            <li><a href="#prerequisites">Prerequisites</a></li>
+          </ul>
+          <p class="nav-heading">Project setup</p>
+          <ul>
+            <li><a href="#install">1 · Install</a></li>
+            <li><a href="#oauth-app">2 · GitHub OAuth app</a></li>
+            <li><a href="#env">3 · Environment</a></li>
+            <li><a href="#database">4 · Database</a></li>
+            <li><a href="#run">5 · Run &amp; sign in</a></li>
+            <li><a href="#configure-account">6 · Configure account</a></li>
+          </ul>
+          <p class="nav-heading">Workflow configuration</p>
+          <ul>
+            <li><a href="#github-app">GitHub App &amp; webhooks</a></li>
+            <li><a href="#resuming">Resuming runs</a></li>
+            <li><a href="#system-prompt">Repo system prompt</a></li>
+            <li><a href="#maintainer-gate">Maintainer gate</a></li>
+            <li><a href="#isolation">Agent isolation</a></li>
+            <li><a href="#artifacts">Run artifacts</a></li>
+            <li><a href="#rest-api">REST API</a></li>
+          </ul>
+          <p class="nav-heading">Self-hosting</p>
+          <ul>
+            <li><a href="#selfhost-overview">Overview &amp; images</a></li>
+            <li><a href="#helm-quickstart">Helm quick start</a></li>
+            <li><a href="#helm-production">Production</a></li>
+            <li><a href="#database-options">Database options</a></li>
+            <li><a href="#terraform">One-click DigitalOcean</a></li>
+            <li><a href="#harness-image">Harness image</a></li>
+          </ul>
+          <p class="nav-heading">Reference</p>
+          <ul>
+            <li><a href="#config-reference">Config reference</a></li>
+            <li><a href="#security">Security notes</a></li>
+          </ul>
+        </div>
+      </nav>
+
+      <main id="content" class="content">
+        <section id="top" class="hero">
+          <p class="eyebrow">Own it. Operate it. For your own projects.</p>
+          <h1>Run Claude Code agents on your&nbsp;own&nbsp;terms</h1>
+          <p class="lede">
+            Bandolier is a web app for running
+            <a href="https://www.anthropic.com/claude-code" target="_blank" rel="noopener">Claude Code</a>
+            agents as Kubernetes Jobs. Sign in with GitHub, point an agent at a
+            repo or an issue, and Bandolier spins up an isolated pod that clones
+            the code, runs the agent, and opens a pull request — while you watch
+            live from a dashboard.
+          </p>
+          <div class="hero-cta">
+            <a class="btn primary" href="#install">Set it up locally</a>
+            <a class="btn" href="#selfhost-overview">Self-host it</a>
+          </div>
+          <div class="hero-tracks">
+            <a class="track-card" href="#install">
+              <span class="track-num">01</span>
+              <h3>Project setup</h3>
+              <p>Get Bandolier running on your machine in six steps.</p>
+            </a>
+            <a class="track-card" href="#github-app">
+              <span class="track-num">02</span>
+              <h3>Workflow config</h3>
+              <p>Webhooks, system prompts, isolation, artifacts, REST API.</p>
+            </a>
+            <a class="track-card" href="#selfhost-overview">
+              <span class="track-num">03</span>
+              <h3>Self-hosting</h3>
+              <p>Ship the whole stack to Kubernetes — Helm or one-click DO.</p>
+            </a>
+          </div>
+        </section>
+
+        <!-- ===================== START HERE ===================== -->
+        <section id="overview">
+          <h2>What is Bandolier?</h2>
+          <p>
+            You launch agents two ways:
+          </p>
+          <ul class="feature-list">
+            <li>
+              <strong>From the dashboard</strong> — pick a repo, write a task (or
+              select an open issue), choose a model, and deploy.
+            </li>
+            <li>
+              <strong>From a GitHub webhook</strong> — when an issue is opened in
+              a configured repo, Bandolier automatically launches an agent to
+              work on it and open a PR.
+            </li>
+          </ul>
+          <div class="callout info">
+            <strong>Your credentials, always.</strong> Every agent runs with the
+            <em>deploying user's own</em> GitHub OAuth token, their model-provider
+            credentials (AWS Bedrock, an Anthropic/OpenAI/Gemini API key, or a
+            Claude Pro/Max &middot; ChatGPT subscription login), and the cluster
+            from their kubeconfig. There are no shared, server-side provider
+            credentials — the available models are queried live from each user's
+            provider.
+          </div>
+        </section>
+
+        <section id="how-it-works">
+          <h2>How it works</h2>
+          <p>Bandolier has two deployable pieces:</p>
+          <ol class="feature-list">
+            <li>
+              <strong>The web app</strong> (<code>src/</code>) — a Next.js + tRPC
+              application. It handles auth, stores per-user credentials, talks to
+              the Kubernetes API, and serves the dashboard.
+            </li>
+            <li>
+              <strong>The agent harness</strong> (<code>agent-harness/</code>) — a
+              small Go binary baked into a container image alongside the Claude
+              Code CLI, <code>git</code>, and <code>gh</code>. This runs inside
+              each agent pod.
+            </li>
+          </ol>
+          <p>When you deploy an agent, the web app:</p>
+          <ol class="numbered">
+            <li>Resolves your credentials (GitHub token, model provider, kubeconfig) from the database.</li>
+            <li>Creates a namespace, a <code>bandolier-agent</code> ServiceAccount, and (optionally) a <code>NetworkPolicy</code> that isolates agent pods.</li>
+            <li>Writes a short-lived <strong>per-job Secret</strong> holding only that run's credentials, owned by the Job so Kubernetes garbage-collects it when the Job is deleted.</li>
+            <li>Creates a Kubernetes <strong>Job</strong> running the harness image, with the task wired in via environment variables.</li>
+          </ol>
+          <p>
+            The harness then clones the repo, runs <code>claude --print</code>,
+            commits the work, pushes a branch, and opens a PR. Logs stream back to
+            the dashboard; if artifact storage is configured, the full transcript
+            is uploaded to S3 so it outlives the Job's TTL.
+          </p>
+          <figure class="diagram">
+            <pre>
+Browser ──▶ Next.js app ──▶ Kubernetes API ──▶ Job (harness pod)
+                │                                   │
+                ├─ Postgres (users, creds, runs)    ├─ git clone
+                └─ S3 (transcripts, optional)       ├─ claude --print
+                                                    └─ gh pr create</pre>
+          </figure>
+        </section>
+
+        <section id="prerequisites">
+          <h2>Prerequisites</h2>
+          <div class="prereq-grid">
+            <div class="prereq">
+              <h4>Node.js 20+ &amp; pnpm 10</h4>
+              <p><code>corepack enable</code> picks up the pinned version.</p>
+            </div>
+            <div class="prereq">
+              <h4>Docker or Podman</h4>
+              <p>For the local Postgres database and building the harness image.</p>
+            </div>
+            <div class="prereq">
+              <h4>PostgreSQL</h4>
+              <p>The included script starts one in a container.</p>
+            </div>
+            <div class="prereq">
+              <h4>A Kubernetes cluster</h4>
+              <p>kind, k3d, or minikube all work locally. It must be able to pull the harness image.</p>
+            </div>
+            <div class="prereq">
+              <h4>A GitHub OAuth app</h4>
+              <p>For sign-in and repo access.</p>
+            </div>
+            <div class="prereq">
+              <h4>A model provider</h4>
+              <p>Each user supplies their own in-app: Bedrock, an API key, or a subscription login. Nothing provider-related in server config.</p>
+            </div>
+          </div>
+        </section>
+
+        <!-- ===================== PROJECT SETUP ===================== -->
+        <div class="track-divider">
+          <span class="track-badge">Track 01</span>
+          <h2 class="track-title">Project setup</h2>
+          <p>Six steps to a running local instance.</p>
+        </div>
+
+        <section id="install">
+          <h2><span class="step-dot">1</span> Install dependencies</h2>
+          <div class="code-block" data-lang="bash">
+            <pre><code>pnpm install</code></pre>
+          </div>
+        </section>
+
+        <section id="oauth-app">
+          <h2><span class="step-dot">2</span> Create a GitHub OAuth app</h2>
+          <p>
+            In GitHub → <strong>Settings → Developer settings → OAuth Apps → New
+            OAuth App</strong>:
+          </p>
+          <ul class="feature-list">
+            <li><strong>Homepage URL</strong>: <code>http://localhost:3000</code></li>
+            <li><strong>Authorization callback URL</strong>: <code>http://localhost:3000/api/auth/callback/github</code></li>
+          </ul>
+          <p>
+            Copy the <strong>Client ID</strong> and generate a
+            <strong>Client Secret</strong>. The app requests the <code>repo</code>
+            and <code>workflow</code> scopes so agents can clone private repos and
+            open PRs (including ones that touch <code>.github/workflows/</code>).
+          </p>
+        </section>
+
+        <section id="env">
+          <h2><span class="step-dot">3</span> Configure environment</h2>
+          <p>Copy the example file and fill it in:</p>
+          <div class="code-block" data-lang="bash">
+            <pre><code>cp .env.example .env</code></pre>
+          </div>
+          <p>Minimum required for local development:</p>
+          <div class="code-block" data-lang="bash">
+            <pre><code># A random secret — generate one with: openssl rand -base64 32
+BETTER_AUTH_SECRET="…"
+
+# From the GitHub OAuth app you just created
+BETTER_AUTH_GITHUB_CLIENT_ID="…"
+BETTER_AUTH_GITHUB_CLIENT_SECRET="…"
+
+# Local Postgres (matches start-database.sh below)
+DATABASE_URL="postgresql://postgres:password@localhost:5432/bandolier"</code></pre>
+          </div>
+          <div class="callout">
+            You also need a cluster for agents to deploy into: <strong>each user
+            pastes their own kubeconfig</strong> in the app's settings, or a repo
+            admin configures a shared kubeconfig for a repo in its settings.
+          </div>
+        </section>
+
+        <section id="database">
+          <h2><span class="step-dot">4</span> Start Postgres &amp; apply the schema</h2>
+          <div class="code-block" data-lang="bash">
+            <pre><code>./start-database.sh     # starts a Postgres container from DATABASE_URL
+pnpm db:push            # creates the tables (no migration files are used)</code></pre>
+          </div>
+        </section>
+
+        <section id="run">
+          <h2><span class="step-dot">5</span> Run the app</h2>
+          <div class="code-block" data-lang="bash">
+            <pre><code>pnpm dev</code></pre>
+          </div>
+          <p>
+            Open <a href="http://localhost:3000">http://localhost:3000</a> and
+            sign in with GitHub.
+          </p>
+        </section>
+
+        <section id="configure-account">
+          <h2><span class="step-dot">6</span> Configure your account</h2>
+          <p>Open <strong>Settings</strong> in the dashboard and add:</p>
+          <ul class="feature-list">
+            <li>
+              <strong>A model provider</strong> — Bedrock credentials, an API key,
+              or a subscription login. For Claude Pro/Max, run
+              <code>claude setup-token</code> locally and paste the
+              <code>sk-ant-oat01-…</code> token; for ChatGPT, run
+              <code>codex login</code> and paste <code>~/.codex/auth.json</code>.
+              API keys are validated before saving and the model picker is
+              populated live; subscription credentials get a static model list and
+              are verified on the first run.
+            </li>
+            <li>
+              <strong>A kubeconfig</strong> — the cluster your agents deploy into
+              (a repo can also provide a shared one).
+            </li>
+          </ul>
+          <div class="callout success">
+            You can now select a repo, deploy an agent, and watch it work. 🎉
+          </div>
+        </section>
+
+        <!-- ===================== WORKFLOW CONFIG ===================== -->
+        <div class="track-divider">
+          <span class="track-badge">Track 02</span>
+          <h2 class="track-title">Workflow configuration</h2>
+          <p>Optional pieces that shape how agents get triggered and constrained.</p>
+        </div>
+
+        <section id="github-app">
+          <h2>GitHub App &amp; webhooks</h2>
+          <p>
+            To have agents launch automatically when issues are opened, install
+            the Bandolier GitHub App.
+          </p>
+          <ol class="numbered">
+            <li>
+              Create a GitHub App (Settings → Developer settings → GitHub Apps).
+              Give it a webhook URL of
+              <code>https://&lt;your-host&gt;/api/webhooks/github</code>, a webhook
+              secret, and these repository permissions: <strong>Issues</strong>
+              (read &amp; write), <strong>Pull requests</strong> (read &amp;
+              write), <strong>Contents</strong> (read), and
+              <strong>Metadata</strong> (read). Subscribe to the
+              <strong>Issues</strong> and <strong>Issue comment</strong> events.
+              Generate a private key.
+            </li>
+            <li>
+              Set <code>GITHUB_APP_ID</code>,
+              <code>GITHUB_APP_PRIVATE_KEY</code> (PEM, <code>\n</code>-escaped),
+              and <code>GITHUB_WEBHOOK_SECRET</code> in the app's environment.
+              Optionally set <code>NEXT_PUBLIC_GITHUB_APP_SLUG</code> so the
+              repo-config UI links to the App's install page.
+            </li>
+            <li>
+              Install the App on the repos you want Bandolier to act on. Events are
+              delivered automatically — there's no per-repo webhook to add.
+            </li>
+          </ol>
+          <p>
+            When an issue is opened, Bandolier verifies the App's signature, finds
+            the Bandolier user linked to the GitHub account that opened it, and
+            deploys an agent under that user's credentials — so clone/push and the
+            resulting PR are attributed to the issue author. The "Bando picked up
+            this issue…" comment is posted by the App itself
+            (<code>bandolier[bot]</code>). Optionally, each repo can set a
+            <strong>trigger phrase</strong> that issue text must contain.
+          </p>
+        </section>
+
+        <section id="resuming">
+          <h2>Resuming a run by commenting</h2>
+          <p>
+            Commenting on an issue or pull request that a run already worked on
+            <strong>resumes</strong> it: Bandolier finds the item's most recent
+            run, spawns a follow-up under the commenter's credentials, and seeds it
+            with the parent run's persisted transcript (when
+            <a href="#artifacts">artifact storage</a> is configured) so the agent
+            picks up with full context. While the parent's PR is still open, the
+            follow-up works directly on its branch; otherwise it starts fresh.
+            Resumed tasks carry a "↻ resumed" chip in the dashboard.
+          </p>
+          <div class="callout">
+            Comments from bots are ignored (including Bando's own), a comment only
+            ever <em>resumes</em> — one with no prior run does nothing — and a
+            configured trigger phrase applies to comments too.
+          </div>
+        </section>
+
+        <section id="system-prompt">
+          <h2>Repository system prompt</h2>
+          <p>
+            A repo admin can attach a <strong>system prompt</strong> to a
+            repository in its settings — a blanket instruction (coding
+            conventions, a review checklist, "always add tests") that Bandolier
+            appends to the system prompt of <em>every</em> agent run for that repo:
+            dashboard tasks, issue PRs, and webhook-triggered runs, across every
+            provider and both one-shot and interactive sessions.
+          </p>
+          <p>
+            It's layered <em>on top of</em> Bandolier's own framing, never
+            replacing it, so you don't need to repeat guidance in each task. Leave
+            it blank for none.
+          </p>
+        </section>
+
+        <section id="maintainer-gate">
+          <h2>Repository credentials &amp; the maintainer gate</h2>
+          <p>
+            A repo admin can configure <strong>shared repo-level credentials</strong>
+            (a kubeconfig and/or model-provider API keys) so everyone works on the
+            same pooled infrastructure. Because those credentials are shared,
+            executing on them is restricted to GitHub users with
+            <strong>maintainer</strong> access or higher. A run only counts as
+            using shared credentials when it actually resolves to the repo's
+            kubeconfig or model key — a user with their own credentials is never
+            gated.
+          </p>
+          <ul class="feature-list">
+            <li>
+              <strong>From the dashboard / REST API:</strong> if your run would use
+              the repo's shared credentials and you're not a maintainer, the deploy
+              is rejected.
+            </li>
+            <li>
+              <strong>From a webhook (issue opened):</strong> if the issue opener
+              isn't a maintainer, the run is <strong>held for approval</strong>.
+              The bot comments asking a maintainer to approve — who can then react
+              👍 (or 🚀) to the bot's comment, or reply <code>/bando approve</code>
+              (decline with <code>/bando decline</code>).
+            </li>
+          </ul>
+          <div class="callout">
+            Approvals are one-shot and verified server-side — a non-maintainer's
+            command or reaction is ignored. On approval the held run is dispatched
+            exactly as it was originally built, attributed to the issue opener.
+          </div>
+        </section>
+
+        <section id="isolation">
+          <h2>Agent isolation</h2>
+          <p>Agent-pod network isolation is controlled by two environment variables:</p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Variable</th><th>Default</th><th>Description</th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>AGENT_NETWORK_POLICY</code></td>
+                  <td><code>true</code></td>
+                  <td>Apply a <code>NetworkPolicy</code> denying inbound and limiting egress to DNS + the public internet. Needs a policy-enforcing CNI (Calico/Cilium); a no-op under kindnet.</td>
+                </tr>
+                <tr>
+                  <td><code>AGENT_EGRESS_BLOCKED_CIDRS</code></td>
+                  <td>RFC-1918 ranges</td>
+                  <td>Comma-separated CIDRs agents cannot reach (blocks lateral movement to in-cluster services).</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            A repo admin can loosen these <em>per repository</em> from the repo
+            configuration modal. Both toggles are <strong>off by default</strong>:
+            <strong>Allow in-cluster (private) egress</strong> drops the blocked-CIDR
+            exclusion, and <strong>Allow all egress ports</strong> permits outbound
+            TCP on any port instead of only 80/443.
+          </p>
+          <div class="callout warn">
+            <strong>Security:</strong> loosening egress weakens agent isolation.
+            Agents run model-generated code with your credentials; in-cluster
+            egress opens lateral movement and all-ports egress widens the
+            exfiltration surface. Enable only for repos you trust, and turn the
+            toggles back off when done.
+          </div>
+        </section>
+
+        <section id="artifacts">
+          <h2>Run artifacts</h2>
+          <p>
+            Each run's full transcript can be uploaded to S3 so it survives the
+            Job's one-week TTL. Storage is configured <strong>per repository</strong>
+            in the repo-config modal (admin-only, under Shared credentials → Run
+            artifact storage): the repo names an S3 bucket it owns (AWS or any
+            S3-compatible endpoint such as MinIO) plus scoped credentials. There is
+            deliberately no server-wide bucket — run data belongs to the repo,
+            never the operator.
+          </p>
+          <div class="callout info">
+            This is independent of a run's <strong>structured output</strong> (the
+            PR or issue URL), which is always persisted to the run row — so a
+            finished run's output stays recoverable even when S3 isn't configured.
+          </div>
+        </section>
+
+        <section id="rest-api">
+          <h2>REST API</h2>
+          <p>
+            Besides the dashboard, agents can be listed and launched over a small
+            REST API under <code>/api/v1</code>, authenticated with an API key
+            (create one in the app; the token is shown once and only its hash is
+            stored).
+          </p>
+          <div class="code-block" data-lang="bash">
+            <pre><code># List tasks for a repo
+curl -H "Authorization: Bearer bnd_…" \
+  https://&lt;your-host&gt;/api/v1/repos/&lt;owner&gt;/&lt;repo&gt;/tasks
+
+# Launch a task
+curl -X POST -H "Authorization: Bearer bnd_…" -H "Content-Type: application/json" \
+  -d '{"task":"Fix the flaky test in auth.spec.ts"}' \
+  https://&lt;your-host&gt;/api/v1/repos/&lt;owner&gt;/&lt;repo&gt;/tasks</code></pre>
+          </div>
+          <p>
+            The launch endpoint accepts everything the dashboard's deploy dialog
+            can set, except interactive sessions. Every field except
+            <code>task</code>/<code>prompt</code> is optional:
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Field</th><th>Type</th><th>Notes</th></tr>
+              </thead>
+              <tbody>
+                <tr><td><code>task</code></td><td>string</td><td>The operator task, or extra context when <code>issueNumber</code> is set.</td></tr>
+                <tr><td><code>prompt</code></td><td>string</td><td>Alias for <code>task</code>.</td></tr>
+                <tr><td><code>branch</code></td><td>string</td><td>Branch to check out (default: repo default).</td></tr>
+                <tr><td><code>model</code></td><td>string</td><td>A model id from one of your providers.</td></tr>
+                <tr><td><code>modelProvider</code></td><td>anthropic · bedrock · openai · gemini</td><td>Pins which provider serves <code>model</code>.</td></tr>
+                <tr><td><code>modelAuth</code></td><td>api_key · subscription</td><td>Pins the credential kind.</td></tr>
+                <tr><td><code>effort</code></td><td>low → max</td><td>Reasoning effort (Claude providers only).</td></tr>
+                <tr><td><code>maxTurns</code></td><td>integer ≥ 1</td><td>Caps the number of agent turns.</td></tr>
+                <tr><td><code>cpu</code> / <code>memory</code></td><td>string</td><td>Per-task K8s resource limits (e.g. <code>"2"</code>, <code>"2Gi"</code>).</td></tr>
+                <tr><td><code>issueNumber</code></td><td>integer &gt; 0</td><td>Work on this GitHub issue.</td></tr>
+                <tr><td><code>outputType</code></td><td>pr · issue</td><td>What the run produces (default <code>pr</code>).</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="callout">
+            You must provide a non-empty <code>task</code>/<code>prompt</code> or an
+            <code>issueNumber</code>.
+          </div>
+        </section>
+
+        <!-- ===================== SELF-HOSTING ===================== -->
+        <div class="track-divider">
+          <span class="track-badge">Track 03</span>
+          <h2 class="track-title">Self-hosting on Kubernetes</h2>
+          <p>Own and operate the whole stack for your team.</p>
+        </div>
+
+        <section id="selfhost-overview">
+          <h2>Overview &amp; images</h2>
+          <p>
+            The web app runs anywhere Node does — Vercel, a VM, or Kubernetes. To
+            deploy the <strong>whole stack to a cluster</strong>, the repo ships a
+            production image and a Helm chart. The web app is
+            <strong>cluster-agnostic</strong> about where agents run (it uses each
+            user's kubeconfig), so it can live on the same cluster as its agents or
+            a separate one; its only hard dependency is Postgres.
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Image</th><th>Stage</th><th>Purpose</th></tr>
+              </thead>
+              <tbody>
+                <tr><td><code>ghcr.io/based64god/bandolier</code></td><td><code>runner</code></td><td>The lean Next.js standalone server. This is the app.</td></tr>
+                <tr><td><code>ghcr.io/based64god/bandolier-migrate</code></td><td><code>migrator</code></td><td><code>drizzle-kit</code> + the SQL under <code>drizzle/</code>. Runs migrations as a Helm hook.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            The <strong>Helm chart</strong> (<code>deploy/helm/bandolier</code>)
+            wires a Deployment, Service, Ingress, config/secret wiring, a
+            pre-install/pre-upgrade migration Job, health probes
+            (<code>/api/health</code>), a choice of database (external, a bundled
+            StatefulSet, or an operator-managed CloudNativePG cluster), and optional
+            in-cluster MinIO for run artifacts.
+          </p>
+        </section>
+
+        <section id="helm-quickstart">
+          <h2>Helm quick start (bundled Postgres, port-forward)</h2>
+          <p>Fastest way to see it running — no external database, no ingress:</p>
+          <div class="code-block" data-lang="bash">
+            <pre><code>helm install bandolier deploy/helm/bandolier \
+  --namespace bandolier --create-namespace \
+  --set postgres.mode=bundled \
+  --set config.betterAuthUrl=http://localhost:3000 \
+  --set secrets.betterAuthSecret="$(openssl rand -base64 32)" \
+  --set secrets.githubClientId=&lt;oauth-client-id&gt; \
+  --set secrets.githubClientSecret=&lt;oauth-client-secret&gt;
+
+kubectl -n bandolier port-forward svc/bandolier 3000:80
+# open http://localhost:3000</code></pre>
+          </div>
+          <div class="callout">
+            For the OAuth callback to work, set your GitHub OAuth app's callback URL
+            to <code>http://localhost:3000/api/auth/callback/github</code>, and
+            <code>config.betterAuthUrl</code> must match the URL you actually reach
+            the app on.
+          </div>
+        </section>
+
+        <section id="helm-production">
+          <h2>Production (external Postgres + ingress + TLS)</h2>
+          <p>
+            Put your values in a file rather than on the command line so secrets
+            don't land in shell history:
+          </p>
+          <div class="code-block" data-lang="yaml">
+            <pre><code># values.prod.yaml
+image:
+  tag: v0.1.0 # pin a release
+
+config:
+  betterAuthUrl: https://bandolier.example.com
+
+ingress:
+  enabled: true
+  className: nginx
+  host: bandolier.example.com
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+  tls:
+    enabled: true
+    secretName: bandolier-tls
+
+secrets:
+  betterAuthSecret: "&lt;openssl rand -base64 32&gt;"
+  githubClientId: "&lt;oauth-client-id&gt;"
+  githubClientSecret: "&lt;oauth-client-secret&gt;"
+  databaseUrl: "postgresql://user:pass@your-db-host:5432/bandolier"</code></pre>
+          </div>
+          <div class="code-block" data-lang="bash">
+            <pre><code>helm upgrade --install bandolier deploy/helm/bandolier \
+  --namespace bandolier --create-namespace \
+  -f values.prod.yaml</code></pre>
+          </div>
+          <div class="callout info">
+            <strong>Keep real secrets out of Helm values.</strong> Committing
+            secrets to a values file leaves them in Helm's release history. Manage
+            the Secret out-of-band with
+            <code>kubectl create secret generic bandolier-env …</code> and point the
+            chart at it with <code>secrets.create: false</code> and
+            <code>secrets.existingSecret: bandolier-env</code>. This composes with
+            sealed-secrets / external-secrets operators.
+          </div>
+        </section>
+
+        <section id="database-options">
+          <h2>Database options</h2>
+          <p><code>postgres.mode</code> selects how the app gets its database:</p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Mode</th><th>What it deploys</th><th>Use it for</th></tr>
+              </thead>
+              <tbody>
+                <tr><td><code>external</code> (default)</td><td>Nothing — you provide <code>secrets.databaseUrl</code>.</td><td>Production with a managed database.</td></tr>
+                <tr><td><code>bundled</code></td><td>A single-replica StatefulSet + PVC.</td><td>Evaluation / quick starts.</td></tr>
+                <tr><td><code>cnpg</code></td><td>A CloudNativePG <code>Cluster</code> (HA, failover, backups).</td><td>In-cluster production Postgres.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            On every install/upgrade a <strong>hook Job</strong> runs
+            <code>drizzle-kit migrate</code> against <code>DATABASE_URL</code>.
+            Disable it with <code>migrations.enabled=false</code> if you apply the
+            schema yourself. The app exposes <code>GET /api/health</code> — 200 when
+            the process is up and Postgres is reachable, 503 otherwise — wired to
+            both liveness and readiness probes.
+          </p>
+        </section>
+
+        <section id="terraform">
+          <h2>One-click DigitalOcean</h2>
+          <p>
+            Don't have a cluster yet?
+            <code>deploy/terraform/digitalocean</code> provisions the whole stack
+            with OpenTofu — a DOKS cluster, managed Postgres, a Spaces bucket for
+            run artifacts, optional DNS + Let's Encrypt TLS — and installs the
+            chart, in one <code>tofu apply</code>.
+          </p>
+          <div class="code-block" data-lang="bash">
+            <pre><code>cd deploy/terraform/digitalocean
+cp terraform.tfvars.example terraform.tfvars   # fill in your values
+tofu init
+tofu apply</code></pre>
+          </div>
+        </section>
+
+        <section id="harness-image">
+          <h2>The agent harness image</h2>
+          <p>
+            Agent Jobs run a built-in default image,
+            <code>ghcr.io/based64god/bandolier-agent-harness:latest</code> (built and
+            pushed by <code>.github/workflows/agent-harness-image.yml</code>). Pods
+            always pull it (<code>imagePullPolicy: Always</code>).
+          </p>
+          <p>
+            To run a custom build, set a per-repo <strong>agent image</strong>
+            override in the repo's settings. Because pods always pull, the image
+            must be pushed to a registry the cluster can reach:
+          </p>
+          <div class="code-block" data-lang="bash">
+            <pre><code>docker build -t &lt;your-registry&gt;/bandolier-agent-harness:latest agent-harness
+docker push &lt;your-registry&gt;/bandolier-agent-harness:latest</code></pre>
+          </div>
+          <div class="callout info">
+            <strong>Private GHCR images</strong> are pulled automatically: Bandolier
+            attaches a short-lived image-pull Secret (owned by the Job) authenticated
+            with the triggering user's GitHub OAuth token — requiring the
+            <code>read:packages</code> scope (requested at sign-in). For private
+            images on other registries, configure the cluster's nodes with pull
+            credentials yourself; Bandolier only brokers GHCR.
+          </div>
+        </section>
+
+        <!-- ===================== REFERENCE ===================== -->
+        <div class="track-divider">
+          <span class="track-badge">Reference</span>
+          <h2 class="track-title">Configuration &amp; security</h2>
+        </div>
+
+        <section id="config-reference">
+          <h2>Configuration reference</h2>
+          <p>All server configuration is validated in <code>src/env.js</code>.</p>
+          <h3>Required</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Variable</th><th>Description</th></tr></thead>
+              <tbody>
+                <tr><td><code>BETTER_AUTH_SECRET</code></td><td>Secret for signing sessions and tokens. Required in production.</td></tr>
+                <tr><td><code>BETTER_AUTH_GITHUB_CLIENT_ID</code></td><td>GitHub OAuth app client ID.</td></tr>
+                <tr><td><code>BETTER_AUTH_GITHUB_CLIENT_SECRET</code></td><td>GitHub OAuth app client secret.</td></tr>
+                <tr><td><code>DATABASE_URL</code></td><td>PostgreSQL connection string.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <h3>Common &amp; optional</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead>
+              <tbody>
+                <tr><td><code>BETTER_AUTH_URL</code></td><td><code>http://localhost:3000</code></td><td>Public base URL of the app.</td></tr>
+                <tr><td><code>K8S_LABEL_SELECTOR</code></td><td><code>app=bandolier-agent</code></td><td>Selector identifying Bandolier-managed agent pods.</td></tr>
+                <tr><td><code>GITHUB_APP_ID</code></td><td>—</td><td>Numeric id of the GitHub App (bot-voice actions + event delivery).</td></tr>
+                <tr><td><code>GITHUB_APP_PRIVATE_KEY</code></td><td>—</td><td>The App's PEM private key (<code>\n</code>-escaped).</td></tr>
+                <tr><td><code>NEXT_PUBLIC_GITHUB_APP_SLUG</code></td><td>—</td><td>The App's public slug; links the repo-config UI to its install page.</td></tr>
+                <tr><td><code>GITHUB_WEBHOOK_SECRET</code></td><td>—</td><td>Secret for verifying webhook signatures.</td></tr>
+                <tr><td><code>APP_PASSWORD</code></td><td>—</td><td>When set, a shared password gates every page/API (webhooks + REST API exempt).</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="security">
+          <h2>Security notes</h2>
+          <ul class="feature-list">
+            <li><strong>Per-user credentials.</strong> Agents only ever run with the deploying (or issue-opening) user's own GitHub, model-provider, and cluster credentials. There is no server-side provider identity to fall back on.</li>
+            <li><strong>Shared repo credentials require maintainer access.</strong> See the <a href="#maintainer-gate">maintainer gate</a>.</li>
+            <li><strong>Per-job secrets.</strong> A run's credentials live in a Kubernetes Secret owned by its Job, deleted when the Job is. Finished Jobs are retained for one week.</li>
+            <li><strong>Stored credentials are not encrypted at rest.</strong> User AWS/Anthropic keys and kubeconfigs are stored in Postgres in plaintext; API key tokens are stored only as SHA-256 hashes. Protect the database and serve the app over HTTPS.</li>
+            <li><strong>Network isolation</strong> for agent pods is on by default but requires a policy-enforcing CNI to take effect.</li>
+          </ul>
+        </section>
+
+        <footer class="site-footer">
+          <p>
+            This site is a companion to the
+            <a href="https://github.com/based64god/bandolier" target="_blank" rel="noopener">Bandolier repository</a>.
+            For the authoritative reference, see the repo's
+            <a href="https://github.com/based64god/bandolier/blob/main/README.md" target="_blank" rel="noopener">README</a>
+            and
+            <a href="https://github.com/based64god/bandolier/blob/main/deploy/README.md" target="_blank" rel="noopener">deploy guide</a>.
+          </p>
+        </footer>
+      </main>
+    </div>
+
+    <script src="./script.js"></script>
+  </body>
+</html>

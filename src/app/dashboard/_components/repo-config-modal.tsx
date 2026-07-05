@@ -765,6 +765,83 @@ function RepoDefaultEffortSection({ repoFullName }: { repoFullName: string }) {
   );
 }
 
+// Resumeable tasks: when a CI pipeline fails on a pull request Bandolier opened,
+// auto-resume the run that produced it so the agent can investigate and push a
+// fix. Off by default — it spends the run owner's credentials without a human in
+// the loop, and is bounded server-side (once per failing commit, capped per PR).
+function RepoResumeSection({ repoFullName }: { repoFullName: string }) {
+  const utils = api.useUtils();
+  const { data: config, isLoading } = api.webhooks.getConfig.useQuery({
+    repoFullName,
+  });
+  const setResume = api.webhooks.setResumeOnCiFailure.useMutation({
+    onSuccess: () => utils.webhooks.getConfig.invalidate({ repoFullName }),
+  });
+
+  const enabled = config?.resumeOnCiFailure ?? false;
+
+  return (
+    <div className="space-y-3 border-t border-white/10 pt-5">
+      <div className="space-y-1">
+        <h3 className="text-xs font-semibold tracking-wider text-white/50 uppercase">
+          Resume tasks on CI failure
+        </h3>
+        <p className="text-xs text-white/40">
+          When a CI pipeline (a GitHub Actions{" "}
+          <code className="rounded bg-white/10 px-1 text-white/60">
+            workflow_run
+          </code>
+          ) fails on a pull request Bandolier produced, automatically resume the
+          run that opened it — seeded with its transcript and continuing on the
+          PR&apos;s branch — to investigate the failure and push a fix. Only
+          open, same-repo pull requests resume; each failing commit resumes at
+          most once, and a PR stops after a few attempts so a fix that never
+          lands can&apos;t loop.
+        </p>
+      </div>
+      {isLoading ? (
+        <p className="text-xs text-white/30">Loading…</p>
+      ) : (
+        <div className="space-y-2">
+          <div className="flex items-start justify-between gap-3 rounded-lg border border-white/10 bg-white/[0.03] p-3">
+            <div className="min-w-0 space-y-1">
+              <h4 className="text-xs font-semibold text-white/70">
+                Auto-resume on failing CI
+              </h4>
+              <p className="text-[11px] text-white/40">
+                Resumes run as the task&apos;s owner and use their model and
+                cluster credentials — enable only if that&apos;s intended.
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={enabled}
+              aria-label="Resume tasks on CI failure"
+              onClick={() =>
+                setResume.mutate({ repoFullName, enabled: !enabled })
+              }
+              disabled={setResume.isPending}
+              className={`relative h-5 w-9 shrink-0 rounded-full transition-colors disabled:opacity-50 ${
+                enabled ? "bg-purple-500/70" : "bg-white/15"
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white transition-transform ${
+                  enabled ? "translate-x-4" : ""
+                }`}
+              />
+            </button>
+          </div>
+          {setResume.error && (
+            <p className="text-xs text-red-400">{setResume.error.message}</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Default agent compute (CPU / memory limit) for every run on this repo —
 // dashboard, issue, and webhook alike. Ordered against a user's own default by
 // the prefer-repo-credentials toggle; a per-task override (deploy form, or an
@@ -1452,6 +1529,8 @@ export function RepoConfigModal({
           <RepoDefaultModelSection repoFullName={repoFullName} />
 
           <RepoDefaultEffortSection repoFullName={repoFullName} />
+
+          <RepoResumeSection repoFullName={repoFullName} />
 
           <RepoDefaultComputeSection repoFullName={repoFullName} />
 

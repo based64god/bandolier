@@ -104,6 +104,13 @@ interface IssuePayload {
   issue: GitHubIssue;
   repository: GitHubRepository;
   sender: { id: number; login: string };
+  // Present on the `edited` action: the prior values of the fields that
+  // changed. Only the changed fields appear, so an unchanged title/body is
+  // absent here and its current value still reflects the pre-edit state.
+  changes?: {
+    title?: { from: string };
+    body?: { from: string | null };
+  };
 }
 
 // `issue_comment` event: a comment on an issue — or on a pull request, which
@@ -658,6 +665,65 @@ async function handleIssueOpened(
       { issue: issue.number },
     );
   }
+}
+
+/**
+ * An issue edited to newly contain the configured trigger phrase starts a run,
+ * exactly as if it had just been opened. Only the *transition* into containing
+ * the prefix fires: an edit that leaves an already-triggering issue triggering
+ * (e.g. tweaking wording after the fact) must not re-run it, and neither must an
+ * edit that never involves the prefix. The pre-edit text is reconstructed from
+ * the payload's `changes` (which carries only the fields that changed), so we
+ * can tell whether the prefix was already there before this edit.
+ *
+ * Requires a configured trigger phrase: with no prefix, `opened` already acts on
+ * every issue, so there is no "newly triggered by an edit" state to detect.
+ */
+async function handleIssueEdited(
+  payload: IssuePayload,
+  prefix: string | null,
+  agentImage: string | null,
+  defaultModel: string | null,
+  defaultEffort: string | null,
+  repoSystemPrompt: string | null,
+  networkPolicy: RepoNetworkPolicy | undefined,
+): Promise<void> {
+  const { issue, changes } = payload;
+
+  if (!prefix) return;
+
+  const newText = `${issue.title}\n${issue.body ?? ""}`;
+  if (!newText.includes(prefix)) return;
+
+  // Reconstruct the text as it was before this edit: for each field that
+  // changed, use its `from` value; for a field that didn't change, its current
+  // value is unchanged and already reflects the pre-edit state.
+  const oldTitle = changes?.title ? changes.title.from : issue.title;
+  const oldBody = changes?.body
+    ? (changes.body.from ?? "")
+    : (issue.body ?? "");
+  const oldText = `${oldTitle}\n${oldBody}`;
+  if (oldText.includes(prefix)) {
+    console.log(
+      "[bandolier:webhook] issue edit skipped — prefix already present before edit",
+      { issue: issue.number, prefix },
+    );
+    return;
+  }
+
+  console.log("[bandolier:webhook] issue edited to include trigger — running", {
+    issue: issue.number,
+    prefix,
+  });
+  await handleIssueOpened(
+    payload,
+    prefix,
+    agentImage,
+    defaultModel,
+    defaultEffort,
+    repoSystemPrompt,
+    networkPolicy,
+  );
 }
 
 /** The PR number at the end of a GitHub pull-request URL, or null. */
@@ -1435,6 +1501,24 @@ export async function POST(req: NextRequest) {
         ? await getRepoWebhookConfig(db, repoFullName)
         : null;
       await handleIssueOpened(
+        payload as IssuePayload,
+        repoConfig?.prefix ?? null,
+        repoConfig?.agentImage ?? null,
+        repoConfig?.defaultWebhookModel ?? null,
+        repoConfig?.defaultWebhookEffort ?? null,
+        repoConfig?.systemPrompt ?? null,
+        repoConfig?.networkPolicy,
+      );
+    } else if (
+      event === "issues" &&
+      (payload as IssuePayload).action === "edited"
+    ) {
+      // An edit that newly introduces the repo's trigger phrase runs the issue
+      // just like an open would; edits that don't cross that threshold are no-ops.
+      const repoConfig = repoFullName
+        ? await getRepoWebhookConfig(db, repoFullName)
+        : null;
+      await handleIssueEdited(
         payload as IssuePayload,
         repoConfig?.prefix ?? null,
         repoConfig?.agentImage ?? null,

@@ -6,26 +6,116 @@ import { getUserAwsCredentials } from "~/server/agents/user-aws";
 import { getRepoCredentials } from "~/server/agents/webhook-config";
 import type { db } from "~/server/db";
 
+/** Which provider a set of credentials routes to. Kept here — the single source
+ * of provider identity — so `~/server/agents/models` can alias its `ModelProvider`
+ * to it rather than restate the union. Ordered most- to least-preferred in
+ * `PROVIDERS` below. */
+export type ProviderName = "bedrock" | "anthropic" | "openai" | "gemini";
+
+/** Optional credential kind, for providers that support both a metered API key
+ * and a subscription login (Anthropic / OpenAI). */
+export type AuthKind = "api_key" | "subscription";
+
+/**
+ * The six-field model-credential shape, provider-agnostic. Every place that
+ * routes by provider — the picker, the deploy/webhook paths, the provider badge —
+ * shares this shape so the fields can't drift apart. `ModelCredentials` adds a
+ * `source` tag; `JobSpec`'s per-field credentials mirror it (with `aws` spelled
+ * `awsCredentials`).
+ */
+export interface ProviderCredentials {
+  aws: AwsCredentials | null;
+  anthropicApiKey: string | null;
+  anthropicOauthToken: string | null;
+  openaiApiKey: string | null;
+  codexAuthJson: string | null;
+  geminiApiKey: string | null;
+}
+
 /**
  * A resolved set of model credentials. AWS Bedrock, an Anthropic key, and an
  * OpenAI key may all be present; callers that need a single provider apply the
- * AWS-beats-Anthropic precedence themselves (see `pickProvider`), while the model
- * picker lists every configured provider's models side by side.
+ * provider precedence themselves (see `pickProvider` / `providerForCredentials`),
+ * while the model picker lists every configured provider's models side by side.
  *
  * OpenAI is user-scoped only — there is no repo-shared OpenAI credential — so it
  * only ever appears on the user's own set.
  */
-export interface ModelCredentials {
-  aws: AwsCredentials | null;
-  anthropicApiKey: string | null;
+export interface ModelCredentials extends ProviderCredentials {
   /** Claude subscription OAuth token (`claude setup-token`) — user-scoped only. */
   anthropicOauthToken: string | null;
-  openaiApiKey: string | null;
   /** ChatGPT-subscription auth.json (`codex login`) — user-scoped only. */
   codexAuthJson: string | null;
-  geminiApiKey: string | null;
   /** Where the credentials came from — useful for logging / UI. */
   source: "user" | "repo" | "none";
+}
+
+/**
+ * The ordered provider registry — the single definition of both the provider
+ * precedence (Bedrock > Anthropic > OpenAI > Gemini) and which of the six
+ * credential fields belong to each provider. Every provider-routing decision
+ * derives from this list, so adding a provider means editing one place.
+ */
+export const PROVIDERS: readonly {
+  name: ProviderName;
+  /** Whether this provider's credentials are present in a set. */
+  hasCredentials: (creds: Partial<ProviderCredentials>) => boolean;
+  /** This provider's fields, extracted from a set (others left null). */
+  select: (creds: Partial<ProviderCredentials>) => Partial<ProviderCredentials>;
+}[] = [
+  {
+    name: "bedrock",
+    hasCredentials: (c) => !!c.aws,
+    select: (c) => ({ aws: c.aws ?? null }),
+  },
+  {
+    name: "anthropic",
+    hasCredentials: (c) => !!c.anthropicApiKey || !!c.anthropicOauthToken,
+    select: (c) => ({
+      anthropicApiKey: c.anthropicApiKey ?? null,
+      anthropicOauthToken: c.anthropicOauthToken ?? null,
+    }),
+  },
+  {
+    name: "openai",
+    hasCredentials: (c) => !!c.openaiApiKey || !!c.codexAuthJson,
+    select: (c) => ({
+      openaiApiKey: c.openaiApiKey ?? null,
+      codexAuthJson: c.codexAuthJson ?? null,
+    }),
+  },
+  {
+    name: "gemini",
+    hasCredentials: (c) => !!c.geminiApiKey,
+    select: (c) => ({ geminiApiKey: c.geminiApiKey ?? null }),
+  },
+];
+
+const NO_CREDENTIALS: ProviderCredentials = {
+  aws: null,
+  anthropicApiKey: null,
+  anthropicOauthToken: null,
+  openaiApiKey: null,
+  codexAuthJson: null,
+  geminiApiKey: null,
+};
+
+/**
+ * The single provider a set routes to by precedence, or null when the set holds
+ * no model credentials at all. `JobSpec`-shaped sets (with `aws` supplied as
+ * `awsCredentials`) must be adapted to `ProviderCredentials` before calling.
+ */
+export function providerForCredentials(
+  creds: Partial<ProviderCredentials>,
+): ProviderName | null {
+  return PROVIDERS.find((p) => p.hasCredentials(creds))?.name ?? null;
+}
+
+/** Whether a set carries any model credential at all. */
+export function hasModelCredentials(
+  creds: Partial<ProviderCredentials>,
+): boolean {
+  return providerForCredentials(creds) !== null;
 }
 
 /**
@@ -111,34 +201,85 @@ export async function resolveModelCredentials(
  * provider's fields are non-null. The interactive deploy path instead routes by
  * the provider of the model the user actually picked.
  */
-export function pickProvider(creds: ModelCredentials): {
-  aws: AwsCredentials | null;
-  anthropicApiKey: string | null;
-  anthropicOauthToken: string | null;
-  openaiApiKey: string | null;
-  codexAuthJson: string | null;
-  geminiApiKey: string | null;
+export function pickProvider(creds: ModelCredentials): ProviderCredentials {
+  const provider = PROVIDERS.find((p) => p.hasCredentials(creds));
+  return { ...NO_CREDENTIALS, ...(provider?.select(creds) ?? {}) };
+}
+
+/**
+ * Selects the exact credentials a single run will use, routing by the provider
+ * of the model the user picked (`modelProvider`) and, for providers with two
+ * credential kinds, the kind they pinned (`modelAuth`). This is the one place
+ * the interactive-deploy, REST, and webhook paths share for that decision.
+ *
+ * `modelProvider` unset (programmatic clients with no picker) falls back to the
+ * primary-provider precedence via `pickProvider`. `modelAuth` unset falls back
+ * to the API-key-beats-subscription precedence. Returns the resolved provider
+ * (null when the set is empty), the auth kind the run actually landed on (for
+ * the two-kind providers), and the six credential fields with only the chosen
+ * provider's populated.
+ */
+export function selectRunCredentials(
+  resolved: ModelCredentials,
+  opts: { modelProvider?: ProviderName; modelAuth?: AuthKind } = {},
+): ProviderCredentials & {
+  provider: ProviderName | null;
+  authKind: AuthKind | null;
 } {
-  const none = {
-    aws: null,
-    anthropicApiKey: null,
-    anthropicOauthToken: null,
-    openaiApiKey: null,
-    codexAuthJson: null,
-    geminiApiKey: null,
+  // A picked provider wins; otherwise fall back to the primary-provider
+  // precedence. `pickProvider` already zeroes the non-primary fields, so the
+  // fallback also supplies the credentials for that provider.
+  const primary = pickProvider(resolved);
+  const provider = opts.modelProvider ?? providerForCredentials(resolved);
+
+  const wantSubscription = opts.modelAuth === "subscription";
+  const wantApiKey = opts.modelAuth === "api_key";
+
+  const aws = provider === "bedrock" ? (resolved.aws ?? primary.aws) : null;
+  const anthropicApiKey =
+    provider === "anthropic" && !wantSubscription
+      ? (resolved.anthropicApiKey ?? primary.anthropicApiKey)
+      : null;
+  const anthropicOauthToken =
+    provider === "anthropic" && !wantApiKey && !anthropicApiKey
+      ? (resolved.anthropicOauthToken ?? primary.anthropicOauthToken)
+      : null;
+  const openaiApiKey =
+    provider === "openai" && !wantSubscription
+      ? (resolved.openaiApiKey ?? primary.openaiApiKey)
+      : null;
+  const codexAuthJson =
+    provider === "openai" && !wantApiKey && !openaiApiKey
+      ? (resolved.codexAuthJson ?? primary.codexAuthJson)
+      : null;
+  const geminiApiKey =
+    provider === "gemini" ? (resolved.geminiApiKey ?? primary.geminiApiKey) : null;
+
+  // The auth kind this actually landed on (the API key beats the subscription),
+  // for the two-kind providers; null for Bedrock/Gemini and empty sets.
+  const authKind: AuthKind | null =
+    provider === "anthropic"
+      ? anthropicApiKey
+        ? "api_key"
+        : anthropicOauthToken
+          ? "subscription"
+          : null
+      : provider === "openai"
+        ? openaiApiKey
+          ? "api_key"
+          : codexAuthJson
+            ? "subscription"
+            : null
+        : null;
+
+  return {
+    provider,
+    authKind,
+    aws,
+    anthropicApiKey,
+    anthropicOauthToken,
+    openaiApiKey,
+    codexAuthJson,
+    geminiApiKey,
   };
-  if (creds.aws) return { ...none, aws: creds.aws };
-  if (creds.anthropicApiKey || creds.anthropicOauthToken)
-    return {
-      ...none,
-      anthropicApiKey: creds.anthropicApiKey,
-      anthropicOauthToken: creds.anthropicOauthToken,
-    };
-  if (creds.openaiApiKey || creds.codexAuthJson)
-    return {
-      ...none,
-      openaiApiKey: creds.openaiApiKey,
-      codexAuthJson: creds.codexAuthJson,
-    };
-  return { ...none, geminiApiKey: creds.geminiApiKey };
 }

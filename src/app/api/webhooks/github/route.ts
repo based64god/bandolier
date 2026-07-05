@@ -43,7 +43,10 @@ import {
   pickPrWriterModel,
 } from "~/server/agents/models";
 import { repoToNamespace } from "~/server/agents/namespace";
-import { resolveModelCredentials } from "~/server/agents/resolve-credentials";
+import {
+  resolveModelCredentials,
+  selectRunCredentials,
+} from "~/server/agents/resolve-credentials";
 import {
   getRepoWebhookConfig,
   type RepoNetworkPolicy,
@@ -349,19 +352,17 @@ async function resolveWebhookRun(opts: {
     });
   }
 
-  const awsCredentials = provider === "bedrock" ? resolved.aws : null;
-  const anthropicApiKey =
-    provider === "anthropic" ? resolved.anthropicApiKey : null;
-  // Subscription credentials apply only when no metered key is set — both can
-  // be configured, with the API key taking precedence.
-  const anthropicOauthToken =
-    provider === "anthropic" && !anthropicApiKey
-      ? resolved.anthropicOauthToken
-      : null;
-  const openaiApiKey = provider === "openai" ? resolved.openaiApiKey : null;
-  const codexAuthJson =
-    provider === "openai" && !openaiApiKey ? resolved.codexAuthJson : null;
-  const geminiApiKey = provider === "gemini" ? resolved.geminiApiKey : null;
+  // Select the run's credentials by the chosen model's provider (mirrors the
+  // deploy path). No modelAuth here — the webhook picks by provider and lets the
+  // API key beat the subscription, which selectRunCredentials does by default.
+  const {
+    aws: awsCredentials,
+    anthropicApiKey,
+    anthropicOauthToken,
+    openaiApiKey,
+    codexAuthJson,
+    geminiApiKey,
+  } = selectRunCredentials(resolved, { modelProvider: provider });
   if (
     !awsCredentials &&
     !anthropicApiKey &&

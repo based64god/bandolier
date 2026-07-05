@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -156,20 +155,10 @@ func (p *acpProxy) endSession() { p.endOnce.Do(func() { close(p.ended) }) }
 // the seed session/new response to capture the sessionId and send the seed
 // prompt.
 func (p *acpProxy) a2cPump(ctx context.Context, stdout io.Reader) {
-	reader := bufio.NewReaderSize(stdout, 1<<20)
-	for {
-		line, err := reader.ReadBytes('\n')
-		if frame := bytes.TrimSpace(line); len(frame) > 0 {
-			p.handleAgentFrame(ctx, frame)
-		}
-		if err != nil {
-			// The agent exited (or the stream broke): end the session so the
-			// caller can run its post-run step rather than waiting on the idle
-			// timeout.
-			p.endSession()
-			return
-		}
-	}
+	forEachLine(stdout, func(line []byte) { p.handleAgentFrame(ctx, bytes.TrimSpace(line)) })
+	// The agent exited (or the stream broke): end the session so the caller can
+	// run its post-run step rather than waiting on the idle timeout.
+	p.endSession()
 }
 
 func (p *acpProxy) handleAgentFrame(ctx context.Context, frame []byte) {

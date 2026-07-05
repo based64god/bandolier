@@ -260,6 +260,18 @@ export const repoWebhookConfig = pgTable("repo_webhook_config", {
   // handler bounds itself (one resume per failing commit, capped per PR) to
   // avoid an endless resume→push→fail loop.
   resumeOnCiFailure: boolean("resume_on_ci_failure").notNull().default(false),
+  // When true, every pull request a Bandolier run reports as its output has
+  // GitHub auto-merge enabled on it the moment the run finishes (the harness
+  // ingest callback), so the PR merges itself once its required checks pass and
+  // it's mergeable — no human click. Off by default: opt-in, since it lets an
+  // agent's work land without a human pressing merge. Auto-merge still respects
+  // the branch's protection rules (required reviews/checks), so it only lands
+  // what the repo's own gates already allow; a repo with no such gates would
+  // merge immediately. The merge method is the first of merge/squash/rebase the
+  // repo permits.
+  autoMergeBandolierPrs: boolean("auto_merge_bandolier_prs")
+    .notNull()
+    .default(false),
   // ── Repo-scoped credentials (admin-only) ──────────────────────────────────
   // Shared infrastructure for everyone working on this repo: a kubeconfig the
   // repo's agents run on and model credentials they authenticate with. Only a

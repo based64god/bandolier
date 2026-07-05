@@ -207,6 +207,12 @@ It's layered _on top of_ Bandolier's own framing (the working agreement that let
 
 ---
 
+## Auto-merging Bandolier PRs (optional)
+
+A repo admin can toggle **Auto-merge Bandolier PRs** in the repo-config UI. When on, every pull request a Bandolier run reports as its output has GitHub's native auto-merge enabled the moment the run finishes, so the PR merges itself once its required checks pass and it's mergeable — no human click. Auto-merge still honors the branch's protection rules (required reviews / status checks), so this only lands what the repo's own gates already allow; a branch with no protection would merge right away. The merge method is the first of merge / squash / rebase the repo permits. **Off by default** — it lets an agent's work merge without a human pressing the button, so enable it only when your branch protection is the gate you trust.
+
+---
+
 ## Repository credentials and the maintainer gate
 
 A repo admin can configure **shared repo-level credentials** (a kubeconfig and/or model-provider API keys) so everyone working on the repo runs on the same pooled infrastructure instead of each pasting their own. Because those credentials are shared — a run with them spends the repo's cluster and the repo's API keys — executing on them is restricted to GitHub users with **maintainer** access or higher on the repo. A run only counts as using shared credentials when it actually resolves to the repo's kubeconfig or model key (see the prefer-repo-credentials toggle); a user with their own credentials configured is never gated.

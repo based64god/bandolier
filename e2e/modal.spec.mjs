@@ -1,33 +1,11 @@
-// Browser smoke test for the shared Modal shell. Playwright is installed
-// globally in this environment; resolve it locally first, else fall back to the
-// global install.
+// Browser smoke test for the shared Modal shell.
 //
 // Run against a dev server serving the harness route:
 //   pnpm next dev --port 3137 &
 //   node e2e/modal.spec.mjs
-import { createRequire } from "node:module";
-const require = createRequire(import.meta.url);
-let chromium;
-try {
-  ({ chromium } = require("playwright"));
-} catch {
-  ({ chromium } = require("/usr/local/lib/node_modules/playwright/index.js"));
-}
+import { BASE, check, launch, finish } from "./helpers.mjs";
 
-const BASE = process.env.MODAL_BASE_URL ?? "http://localhost:3137";
-let passed = 0;
-let failed = 0;
-function check(name, cond) {
-  if (cond) {
-    passed++;
-    console.log(`  ✓ ${name}`);
-  } else {
-    failed++;
-    console.log(`  ✗ ${name}`);
-  }
-}
-
-const browser = await chromium.launch();
+const browser = await launch();
 const page = await browser.newPage();
 const closes = () => page.getByTestId("closes").innerText();
 
@@ -78,6 +56,4 @@ await page.keyboard.press("Escape");
 await panel.waitFor({ state: "hidden", timeout: 5000 });
 check("Escape closes", (await closes()) === "2");
 
-await browser.close();
-console.log(`\n${passed} passed, ${failed} failed`);
-process.exit(failed > 0 ? 1 : 0);
+await finish(browser);

@@ -2,70 +2,32 @@ import { type NextRequest, NextResponse } from "next/server";
 
 import type { EFFORT_LEVELS } from "~/lib/effort";
 import { listModelsForUser, pickDefaultModel } from "~/server/agents/models";
-import { repoToNamespace } from "~/server/agents/namespace";
-import {
-  authenticate,
-  callerForUser,
-  errorMessage,
-  getAccessibleRepo,
-  statusForTrpcError,
-  toTaskResource,
-} from "~/server/api/rest";
+import { resolve, restHandler, toTaskResource } from "~/server/api/rest";
 import { db } from "~/server/db";
 
 type Params = { params: Promise<{ owner: string; repo: string }> };
 
 // GET /api/v1/repos/{owner}/{repo}/tasks — list this repo's tasks.
-export async function GET(req: NextRequest, { params }: Params) {
-  const userId = await authenticate(req);
-  if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
+export const GET = restHandler(async (req: NextRequest, { params }: Params) => {
   const { owner, repo } = await params;
   const fullName = `${owner}/${repo}`;
-  if (!(await getAccessibleRepo(userId, fullName))) {
-    return NextResponse.json(
-      { error: "Repository not found or not accessible" },
-      { status: 403 },
-    );
-  }
+  const ctx = await resolve(req, fullName);
+  if ("error" in ctx) return ctx.error;
 
-  const caller = await callerForUser(userId);
-  if (!caller) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  try {
-    const tasks = await caller.agents.list({
-      namespace: repoToNamespace(fullName),
-      repoFullName: fullName,
-    });
-    return NextResponse.json({ tasks: tasks.map(toTaskResource) });
-  } catch (err) {
-    return NextResponse.json(
-      { error: errorMessage(err) },
-      { status: statusForTrpcError(err) },
-    );
-  }
-}
+  const tasks = await ctx.caller.agents.list({
+    namespace: ctx.namespace,
+    repoFullName: fullName,
+  });
+  return NextResponse.json({ tasks: tasks.map(toTaskResource) });
+});
 
 // POST /api/v1/repos/{owner}/{repo}/tasks — create (deploy) a task.
-export async function POST(req: NextRequest, { params }: Params) {
-  const userId = await authenticate(req);
-  if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
+export const POST = restHandler(async (req: NextRequest, { params }: Params) => {
   const { owner, repo } = await params;
   const fullName = `${owner}/${repo}`;
-  const access = await getAccessibleRepo(userId, fullName);
-  if (!access) {
-    return NextResponse.json(
-      { error: "Repository not found or not accessible" },
-      { status: 403 },
-    );
-  }
+  const ctx = await resolve(req, fullName);
+  if ("error" in ctx) return ctx.error;
+  const { access, userId } = ctx;
 
   let body: {
     task?: string;
@@ -101,33 +63,21 @@ export async function POST(req: NextRequest, { params }: Params) {
     );
   }
 
-  const caller = await callerForUser(userId);
-  if (!caller) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  try {
-    const { jobName } = await caller.agents.deploy({
-      namespace: repoToNamespace(fullName),
-      task: body.task ?? body.prompt ?? "",
-      repoUrl: access.cloneUrl,
-      repoFullName: fullName,
-      branch: body.branch ?? access.defaultBranch,
-      model,
-      modelProvider: body.modelProvider,
-      modelAuth: body.modelAuth,
-      effort: body.effort,
-      maxTurns: body.maxTurns,
-      cpu: body.cpu,
-      memory: body.memory,
-      issueNumber: body.issueNumber,
-      outputType: body.outputType,
-    });
-    return NextResponse.json({ id: jobName, jobName }, { status: 201 });
-  } catch (err) {
-    return NextResponse.json(
-      { error: errorMessage(err) },
-      { status: statusForTrpcError(err) },
-    );
-  }
-}
+  const { jobName } = await ctx.caller.agents.deploy({
+    namespace: ctx.namespace,
+    task: body.task ?? body.prompt ?? "",
+    repoUrl: access.cloneUrl,
+    repoFullName: fullName,
+    branch: body.branch ?? access.defaultBranch,
+    model,
+    modelProvider: body.modelProvider,
+    modelAuth: body.modelAuth,
+    effort: body.effort,
+    maxTurns: body.maxTurns,
+    cpu: body.cpu,
+    memory: body.memory,
+    issueNumber: body.issueNumber,
+    outputType: body.outputType,
+  });
+  return NextResponse.json({ id: jobName, jobName }, { status: 201 });
+});

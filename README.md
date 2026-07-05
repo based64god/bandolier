@@ -116,7 +116,7 @@ Open <http://localhost:3000> and sign in with GitHub.
 Open **Settings** in the dashboard and add:
 
 - **A model provider** — AWS Bedrock credentials, an API key, or a subscription login. For Claude Pro/Max, run `claude setup-token` locally and paste the `sk-ant-oat01-…` token; for ChatGPT, run `codex login` locally and paste the contents of `~/.codex/auth.json`. API keys are validated before they're saved and the model picker is populated live from your provider; subscription credentials can't be probed via the API, so they get a static list of current models and are verified on the first run.
-- **A kubeconfig** — the cluster your agents deploy into (a repo can also provide a shared one).
+- **A kubeconfig** — the cluster your agents deploy into (a repo can also provide a shared one). Bandolier runs the Kubernetes client on its server, so exec-plugin kubeconfigs (the `aws`/`gcloud` credential plugins EKS/GKE emit) and ones that reference cert/key files on your laptop won't work — the server has neither those binaries nor those files. Generate a self-contained, token-based kubeconfig from your current cluster instead: `curl -fsSL https://<your-host>/setup.sh | bash` (hosted) or `./scripts/create-bandolier-kubeconfig.sh` (local checkout), then paste the output here. Add `--scoped` (e.g. `curl -fsSL https://<your-host>/setup.sh | bash -s -- --scoped`) to bind a least-privilege ClusterRole instead of cluster-admin.
 
 You can now select a repo, deploy an agent, and watch it work.
 

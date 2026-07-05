@@ -4,14 +4,11 @@ import "encoding/json"
 
 // ACP method and notification names.
 const (
-	MethodInitialize        = "initialize"
-	MethodAuthenticate      = "authenticate"
-	MethodNewSession        = "session/new"
-	MethodLoadSession       = "session/load"
-	MethodPrompt            = "session/prompt"
-	MethodCancel            = "session/cancel" // notification
-	MethodSessionUpdate     = "session/update" // notification
-	MethodRequestPermission = "session/request_permission"
+	MethodInitialize    = "initialize"
+	MethodNewSession    = "session/new"
+	MethodPrompt        = "session/prompt"
+	MethodCancel        = "session/cancel" // notification
+	MethodSessionUpdate = "session/update" // notification
 )
 
 // session/update discriminator values (the `sessionUpdate` field).
@@ -21,32 +18,27 @@ const (
 	UpdateUserMessageChunk  = "user_message_chunk"
 	UpdateToolCall          = "tool_call"
 	UpdateToolCallUpdate    = "tool_call_update"
-	UpdatePlan              = "plan"
 	UpdateAvailableCommands = "available_commands_update"
 )
 
 // session/prompt stop reasons.
 const (
-	StopEndTurn         = "end_turn"
-	StopMaxTokens       = "max_tokens"
-	StopMaxTurnRequests = "max_turn_requests"
-	StopRefusal         = "refusal"
-	StopCancelled       = "cancelled"
+	StopEndTurn   = "end_turn"
+	StopRefusal   = "refusal"
+	StopCancelled = "cancelled"
 )
 
 // Tool-call status and kind values.
 const (
-	ToolStatusPending    = "pending"
-	ToolStatusInProgress = "in_progress"
-	ToolStatusCompleted  = "completed"
-	ToolStatusFailed     = "failed"
+	ToolStatusPending   = "pending"
+	ToolStatusCompleted = "completed"
+	ToolStatusFailed    = "failed"
 
 	ToolKindRead    = "read"
 	ToolKindEdit    = "edit"
 	ToolKindExecute = "execute"
 	ToolKindSearch  = "search"
 	ToolKindFetch   = "fetch"
-	ToolKindThink   = "think"
 	ToolKindOther   = "other"
 )
 
@@ -60,19 +52,8 @@ type Implementation struct {
 // ── initialize ────────────────────────────────────────────────────────────────
 
 type InitializeParams struct {
-	ProtocolVersion    int                `json:"protocolVersion"`
-	ClientCapabilities ClientCapabilities `json:"clientCapabilities,omitempty"`
-	ClientInfo         *Implementation    `json:"clientInfo,omitempty"`
-}
-
-type ClientCapabilities struct {
-	FS       FSCapability `json:"fs,omitempty"`
-	Terminal bool         `json:"terminal,omitempty"`
-}
-
-type FSCapability struct {
-	ReadTextFile  bool `json:"readTextFile,omitempty"`
-	WriteTextFile bool `json:"writeTextFile,omitempty"`
+	ProtocolVersion int             `json:"protocolVersion"`
+	ClientInfo      *Implementation `json:"clientInfo,omitempty"`
 }
 
 type InitializeResult struct {
@@ -125,10 +106,6 @@ type PromptParams struct {
 
 type PromptResult struct {
 	StopReason string `json:"stopReason"`
-}
-
-type CancelParams struct {
-	SessionID string `json:"sessionId"`
 }
 
 // ── content ───────────────────────────────────────────────────────────────────
@@ -191,17 +168,6 @@ type ToolCallContent struct {
 	Content ContentBlock `json:"content"`
 }
 
-type PlanUpdate struct {
-	SessionUpdate string      `json:"sessionUpdate"` // UpdatePlan
-	Entries       []PlanEntry `json:"entries"`
-}
-
-type PlanEntry struct {
-	Content  string `json:"content"`
-	Priority string `json:"priority,omitempty"`
-	Status   string `json:"status,omitempty"`
-}
-
 // AvailableCommandsUpdate advertises the slash commands the session supports, so
 // a client can offer a typeahead menu. The agent emits it once the underlying
 // CLI reports its command set (e.g. claude's stream-json init event).
@@ -225,27 +191,4 @@ func UpdateKind(raw json.RawMessage) string {
 	}
 	_ = json.Unmarshal(raw, &probe)
 	return probe.SessionUpdate
-}
-
-// ── session/request_permission ────────────────────────────────────────────────
-
-type RequestPermissionParams struct {
-	SessionID string             `json:"sessionId"`
-	ToolCall  json.RawMessage    `json:"toolCall,omitempty"`
-	Options   []PermissionOption `json:"options"`
-}
-
-type PermissionOption struct {
-	OptionID string `json:"optionId"`
-	Name     string `json:"name"`
-	Kind     string `json:"kind"` // allow_once, allow_always, reject_once, reject_always
-}
-
-type RequestPermissionResult struct {
-	Outcome PermissionOutcome `json:"outcome"`
-}
-
-type PermissionOutcome struct {
-	Outcome  string `json:"outcome"` // "selected" | "cancelled"
-	OptionID string `json:"optionId,omitempty"`
 }

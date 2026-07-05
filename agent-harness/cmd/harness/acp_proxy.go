@@ -337,7 +337,7 @@ func userMessageFrame(sessionID, text string) string {
 		"params": map[string]any{
 			"sessionId": sessionID,
 			"update": map[string]any{
-				"sessionUpdate": "user_message_chunk",
+				"sessionUpdate": acp.UpdateUserMessageChunk,
 				"content":       map[string]any{"type": "text", "text": text},
 			},
 		},
@@ -456,15 +456,15 @@ func renderFrameToTranscript(raw []byte) {
 			return
 		}
 		switch u.SessionUpdate {
-		case "agent_message_chunk":
+		case acp.UpdateAgentMessageChunk:
 			if t := strings.TrimSpace(u.Content.Text); t != "" {
 				fmt.Fprintln(stdoutTee, t)
 			}
-		case "user_message_chunk":
+		case acp.UpdateUserMessageChunk:
 			if t := strings.TrimSpace(u.Content.Text); t != "" {
 				logUserInput(t)
 			}
-		case "tool_call":
+		case acp.UpdateToolCall:
 			if u.Title != "" {
 				log.Printf("[harness] → %s", u.Title)
 			}

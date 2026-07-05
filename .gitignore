@@ -55,3 +55,4 @@ agent-harness/harness
 *.tfstate
 *.tfstate.*
 terraform.tfvars
+.serena/

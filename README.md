@@ -209,7 +209,7 @@ It's layered _on top of_ Bandolier's own framing (the working agreement that let
 
 ## Auto-merging Bandolier PRs (optional)
 
-A repo admin can toggle **Auto-merge Bandolier PRs** in the repo-config UI. When on, every pull request a Bandolier run reports as its output has GitHub's native auto-merge enabled the moment the run finishes, so the PR merges itself once its required checks pass and it's mergeable — no human click. Auto-merge still honors the branch's protection rules (required reviews / status checks), so this only lands what the repo's own gates already allow; a branch with no protection would merge right away. The merge method is the first of merge / squash / rebase the repo permits. **Off by default** — it lets an agent's work merge without a human pressing the button, so enable it only when your branch protection is the gate you trust.
+Auto-merge lives in the repo as a GitHub Action, not in the app. `.github/workflows/auto-merge.yml` triggers when the `CI` workflow finishes **successfully** on a `bandolier/*` head branch, resolves the open PR for that branch, and enables GitHub's native auto-merge (`gh pr merge --auto --squash`). The PR then lands on its own once every required check has passed and it's mergeable — no human click. Auto-merge still honors the branch's protection rules (required reviews / status checks), so this only merges what the repo's own gates already allow; a branch with no protection would merge right away. It's scoped to `bandolier/*` branches, so agent PRs auto-merge while human PRs still need a manual merge. Drop the workflow (or narrow its `if:` condition) to change the policy.
 
 ---
 

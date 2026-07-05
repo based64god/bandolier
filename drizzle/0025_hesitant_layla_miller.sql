@@ -1,0 +1,1 @@
+ALTER TABLE "repo_webhook_config" DROP COLUMN "auto_merge_bandolier_prs";

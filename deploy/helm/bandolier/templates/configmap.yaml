@@ -13,3 +13,6 @@ data:
   {{- with .Values.config.githubAppSlug }}
   NEXT_PUBLIC_GITHUB_APP_SLUG: {{ . | quote }}
   {{- end }}
+  {{- with .Values.config.vapidPublicKey }}
+  NEXT_PUBLIC_VAPID_PUBLIC_KEY: {{ . | quote }}
+  {{- end }}

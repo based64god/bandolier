@@ -49,6 +49,7 @@
     "node_modules",
     "generated",
     "coverage",
-    "public"
+    "public",
+    "docs-site"
   ]
 }

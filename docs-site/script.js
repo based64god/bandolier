@@ -23,8 +23,7 @@
   var themeToggle = document.querySelector(".theme-toggle");
   if (themeToggle) {
     themeToggle.addEventListener("click", function () {
-      var next =
-        root.getAttribute("data-theme") === "light" ? "dark" : "light";
+      var next = root.getAttribute("data-theme") === "light" ? "dark" : "light";
       root.setAttribute("data-theme", next);
       try {
         localStorage.setItem(STORAGE_KEY, next);
@@ -90,7 +89,7 @@
 
   /* ---------- Scroll spy ---------- */
   var links = Array.prototype.slice.call(
-    document.querySelectorAll(".sidebar a[href^='#']")
+    document.querySelectorAll(".sidebar a[href^='#']"),
   );
   var byId = {};
   links.forEach(function (a) {
@@ -128,8 +127,7 @@
         }
       }
       var nearBottom =
-        window.innerHeight + window.scrollY >=
-        document.body.scrollHeight - 4;
+        window.innerHeight + window.scrollY >= document.body.scrollHeight - 4;
       if (nearBottom) active = targets[targets.length - 1].id;
       setActive(active);
     };
@@ -145,7 +143,7 @@
           ticking = false;
         });
       },
-      { passive: true }
+      { passive: true },
     );
     onScroll();
   }

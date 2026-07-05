@@ -76,9 +76,7 @@ var (
 // artifacts are enabled. No-op only when the ingest env isn't injected.
 func uploadTranscript() {
 	url := os.Getenv("BANDOLIER_INGEST_URL")
-	token := os.Getenv("BANDOLIER_INGEST_TOKEN")
-	job := os.Getenv("BANDOLIER_JOB")
-	if url == "" || token == "" || job == "" {
+	if url == "" || bando.token == "" || bando.job == "" {
 		return
 	}
 
@@ -87,13 +85,11 @@ func uploadTranscript() {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	req, err := bando.newRequest(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		log.Printf("[harness] warn: transcript request: %v", err)
 		return
 	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("X-Bandolier-Job", job)
 	req.Header.Set("Content-Type", "text/plain; charset=utf-8")
 	// Report the run's structured output alongside the transcript so it's
 	// persisted durably — pod logs (the live source) vanish with the pod.
@@ -109,7 +105,7 @@ func uploadTranscript() {
 		req.Header.Set("X-Bandolier-Tokens", tokens)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := bando.do(req)
 	if err != nil {
 		log.Printf("[harness] warn: transcript upload failed: %v", err)
 		return
@@ -136,23 +132,13 @@ const maxParentContextBytes = 100_000
 // or any error — because a resume must still run without it.
 func fetchParentContext(ctx context.Context, cfg config) string {
 	url := cfg.contextURL
-	token := os.Getenv("BANDOLIER_INGEST_TOKEN")
-	job := os.Getenv("BANDOLIER_JOB")
-	if url == "" || token == "" || job == "" {
+	if url == "" || bando.token == "" || bando.job == "" {
 		return ""
 	}
 
 	reqCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, url, nil)
-	if err != nil {
-		log.Printf("[harness] warn: parent context request: %v", err)
-		return ""
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("X-Bandolier-Job", job)
-
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := bando.get(reqCtx, url)
 	if err != nil {
 		log.Printf("[harness] warn: parent context fetch failed: %v", err)
 		return ""
@@ -2274,14 +2260,7 @@ func pollInput(ctx context.Context, cfg config) (string, bool, error) {
 	if cfg.inputURL == "" {
 		return "", false, fmt.Errorf("no input URL configured")
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, cfg.inputURL, nil)
-	if err != nil {
-		return "", false, err
-	}
-	req.Header.Set("Authorization", "Bearer "+os.Getenv("BANDOLIER_INGEST_TOKEN"))
-	req.Header.Set("X-Bandolier-Job", os.Getenv("BANDOLIER_JOB"))
-
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := bando.get(ctx, cfg.inputURL)
 	if err != nil {
 		return "", false, err
 	}

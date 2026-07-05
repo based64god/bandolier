@@ -67,6 +67,12 @@ variable "ha_control_plane" {
   default     = false
 }
 
+variable "agent_only" {
+  description = "Provision an agent-only cluster: DOKS (plus Spaces, when enabled) with no database and no Bandolier Helm release. Use when this cluster only runs agent Jobs for a Bandolier app hosted elsewhere — paste this cluster's kubeconfig into that app. Overrides managed_database and install_app; incompatible with dns_zone."
+  type        = bool
+  default     = false
+}
+
 # ── Database ──────────────────────────────────────────────────────────────────
 
 variable "managed_database" {

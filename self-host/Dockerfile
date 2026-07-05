@@ -27,6 +27,13 @@ ENV GOROOT=/usr/local/go
 ENV GOPATH=/root/go
 ENV PATH="/usr/local/go/bin:/root/go/bin:${PATH}"
 
+# gopls — the Go language server, so Serena (installed in the base harness
+# image) gets language-server-backed symbol tools for Go code. Installed into
+# /root/go/bin (GOPATH/bin, on PATH above); the module/build caches are only
+# build residue, so drop them to keep the layer small.
+RUN go install golang.org/x/tools/gopls@latest \
+    && go clean -cache -modcache
+
 # ── Node.js (+ npm, corepack) ─────────────────────────────────────────────────
 # Copy the node binary and its bundled modules, then recreate the launcher
 # symlinks the official node image ships (relative, so they resolve under
@@ -38,8 +45,8 @@ RUN ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && ln -sf ../lib/node_modules/corepack/dist/corepack.js /usr/local/bin/corepack \
     && corepack enable
 
-# Fail the build loudly if either toolchain can't run on the base image.
-RUN go version && node --version && npm --version
+# Fail the build loudly if either toolchain (or gopls) can't run on the base image.
+RUN go version && gopls version && node --version && npm --version
 
 # ── Warm the pnpm store ───────────────────────────────────────────────────────
 # Prefetch this repo's dependencies into pnpm's content-addressable store so a

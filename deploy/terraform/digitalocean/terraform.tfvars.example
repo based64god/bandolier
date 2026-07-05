@@ -3,12 +3,18 @@
 #   export SPACES_ACCESS_KEY_ID=DO...          # admin Spaces key, for bucket creation
 #   export SPACES_SECRET_ACCESS_KEY=...
 
-# ── Required ──────────────────────────────────────────────────────────────────
+# ── Required (unless agent_only = true) ───────────────────────────────────────
 
 # GitHub OAuth app (Settings → Developer settings → OAuth Apps). Callback URL:
 #   <app url>/api/auth/callback/github
 github_client_id     = ""
 github_client_secret = ""
+
+# ── Cluster mode ──────────────────────────────────────────────────────────────
+
+# agent_only = false   # true → cluster only runs agent Jobs: no database, no
+#                      # app Helm release; paste this cluster's kubeconfig into
+#                      # a Bandolier app hosted elsewhere
 
 # ── Placement & sizing ────────────────────────────────────────────────────────
 

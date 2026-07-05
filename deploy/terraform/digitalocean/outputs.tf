@@ -19,8 +19,8 @@ output "kubeconfig" {
 # ── App ───────────────────────────────────────────────────────────────────────
 
 output "app_url" {
-  description = "Where the app is served. Without DNS this is the port-forward address — run: kubectl -n <namespace> port-forward svc/<name> 3000:80"
-  value       = local.app_url
+  description = "Where the app is served. Without DNS this is the port-forward address — run: kubectl -n <namespace> port-forward svc/<name> 3000:80. Empty when agent_only=true (no app on this cluster)."
+  value       = var.agent_only ? "" : local.app_url
 }
 
 output "ingress_load_balancer_ip" {

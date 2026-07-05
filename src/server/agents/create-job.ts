@@ -20,6 +20,7 @@ import {
   NETWORK_POLICY_NAME,
   type NetworkPolicyOptions,
 } from "~/server/agents/network-policy";
+import { providerForCredentials } from "~/server/agents/resolve-credentials";
 import { db } from "~/server/db";
 import { taskRun } from "~/server/db/schema";
 import {
@@ -403,16 +404,29 @@ export interface ProviderDescriptor {
 
 /**
  * Picks the run's provider from the spec's credentials and derives its full
- * credential wiring (env refs + secret payload) once. Precedence: AWS Bedrock
- * beats Anthropic (API key beats subscription OAuth token), which beats OpenAI
- * (API key beats ChatGPT auth.json), which beats Gemini. Throws when the spec
- * carries no model credentials at all — there is no server fallback.
+ * credential wiring (env refs + secret payload) once. Precedence comes from
+ * the provider registry in resolve-credentials.ts (Bedrock beats Anthropic,
+ * which beats OpenAI, which beats Gemini; within a provider an API key beats
+ * a subscription credential). Throws when the spec carries no model
+ * credentials at all — there is no server fallback.
  */
 export function resolveProvider(spec: JobSpec): ProviderDescriptor {
   const model = spec.model;
 
-  if (spec.awsCredentials) {
-    const aws = spec.awsCredentials;
+  // Route by the single provider precedence the registry defines, so this
+  // path can't drift from the resolver. The spec spells the Bedrock field
+  // `awsCredentials`; adapt it to the registry's `aws`.
+  const provider = providerForCredentials({
+    aws: spec.awsCredentials ?? null,
+    anthropicApiKey: spec.anthropicApiKey ?? null,
+    anthropicOauthToken: spec.anthropicOauthToken ?? null,
+    openaiApiKey: spec.openaiApiKey ?? null,
+    codexAuthJson: spec.codexAuthJson ?? null,
+    geminiApiKey: spec.geminiApiKey ?? null,
+  });
+
+  if (provider === "bedrock") {
+    const aws = spec.awsCredentials!;
     const secretData: Record<string, string> = {
       AWS_ACCESS_KEY_ID: aws.accessKeyId,
       AWS_SECRET_ACCESS_KEY: aws.secretAccessKey,
@@ -439,10 +453,10 @@ export function resolveProvider(spec: JobSpec): ProviderDescriptor {
     };
   }
 
-  // An API key and a subscription OAuth token are two routes to the same
-  // provider; the key takes precedence, so exactly one lands in the secret
-  // (matching the env var the pod references).
-  if (spec.anthropicApiKey || spec.anthropicOauthToken) {
+  if (provider === "anthropic") {
+    // An API key and a subscription OAuth token are two routes to the same
+    // provider; the key takes precedence, so exactly one lands in the secret
+    // (matching the env var the pod references).
     const [key, value] = spec.anthropicApiKey
       ? (["ANTHROPIC_API_KEY", spec.anthropicApiKey] as const)
       : (["CLAUDE_CODE_OAUTH_TOKEN", spec.anthropicOauthToken!] as const);
@@ -456,7 +470,7 @@ export function resolveProvider(spec: JobSpec): ProviderDescriptor {
     };
   }
 
-  if (spec.openaiApiKey || spec.codexAuthJson) {
+  if (provider === "openai") {
     // The harness writes CODEX_AUTH_JSON to ~/.codex/auth.json for
     // ChatGPT-subscription auth; the API key takes precedence over it.
     const [key, value] = spec.openaiApiKey
@@ -472,7 +486,7 @@ export function resolveProvider(spec: JobSpec): ProviderDescriptor {
     };
   }
 
-  if (spec.geminiApiKey) {
+  if (provider === "gemini") {
     // agy (Antigravity CLI) authenticates via Application Default Credentials;
     // the harness writes this project credentials JSON to
     // ~/.gemini/credentials.json.
@@ -482,10 +496,11 @@ export function resolveProvider(spec: JobSpec): ProviderDescriptor {
       isClaude: false,
       plainEnv: [],
       secretRefs: [{ key: "GOOGLE_PROJECT_CREDENTIALS" }],
-      secretData: { GOOGLE_PROJECT_CREDENTIALS: spec.geminiApiKey },
+      secretData: { GOOGLE_PROJECT_CREDENTIALS: spec.geminiApiKey! },
     };
   }
 
+  // Only user-provided credentials are ever used — there is no server fallback.
   throw new Error(
     "No model credentials available. Configure AWS, Anthropic, OpenAI, or Gemini credentials in account settings.",
   );
@@ -513,7 +528,7 @@ export function buildEnvVars(
 
   const envVars: EnvVar[] = [
     { name: "CLAUDE_TASK", value: spec.task },
-    { name: "CLAUDE_MODEL", value: provider.model },
+    { name: "CLAUDE_MODEL", value: spec.model },
     { name: "AGENT_TITLE", value: spec.displayName },
     { name: "REPO_URL", value: spec.repoUrl ?? "" },
     { name: "BRANCH", value: spec.branch },

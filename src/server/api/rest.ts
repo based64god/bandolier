@@ -1,9 +1,11 @@
 import { TRPCError } from "@trpc/server";
 import { eq } from "drizzle-orm";
+import { type NextRequest, NextResponse } from "next/server";
 
 import { totalTokens, type TokenUsage } from "~/lib/tokens";
 import { resolveApiKey } from "~/server/agents/api-keys";
 import { getUserGithubToken } from "~/server/agents/github-token";
+import { repoToNamespace } from "~/server/agents/namespace";
 import { auth } from "~/server/better-auth";
 import { db } from "~/server/db";
 import { user } from "~/server/db/schema";
@@ -114,6 +116,75 @@ export async function getAccessibleRepo(
     default_branch: string;
   };
   return { cloneUrl: data.clone_url, defaultBranch: data.default_branch };
+}
+
+type RestContext = {
+  userId: string;
+  caller: NonNullable<Awaited<ReturnType<typeof callerForUser>>>;
+  access: { cloneUrl: string; defaultBranch: string };
+  fullName: string;
+  namespace: string;
+};
+
+/**
+ * Shared REST setup: authenticate, confirm repo access, and build a tRPC caller.
+ * Returns `{ error }` (a ready-to-return response) when any step fails, or the
+ * resolved context — including `access` (cloneUrl/defaultBranch) for deploys.
+ */
+export async function resolve(
+  req: NextRequest,
+  fullName: string,
+): Promise<{ error: NextResponse } | RestContext> {
+  const userId = await authenticate(req);
+  if (!userId) {
+    return {
+      error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
+    };
+  }
+
+  const access = await getAccessibleRepo(userId, fullName);
+  if (!access) {
+    return {
+      error: NextResponse.json(
+        { error: "Repository not found or not accessible" },
+        { status: 403 },
+      ),
+    };
+  }
+
+  const caller = await callerForUser(userId);
+  if (!caller) {
+    return {
+      error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
+    };
+  }
+
+  return {
+    userId,
+    caller,
+    access,
+    fullName,
+    namespace: repoToNamespace(fullName),
+  };
+}
+
+/**
+ * Wraps a route handler so any thrown error becomes the standard REST error
+ * envelope (`{ error }` with a tRPC-derived status) instead of a raw 500.
+ */
+export function restHandler<T extends unknown[]>(
+  fn: (...args: T) => Promise<NextResponse>,
+): (...args: T) => Promise<NextResponse> {
+  return async (...args: T) => {
+    try {
+      return await fn(...args);
+    } catch (err) {
+      return NextResponse.json(
+        { error: errorMessage(err) },
+        { status: statusForTrpcError(err) },
+      );
+    }
+  };
 }
 
 /** Maps a tRPC error to an HTTP status for the REST surface. */

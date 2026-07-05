@@ -31,11 +31,13 @@ const ROUTES = [
   "/dev/composer",
   "/dev/conversation",
   "/dev/credential-ui",
+  "/dev/deploy-modal",
   "/dev/effort-picker",
   "/dev/modal",
   "/dev/searchable-select",
   "/dev/status-badge",
   "/dev/task-row",
+  "/dev/tokens",
 ];
 
 // Inert placeholders for the handful of vars env.js validates at import time.

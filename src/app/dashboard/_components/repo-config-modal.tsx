@@ -6,6 +6,7 @@ import { env } from "~/env";
 import { EFFORT_LEVELS, providerSupportsEffort } from "~/lib/effort";
 import { api } from "~/trpc/react";
 import {
+  ComputeForm,
   CredentialFeedback,
   MaskedCredentialRow,
   SecretForm,
@@ -784,97 +785,41 @@ function RepoAutoMergeSection({ repoFullName }: { repoFullName: string }) {
 function RepoDefaultComputeSection({ repoFullName }: { repoFullName: string }) {
   const utils = api.useUtils();
   const { data: config } = api.webhooks.getConfig.useQuery({ repoFullName });
-  // null = untouched; the stored value (or blank) shows until the user types.
-  const [cpu, setCpu] = useState<string | null>(null);
-  const [memory, setMemory] = useState<string | null>(null);
-  const [result, setResult] = useState<string | null>(null);
-
-  const cpuValue = cpu ?? config?.computeCpu ?? "";
-  const memoryValue = memory ?? config?.computeMemory ?? "";
-  const dirty = cpu !== null || memory !== null;
-
   const setDefault = api.webhooks.setDefaultCompute.useMutation({
     onSuccess: () => {
       void utils.webhooks.getConfig.invalidate({ repoFullName });
       void utils.agents.deployDefaults.invalidate();
-      setCpu(null);
-      setMemory(null);
-      setResult("Saved ✓");
     },
   });
 
   return (
-    <div className="space-y-2 border-t border-white/10 pt-5">
-      <h3 className="text-xs font-semibold tracking-wider text-white/50 uppercase">
-        Default agent compute
-      </h3>
-      <p className="text-xs text-white/40">
-        CPU / memory limit for agents run on this repo, as Kubernetes quantities
-        (e.g. <code className="rounded bg-white/10 px-1 text-white/60">4</code>{" "}
-        CPUs,{" "}
-        <code className="rounded bg-white/10 px-1 text-white/60">8Gi</code>{" "}
-        memory). Issue labels like{" "}
-        <code className="rounded bg-white/10 px-1 text-white/60">cpu:4</code>{" "}
-        and{" "}
-        <code className="rounded bg-white/10 px-1 text-white/60">
-          memory:8Gi
-        </code>{" "}
-        override it per issue, as does the deploy form per task. Blank = the
-        user&rsquo;s default, then the built-in limit.
-      </p>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          setResult(null);
-          setDefault.mutate({
-            repoFullName,
-            cpu: cpuValue,
-            memory: memoryValue,
-          });
-        }}
-        className="flex items-end gap-3"
-      >
-        <div className="space-y-1.5">
-          <label className="block text-xs font-medium text-white/60">CPU</label>
-          <input
-            type="text"
-            value={cpuValue}
-            onChange={(e) => {
-              setCpu(e.target.value);
-              setResult(null);
-            }}
-            placeholder="2"
-            className="w-28 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 focus:border-purple-500/50 focus:outline-none"
-          />
-        </div>
-        <div className="space-y-1.5">
-          <label className="block text-xs font-medium text-white/60">
-            Memory
-          </label>
-          <input
-            type="text"
-            value={memoryValue}
-            onChange={(e) => {
-              setMemory(e.target.value);
-              setResult(null);
-            }}
-            placeholder="2Gi"
-            className="w-28 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 focus:border-purple-500/50 focus:outline-none"
-          />
-        </div>
-        <button
-          type="submit"
-          disabled={setDefault.isPending || !dirty}
-          className="rounded-lg bg-purple-600 px-3 py-2 text-sm font-medium text-black hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {setDefault.isPending ? "Saving…" : "Save"}
-        </button>
-      </form>
-      <CredentialFeedback
-        saveError={setDefault.error?.message}
-        result={result}
-      />
-    </div>
+    <ComputeForm
+      accent="purple"
+      containerClassName="space-y-2 border-t border-white/10 pt-5"
+      title="Default agent compute"
+      titleClassName="text-xs font-semibold tracking-wider text-white/50 uppercase"
+      description={
+        <>
+          CPU / memory limit for agents run on this repo, as Kubernetes
+          quantities (e.g.{" "}
+          <code className="rounded bg-white/10 px-1 text-white/60">4</code>{" "}
+          CPUs,{" "}
+          <code className="rounded bg-white/10 px-1 text-white/60">8Gi</code>{" "}
+          memory). Issue labels like{" "}
+          <code className="rounded bg-white/10 px-1 text-white/60">cpu:4</code>{" "}
+          and{" "}
+          <code className="rounded bg-white/10 px-1 text-white/60">
+            memory:8Gi
+          </code>{" "}
+          override it per issue, as does the deploy form per task. Blank = the
+          user&rsquo;s default, then the built-in limit.
+        </>
+      }
+      values={{ cpu: config?.computeCpu, memory: config?.computeMemory }}
+      onSave={(compute) => setDefault.mutateAsync({ repoFullName, ...compute })}
+      pending={setDefault.isPending}
+      error={setDefault.error?.message}
+    />
   );
 }
 

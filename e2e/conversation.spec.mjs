@@ -1,36 +1,14 @@
 // Browser smoke test for the Conversation transcript's awaiting re-pin: when a
 // session starts awaiting input the parent bumps `scrollSignal`, and the
 // transcript must snap back to the bottom (re-pinning stick-to-bottom) even if
-// the user had scrolled up to read earlier output. Playwright isn't a project
-// dependency (it's installed globally in this environment), so resolve it from
-// the local node_modules if present, else fall back to the global install.
+// the user had scrolled up to read earlier output.
 //
 // Run against a dev server serving the harness route:
 //   pnpm next dev --port 3137 &
 //   node e2e/conversation.spec.mjs
-import { createRequire } from "node:module";
-const require = createRequire(import.meta.url);
-let chromium;
-try {
-  ({ chromium } = require("playwright"));
-} catch {
-  ({ chromium } = require("/usr/local/lib/node_modules/playwright/index.js"));
-}
+import { BASE, check, launch, finish } from "./helpers.mjs";
 
-const BASE = process.env.CONVERSATION_BASE_URL ?? "http://localhost:3137";
-let passed = 0;
-let failed = 0;
-function check(name, cond) {
-  if (cond) {
-    passed++;
-    console.log(`  ✓ ${name}`);
-  } else {
-    failed++;
-    console.log(`  ✗ ${name}`);
-  }
-}
-
-const browser = await chromium.launch();
+const browser = await launch();
 const page = await browser.newPage();
 
 await page.goto(`${BASE}/dev/conversation`);
@@ -74,6 +52,4 @@ check(
   (await page.getByRole("button", { name: "Scroll to bottom" }).count()) === 0,
 );
 
-await browser.close();
-console.log(`\n${passed} passed, ${failed} failed`);
-process.exit(failed === 0 ? 0 : 1);
+await finish(browser);

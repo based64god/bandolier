@@ -244,12 +244,14 @@ reference](../README.md#configuration-reference) for what each variable does.
 | `config.agentNetworkPolicy`                                                                   | `AGENT_NETWORK_POLICY`                     | Agent-pod isolation (needs a policy CNI).                                 |
 | `config.agentEgressBlockedCidrs`                                                              | `AGENT_EGRESS_BLOCKED_CIDRS`               | CIDRs agents can't reach.                                                 |
 | `config.githubAppSlug`                                                                        | `NEXT_PUBLIC_GITHUB_APP_SLUG`              | Links repo-config UI to the App.                                          |
+| `config.vapidPublicKey`                                                                       | `NEXT_PUBLIC_VAPID_PUBLIC_KEY`             | Optional. Web Push public key (`pnpm vapid:generate`).                    |
 | `secrets.betterAuthSecret`                                                                    | `BETTER_AUTH_SECRET`                       | **Required.** Session/token signing key.                                  |
 | `secrets.githubClientId` / `githubClientSecret`                                               | `BETTER_AUTH_GITHUB_CLIENT_ID` / `_SECRET` | **Required.** OAuth app.                                                  |
 | `secrets.databaseUrl`                                                                         | `DATABASE_URL`                             | **Required** when `postgres.mode=external`; ignored for `bundled`/`cnpg`. |
 | `secrets.githubWebhookSecret`                                                                 | `GITHUB_WEBHOOK_SECRET`                    | Optional. Webhook signature verification.                                 |
 | `secrets.githubAppId` / `githubAppPrivateKey` / `githubAppClientId` / `githubAppClientSecret` | `GITHUB_APP_*`                             | Optional. Bot identity.                                                   |
 | `secrets.appPassword`                                                                         | `APP_PASSWORD`                             | Optional. Shared password gate.                                           |
+| `secrets.vapidSubject` / `vapidPrivateKey`                                                    | `VAPID_SUBJECT` / `VAPID_PRIVATE_KEY`      | Optional. Web Push (with `config.vapidPublicKey`).                        |
 
 See [`helm/bandolier/values.yaml`](helm/bandolier/values.yaml) for the full,
 commented list (replicas, resources, probes, ingress, and `postgres.*` /

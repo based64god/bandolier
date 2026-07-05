@@ -1,4 +1,10 @@
 <!doctype html>
+<!--
+  This page mirrors README.md — the two are kept in sync by hand. When you
+  change a feature description here, update the matching section in README.md
+  (and vice versa). The docs-site deploy workflow only triggers on
+  docs-site/** changes, so a README edit will not remind you to sync this file.
+-->
 <html lang="en" data-theme="dark">
   <head>
     <meta charset="utf-8" />
@@ -69,6 +75,7 @@
             <li><a href="#github-app">GitHub App &amp; webhooks</a></li>
             <li><a href="#resuming">Resuming runs</a></li>
             <li><a href="#system-prompt">Repo system prompt</a></li>
+            <li><a href="#auto-merge">Auto-merge PRs</a></li>
             <li><a href="#maintainer-gate">Maintainer gate</a></li>
             <li><a href="#isolation">Agent isolation</a></li>
             <li><a href="#artifacts">Run artifacts</a></li>
@@ -197,7 +204,7 @@ Browser ──▶ Next.js app ──▶ Kubernetes API ──▶ Job (harness po
           <h2>Prerequisites</h2>
           <div class="prereq-grid">
             <div class="prereq">
-              <h4>Node.js 20+ &amp; pnpm 10</h4>
+              <h4>Node.js 24 &amp; pnpm 11</h4>
               <p><code>corepack enable</code> picks up the pinned version.</p>
             </div>
             <div class="prereq">
@@ -284,7 +291,14 @@ DATABASE_URL="postgresql://postgres:password@localhost:5432/bandolier"</code></p
           <h2><span class="step-dot">4</span> Start Postgres &amp; apply the schema</h2>
           <div class="code-block" data-lang="bash">
             <pre><code>./start-database.sh     # starts a Postgres container from DATABASE_URL
-pnpm db:push            # creates the tables (no migration files are used)</code></pre>
+pnpm db:push            # syncs the schema straight to your local database</code></pre>
+          </div>
+          <div class="callout">
+            <code>db:push</code> is for local development only. Self-host deploys
+            apply the checked-in SQL migrations under <code>drizzle/</code> (via
+            the migrator image, run as a Helm hook). After changing
+            <code>src/server/db/schema.ts</code>, run <code>pnpm db:generate</code>
+            to emit a new migration and commit it.
           </div>
         </section>
 
@@ -315,9 +329,25 @@ pnpm db:push            # creates the tables (no migration files are used)</code
             </li>
             <li>
               <strong>A kubeconfig</strong> — the cluster your agents deploy into
-              (a repo can also provide a shared one).
+              (a repo can also provide a shared one). Bandolier runs the
+              Kubernetes client on its server, so exec-plugin kubeconfigs (the
+              <code>aws</code>/<code>gcloud</code> credential plugins EKS/GKE
+              emit) and ones that reference cert/key files on your laptop won't
+              work — the server has neither those binaries nor those files.
+              Generate a self-contained, token-based kubeconfig from your current
+              cluster and paste that instead:
             </li>
           </ul>
+          <div class="code-block" data-lang="bash">
+            <pre><code># hosted — no checkout needed
+curl -fsSL https://&lt;your-host&gt;/setup.sh | bash
+
+# from a local checkout
+./scripts/create-bandolier-kubeconfig.sh
+
+# add --scoped for a least-privilege ClusterRole instead of cluster-admin
+curl -fsSL https://&lt;your-host&gt;/setup.sh | bash -s -- --scoped</code></pre>
+          </div>
           <div class="callout success">
             You can now select a repo, deploy an agent, and watch it work. 🎉
           </div>
@@ -408,6 +438,29 @@ pnpm db:push            # creates the tables (no migration files are used)</code
             replacing it, so you don't need to repeat guidance in each task. Leave
             it blank for none.
           </p>
+        </section>
+
+        <section id="auto-merge">
+          <h2>Auto-merging Bandolier PRs</h2>
+          <p>
+            A repo admin can toggle <strong>Auto-merge Bandolier PRs</strong> in
+            the repo-config UI. When on, every pull request a Bandolier run
+            reports as its output has GitHub's native auto-merge enabled the
+            moment the run finishes, so the PR merges itself once its required
+            checks pass and it's mergeable — no human click. The merge method is
+            the first of merge / squash / rebase the repo permits.
+          </p>
+          <p>
+            Auto-merge still honors the branch's protection rules (required
+            reviews / status checks), so this only lands what the repo's own
+            gates already allow; a branch with no protection would merge right
+            away.
+          </p>
+          <div class="callout">
+            <strong>Off by default.</strong> It lets an agent's work merge
+            without a human pressing the button, so enable it only when your
+            branch protection is the gate you trust.
+          </div>
         </section>
 
         <section id="maintainer-gate">
@@ -515,7 +568,34 @@ curl -H "Authorization: Bearer bnd_…" \
 # Launch a task
 curl -X POST -H "Authorization: Bearer bnd_…" -H "Content-Type: application/json" \
   -d '{"task":"Fix the flaky test in auth.spec.ts"}' \
-  https://&lt;your-host&gt;/api/v1/repos/&lt;owner&gt;/&lt;repo&gt;/tasks</code></pre>
+  https://&lt;your-host&gt;/api/v1/repos/&lt;owner&gt;/&lt;repo&gt;/tasks
+
+# Read one task
+curl -H "Authorization: Bearer bnd_…" \
+  https://&lt;your-host&gt;/api/v1/repos/&lt;owner&gt;/&lt;repo&gt;/tasks/&lt;id&gt;
+
+# Rename a task
+curl -X PATCH -H "Authorization: Bearer bnd_…" -H "Content-Type: application/json" \
+  -d '{"displayName":"New name"}' \
+  https://&lt;your-host&gt;/api/v1/repos/&lt;owner&gt;/&lt;repo&gt;/tasks/&lt;id&gt;
+
+# Terminate a task
+curl -X DELETE -H "Authorization: Bearer bnd_…" \
+  https://&lt;your-host&gt;/api/v1/repos/&lt;owner&gt;/&lt;repo&gt;/tasks/&lt;id&gt;</code></pre>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Method</th><th>Path</th><th>Body</th><th>Purpose</th></tr>
+              </thead>
+              <tbody>
+                <tr><td><code>GET</code></td><td><code>/api/v1/repos/{owner}/{repo}/tasks</code></td><td>—</td><td>List tasks for a repo</td></tr>
+                <tr><td><code>POST</code></td><td><code>/api/v1/repos/{owner}/{repo}/tasks</code></td><td>launch fields (below)</td><td>Launch a task</td></tr>
+                <tr><td><code>GET</code></td><td><code>/api/v1/repos/{owner}/{repo}/tasks/{id}</code></td><td>—</td><td>Read one task</td></tr>
+                <tr><td><code>PATCH</code></td><td><code>/api/v1/repos/{owner}/{repo}/tasks/{id}</code></td><td><code>{ "displayName": … }</code></td><td>Rename a task</td></tr>
+                <tr><td><code>DELETE</code></td><td><code>/api/v1/repos/{owner}/{repo}/tasks/{id}</code></td><td>—</td><td>Terminate a task</td></tr>
+              </tbody>
+            </table>
           </div>
           <p>
             The launch endpoint accepts everything the dashboard's deploy dialog

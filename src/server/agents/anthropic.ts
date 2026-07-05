@@ -1,38 +1,23 @@
 import { eq } from "drizzle-orm";
 
+import { probeApiKey, type Validation } from "~/server/agents/validation";
 import { type db } from "~/server/db";
 import { userAnthropicCredentials } from "~/server/db/schema";
 
-export interface AnthropicValidation {
-  valid: boolean;
-  error?: string;
-}
+export type AnthropicValidation = Validation;
 
 /**
  * Validates an Anthropic API key with a cheap, token-free GET /v1/models call.
  * A 401 means the key is bad; 200 means it works.
  */
-export async function validateAnthropicKey(
+export function validateAnthropicKey(
   apiKey: string,
 ): Promise<AnthropicValidation> {
-  try {
-    const res = await fetch("https://api.anthropic.com/v1/models?limit=1", {
-      headers: {
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-    });
-    if (res.ok) return { valid: true };
-    if (res.status === 401)
-      return { valid: false, error: "API key is invalid." };
-    return { valid: false, error: `Anthropic API error: ${res.status}` };
-  } catch (err) {
-    return {
-      valid: false,
-      error:
-        err instanceof Error ? err.message : "Could not reach Anthropic API.",
-    };
-  }
+  return probeApiKey(
+    "https://api.anthropic.com/v1/models?limit=1",
+    { "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+    "Anthropic",
+  );
 }
 
 // Claude subscription OAuth tokens from `claude setup-token` look like

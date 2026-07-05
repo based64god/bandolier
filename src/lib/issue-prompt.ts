@@ -1,7 +1,8 @@
 // Single source of truth for the issue-mode prompt, shared by the server (which
 // sets the system prompt as CLAUDE_SYSTEM_PROMPT and the issue context as
-// CLAUDE_TASK) and the deploy modal's preview tooltip. The harness keeps a Go
-// copy of these builders as a fallback — keep in sync.
+// CLAUDE_TASK) and the deploy modal's preview tooltip. The harness has no copy
+// of these builders: it requires the server-supplied env and fails loudly if
+// it's missing, so this is genuinely the only place the prompt is built.
 
 function slugify(s: string): string {
   let slug = s

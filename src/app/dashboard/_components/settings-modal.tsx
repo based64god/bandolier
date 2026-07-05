@@ -3,59 +3,35 @@
 import { useState, useSyncExternalStore } from "react";
 
 import { api } from "~/trpc/react";
+import {
+  CredentialFeedback,
+  MaskedCredentialRow,
+  SecretForm,
+  useCredentialMutations,
+} from "./credential-ui";
 import { Modal } from "./modal";
 import { parseAwsCredentials } from "./parse-aws";
-
-function StatusFeedback({
-  error,
-  ok,
-}: {
-  error?: string | null;
-  ok?: string | null;
-}) {
-  if (!error && !ok) return null;
-  return (
-    <p
-      className={`rounded-lg border px-3 py-2 text-xs ${
-        error
-          ? "border-red-500/30 bg-red-500/10 text-red-400"
-          : "border-green-500/30 bg-green-500/10 text-green-300"
-      }`}
-    >
-      {error ?? ok}
-    </p>
-  );
-}
 
 function AnthropicSection() {
   const utils = api.useUtils();
   const { data: status } = api.account.anthropicStatus.useQuery();
   const [apiKey, setApiKey] = useState("");
   const [oauthToken, setOauthToken] = useState("");
-  const [result, setResult] = useState<string | null>(null);
+  const { result, setResult, onSave, onRemove } = useCredentialMutations(() =>
+    utils.account.anthropicStatus.invalidate(),
+  );
 
   const setAnthropic = api.account.setAnthropic.useMutation({
-    onSuccess: () => {
-      void utils.account.anthropicStatus.invalidate();
-      setApiKey("");
-      setResult("Saved and verified ✓");
-    },
+    onSuccess: () => onSave(() => setApiKey("")),
   });
   const setAnthropicOauth = api.account.setAnthropicOauth.useMutation({
-    onSuccess: () => {
-      void utils.account.anthropicStatus.invalidate();
-      setOauthToken("");
-      setResult("Saved ✓");
-    },
+    onSuccess: () => onSave(() => setOauthToken(""), "Saved ✓"),
   });
   const testAnthropic = api.account.testAnthropic.useMutation({
     onSuccess: (r) => setResult(r.valid ? "Valid ✓" : `Invalid: ${r.error}`),
   });
   const deleteAnthropic = api.account.deleteAnthropic.useMutation({
-    onSuccess: () => {
-      void utils.account.anthropicStatus.invalidate();
-      setResult(null);
-    },
+    onSuccess: onRemove,
   });
 
   const saveError =
@@ -69,52 +45,32 @@ function AnthropicSection() {
       {/* API key */}
       <p className="text-xs text-white/50">API key</p>
       {status?.apiKeyMasked ? (
-        <div className="flex items-center justify-between rounded-lg border border-white/10 bg-white/5 px-3 py-2.5 text-sm">
+        <MaskedCredentialRow
+          onTest={() => {
+            setResult("Testing…");
+            testAnthropic.mutate({ kind: "api_key" });
+          }}
+          testPending={testAnthropic.isPending}
+          onRemove={() => deleteAnthropic.mutate({ kind: "api_key" })}
+          removePending={deleteAnthropic.isPending}
+        >
           <code className="text-purple-300">{status.apiKeyMasked}</code>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => {
-                setResult("Testing…");
-                testAnthropic.mutate({ kind: "api_key" });
-              }}
-              disabled={testAnthropic.isPending}
-              className="rounded bg-white/10 px-2 py-1 text-xs hover:bg-white/20 disabled:opacity-50"
-            >
-              Test
-            </button>
-            <button
-              onClick={() => deleteAnthropic.mutate({ kind: "api_key" })}
-              disabled={deleteAnthropic.isPending}
-              className="rounded bg-red-500/10 px-2 py-1 text-xs text-red-400 hover:bg-red-500/20 disabled:opacity-50"
-            >
-              Remove
-            </button>
-          </div>
-        </div>
+        </MaskedCredentialRow>
       ) : (
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
+        <SecretForm
+          accent="purple"
+          value={apiKey}
+          onChange={setApiKey}
+          onSubmit={() => {
             setResult(null);
             setAnthropic.mutate({ apiKey });
           }}
-          className="flex gap-2"
-        >
-          <input
-            type="password"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            placeholder="sk-ant-…"
-            className="flex-1 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 focus:border-purple-500/50 focus:outline-none"
-          />
-          <button
-            type="submit"
-            disabled={setAnthropic.isPending || !apiKey}
-            className="rounded-lg bg-purple-600 px-3 py-2 text-sm font-medium text-black hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {setAnthropic.isPending ? "Verifying…" : "Save"}
-          </button>
-        </form>
+          placeholder="sk-ant-…"
+          submitLabel="Save"
+          pendingLabel="Verifying…"
+          pending={setAnthropic.isPending}
+          canSubmit={!!apiKey}
+        />
       )}
 
       {/* Claude subscription (OAuth token) */}
@@ -126,52 +82,32 @@ function AnthropicSection() {
         </span>
       </p>
       {status?.oauthTokenMasked ? (
-        <div className="flex items-center justify-between rounded-lg border border-white/10 bg-white/5 px-3 py-2.5 text-sm">
+        <MaskedCredentialRow
+          onTest={() => {
+            setResult("Testing…");
+            testAnthropic.mutate({ kind: "oauth_token" });
+          }}
+          testPending={testAnthropic.isPending}
+          onRemove={() => deleteAnthropic.mutate({ kind: "oauth_token" })}
+          removePending={deleteAnthropic.isPending}
+        >
           <code className="text-purple-300">{status.oauthTokenMasked}</code>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => {
-                setResult("Testing…");
-                testAnthropic.mutate({ kind: "oauth_token" });
-              }}
-              disabled={testAnthropic.isPending}
-              className="rounded bg-white/10 px-2 py-1 text-xs hover:bg-white/20 disabled:opacity-50"
-            >
-              Test
-            </button>
-            <button
-              onClick={() => deleteAnthropic.mutate({ kind: "oauth_token" })}
-              disabled={deleteAnthropic.isPending}
-              className="rounded bg-red-500/10 px-2 py-1 text-xs text-red-400 hover:bg-red-500/20 disabled:opacity-50"
-            >
-              Remove
-            </button>
-          </div>
-        </div>
+        </MaskedCredentialRow>
       ) : (
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
+        <SecretForm
+          accent="purple"
+          value={oauthToken}
+          onChange={setOauthToken}
+          onSubmit={() => {
             setResult(null);
             setAnthropicOauth.mutate({ oauthToken });
           }}
-          className="flex gap-2"
-        >
-          <input
-            type="password"
-            value={oauthToken}
-            onChange={(e) => setOauthToken(e.target.value)}
-            placeholder="sk-ant-oat01-…"
-            className="flex-1 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 focus:border-purple-500/50 focus:outline-none"
-          />
-          <button
-            type="submit"
-            disabled={setAnthropicOauth.isPending || !oauthToken}
-            className="rounded-lg bg-purple-600 px-3 py-2 text-sm font-medium text-black hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {setAnthropicOauth.isPending ? "Saving…" : "Save"}
-          </button>
-        </form>
+          placeholder="sk-ant-oat01-…"
+          submitLabel="Save"
+          pendingLabel="Saving…"
+          pending={setAnthropicOauth.isPending}
+          canSubmit={!!oauthToken}
+        />
       )}
 
       {bothConfigured && (
@@ -181,10 +117,7 @@ function AnthropicSection() {
         </p>
       )}
 
-      <StatusFeedback
-        error={saveError ?? (result?.startsWith("Invalid") ? result : null)}
-        ok={result && !result.startsWith("Invalid") ? result : null}
-      />
+      <CredentialFeedback saveError={saveError} result={result} />
     </div>
   );
 }
@@ -194,30 +127,21 @@ function OpenAISection() {
   const { data: status } = api.account.openaiStatus.useQuery();
   const [apiKey, setApiKey] = useState("");
   const [authJson, setAuthJson] = useState("");
-  const [result, setResult] = useState<string | null>(null);
+  const { result, setResult, onSave, onRemove } = useCredentialMutations(() =>
+    utils.account.openaiStatus.invalidate(),
+  );
 
   const setOpenai = api.account.setOpenai.useMutation({
-    onSuccess: () => {
-      void utils.account.openaiStatus.invalidate();
-      setApiKey("");
-      setResult("Saved and verified ✓");
-    },
+    onSuccess: () => onSave(() => setApiKey("")),
   });
   const setCodexAuth = api.account.setCodexAuth.useMutation({
-    onSuccess: () => {
-      void utils.account.openaiStatus.invalidate();
-      setAuthJson("");
-      setResult("Saved ✓");
-    },
+    onSuccess: () => onSave(() => setAuthJson(""), "Saved ✓"),
   });
   const testOpenai = api.account.testOpenai.useMutation({
     onSuccess: (r) => setResult(r.valid ? "Valid ✓" : `Invalid: ${r.error}`),
   });
   const deleteOpenai = api.account.deleteOpenai.useMutation({
-    onSuccess: () => {
-      void utils.account.openaiStatus.invalidate();
-      setResult(null);
-    },
+    onSuccess: onRemove,
   });
 
   const saveError = setOpenai.error?.message ?? setCodexAuth.error?.message;
@@ -230,52 +154,32 @@ function OpenAISection() {
       {/* API key */}
       <p className="text-xs text-white/50">API key</p>
       {status?.apiKeyMasked ? (
-        <div className="flex items-center justify-between rounded-lg border border-white/10 bg-white/5 px-3 py-2.5 text-sm">
+        <MaskedCredentialRow
+          onTest={() => {
+            setResult("Testing…");
+            testOpenai.mutate({ kind: "api_key" });
+          }}
+          testPending={testOpenai.isPending}
+          onRemove={() => deleteOpenai.mutate({ kind: "api_key" })}
+          removePending={deleteOpenai.isPending}
+        >
           <code className="text-teal-300">{status.apiKeyMasked}</code>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => {
-                setResult("Testing…");
-                testOpenai.mutate({ kind: "api_key" });
-              }}
-              disabled={testOpenai.isPending}
-              className="rounded bg-white/10 px-2 py-1 text-xs hover:bg-white/20 disabled:opacity-50"
-            >
-              Test
-            </button>
-            <button
-              onClick={() => deleteOpenai.mutate({ kind: "api_key" })}
-              disabled={deleteOpenai.isPending}
-              className="rounded bg-red-500/10 px-2 py-1 text-xs text-red-400 hover:bg-red-500/20 disabled:opacity-50"
-            >
-              Remove
-            </button>
-          </div>
-        </div>
+        </MaskedCredentialRow>
       ) : (
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
+        <SecretForm
+          accent="teal"
+          value={apiKey}
+          onChange={setApiKey}
+          onSubmit={() => {
             setResult(null);
             setOpenai.mutate({ apiKey });
           }}
-          className="flex gap-2"
-        >
-          <input
-            type="password"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            placeholder="sk-…"
-            className="flex-1 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 focus:border-teal-500/50 focus:outline-none"
-          />
-          <button
-            type="submit"
-            disabled={setOpenai.isPending || !apiKey}
-            className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-medium hover:bg-teal-500 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {setOpenai.isPending ? "Verifying…" : "Save"}
-          </button>
-        </form>
+          placeholder="sk-…"
+          submitLabel="Save"
+          pendingLabel="Verifying…"
+          pending={setOpenai.isPending}
+          canSubmit={!!apiKey}
+        />
       )}
 
       {/* ChatGPT subscription (Codex auth.json) */}
@@ -287,52 +191,34 @@ function OpenAISection() {
         </span>
       </p>
       {status?.chatgptConfigured ? (
-        <div className="flex items-center justify-between rounded-lg border border-white/10 bg-white/5 px-3 py-2.5 text-sm">
+        <MaskedCredentialRow
+          onTest={() => {
+            setResult("Testing…");
+            testOpenai.mutate({ kind: "chatgpt" });
+          }}
+          testPending={testOpenai.isPending}
+          onRemove={() => deleteOpenai.mutate({ kind: "chatgpt" })}
+          removePending={deleteOpenai.isPending}
+        >
           <code className="text-teal-300">ChatGPT sign-in</code>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => {
-                setResult("Testing…");
-                testOpenai.mutate({ kind: "chatgpt" });
-              }}
-              disabled={testOpenai.isPending}
-              className="rounded bg-white/10 px-2 py-1 text-xs hover:bg-white/20 disabled:opacity-50"
-            >
-              Test
-            </button>
-            <button
-              onClick={() => deleteOpenai.mutate({ kind: "chatgpt" })}
-              disabled={deleteOpenai.isPending}
-              className="rounded bg-red-500/10 px-2 py-1 text-xs text-red-400 hover:bg-red-500/20 disabled:opacity-50"
-            >
-              Remove
-            </button>
-          </div>
-        </div>
+        </MaskedCredentialRow>
       ) : (
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
+        <SecretForm
+          accent="teal"
+          variant="textarea"
+          value={authJson}
+          onChange={setAuthJson}
+          onSubmit={() => {
             setResult(null);
             setCodexAuth.mutate({ authJson });
           }}
-          className="space-y-2"
-        >
-          <textarea
-            value={authJson}
-            onChange={(e) => setAuthJson(e.target.value)}
-            placeholder='{"OPENAI_API_KEY": null, "tokens": { … }}'
-            rows={3}
-            className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 font-mono text-xs text-white placeholder-white/30 focus:border-teal-500/50 focus:outline-none"
-          />
-          <button
-            type="submit"
-            disabled={setCodexAuth.isPending || !authJson}
-            className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-medium hover:bg-teal-500 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {setCodexAuth.isPending ? "Saving…" : "Save"}
-          </button>
-        </form>
+          placeholder='{"OPENAI_API_KEY": null, "tokens": { … }}'
+          rows={3}
+          submitLabel="Save"
+          pendingLabel="Saving…"
+          pending={setCodexAuth.isPending}
+          canSubmit={!!authJson}
+        />
       )}
 
       {bothConfigured && (
@@ -342,10 +228,7 @@ function OpenAISection() {
         </p>
       )}
 
-      <StatusFeedback
-        error={saveError ?? (result?.startsWith("Invalid") ? result : null)}
-        ok={result && !result.startsWith("Invalid") ? result : null}
-      />
+      <CredentialFeedback saveError={saveError} result={result} />
     </div>
   );
 }
@@ -354,23 +237,18 @@ function GeminiSection() {
   const utils = api.useUtils();
   const { data: status } = api.account.geminiStatus.useQuery();
   const [credentials, setCredentials] = useState("");
-  const [result, setResult] = useState<string | null>(null);
+  const { result, setResult, onSave, onRemove } = useCredentialMutations(() =>
+    utils.account.geminiStatus.invalidate(),
+  );
 
   const setGemini = api.account.setGemini.useMutation({
-    onSuccess: () => {
-      void utils.account.geminiStatus.invalidate();
-      setCredentials("");
-      setResult("Saved and verified ✓");
-    },
+    onSuccess: () => onSave(() => setCredentials("")),
   });
   const testGemini = api.account.testGemini.useMutation({
     onSuccess: (r) => setResult(r.valid ? "Valid ✓" : `Invalid: ${r.error}`),
   });
   const deleteGemini = api.account.deleteGemini.useMutation({
-    onSuccess: () => {
-      void utils.account.geminiStatus.invalidate();
-      setResult(null);
-    },
+    onSuccess: onRemove,
   });
 
   return (
@@ -380,7 +258,15 @@ function GeminiSection() {
       </h3>
 
       {status?.configured && (
-        <div className="flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-white/5 px-3 py-2.5 text-sm">
+        <MaskedCredentialRow
+          onTest={() => {
+            setResult("Testing…");
+            testGemini.mutate();
+          }}
+          testPending={testGemini.isPending}
+          onRemove={() => deleteGemini.mutate()}
+          removePending={deleteGemini.isPending}
+        >
           <div className="min-w-0">
             <div className="truncate text-blue-300">
               {status.clientEmail ?? "service account"}
@@ -391,68 +277,39 @@ function GeminiSection() {
               </div>
             )}
           </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <button
-              onClick={() => {
-                setResult("Testing…");
-                testGemini.mutate();
-              }}
-              disabled={testGemini.isPending}
-              className="rounded bg-white/10 px-2 py-1 text-xs hover:bg-white/20 disabled:opacity-50"
-            >
-              Test
-            </button>
-            <button
-              onClick={() => deleteGemini.mutate()}
-              disabled={deleteGemini.isPending}
-              className="rounded bg-red-500/10 px-2 py-1 text-xs text-red-400 hover:bg-red-500/20 disabled:opacity-50"
-            >
-              Remove
-            </button>
-          </div>
-        </div>
+        </MaskedCredentialRow>
       )}
 
       {!status?.configured && (
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
+        <SecretForm
+          accent="blue"
+          variant="textarea"
+          value={credentials}
+          onChange={setCredentials}
+          onSubmit={() => {
             setResult(null);
             setGemini.mutate({ credentials });
           }}
-          className="space-y-2"
+          rows={6}
+          placeholder={
+            '{\n  "type": "service_account",\n  "project_id": "…",\n  "client_email": "…",\n  "private_key": "-----BEGIN PRIVATE KEY-----…"\n}'
+          }
+          submitLabel="Save"
+          pendingLabel="Verifying…"
+          pending={setGemini.isPending}
+          canSubmit={!!credentials}
+          align="end"
         >
           <p className="text-xs text-white/40">
             Paste a Google Cloud service-account key (JSON). The agent
             authenticates to your project via Application Default Credentials.
           </p>
-          <textarea
-            rows={6}
-            value={credentials}
-            onChange={(e) => setCredentials(e.target.value)}
-            placeholder={
-              '{\n  "type": "service_account",\n  "project_id": "…",\n  "client_email": "…",\n  "private_key": "-----BEGIN PRIVATE KEY-----…"\n}'
-            }
-            className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 font-mono text-xs text-white placeholder-white/25 focus:border-blue-500/50 focus:outline-none"
-          />
-          <div className="flex justify-end">
-            <button
-              type="submit"
-              disabled={setGemini.isPending || !credentials}
-              className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-black hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {setGemini.isPending ? "Verifying…" : "Save"}
-            </button>
-          </div>
-        </form>
+        </SecretForm>
       )}
 
-      <StatusFeedback
-        error={
-          setGemini.error?.message ??
-          (result?.startsWith("Invalid") ? result : null)
-        }
-        ok={result && !result.startsWith("Invalid") ? result : null}
+      <CredentialFeedback
+        saveError={setGemini.error?.message}
+        result={result}
       />
     </div>
   );
@@ -466,27 +323,23 @@ function AwsSection() {
   const [secretAccessKey, setSecretAccessKey] = useState("");
   const [sessionToken, setSessionToken] = useState("");
   const [region, setRegion] = useState("us-east-1");
-  const [result, setResult] = useState<string | null>(null);
+  const { result, setResult, onSave, onRemove } = useCredentialMutations(() =>
+    utils.account.awsStatus.invalidate(),
+  );
 
   const setAws = api.account.setAws.useMutation({
-    onSuccess: () => {
-      void utils.account.awsStatus.invalidate();
-      setAccessKeyId("");
-      setSecretAccessKey("");
-      setSessionToken("");
-      setResult("Saved and verified ✓");
-    },
+    onSuccess: () =>
+      onSave(() => {
+        setAccessKeyId("");
+        setSecretAccessKey("");
+        setSessionToken("");
+      }),
   });
   const testAws = api.account.testAws.useMutation({
     onSuccess: (r) =>
       setResult(r.valid ? `Valid ✓ ${r.arn ?? ""}` : `Invalid: ${r.error}`),
   });
-  const deleteAws = api.account.deleteAws.useMutation({
-    onSuccess: () => {
-      void utils.account.awsStatus.invalidate();
-      setResult(null);
-    },
-  });
+  const deleteAws = api.account.deleteAws.useMutation({ onSuccess: onRemove });
 
   // Auto-fill the individual fields when a credentials block is pasted.
   function handlePaste(text: string) {
@@ -506,7 +359,15 @@ function AwsSection() {
       </h3>
 
       {status?.configured && (
-        <div className="flex items-center justify-between rounded-lg border border-white/10 bg-white/5 px-3 py-2.5 text-sm">
+        <MaskedCredentialRow
+          onTest={() => {
+            setResult("Testing…");
+            testAws.mutate();
+          }}
+          testPending={testAws.isPending}
+          onRemove={() => deleteAws.mutate()}
+          removePending={deleteAws.isPending}
+        >
           <span>
             <code className="text-orange-300">{status.accessKeyIdMasked}</code>
             <span className="ml-2 text-white/40">{status.region}</span>
@@ -516,26 +377,7 @@ function AwsSection() {
               </span>
             )}
           </span>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => {
-                setResult("Testing…");
-                testAws.mutate();
-              }}
-              disabled={testAws.isPending}
-              className="rounded bg-white/10 px-2 py-1 text-xs hover:bg-white/20 disabled:opacity-50"
-            >
-              Test
-            </button>
-            <button
-              onClick={() => deleteAws.mutate()}
-              disabled={deleteAws.isPending}
-              className="rounded bg-red-500/10 px-2 py-1 text-xs text-red-400 hover:bg-red-500/20 disabled:opacity-50"
-            >
-              Remove
-            </button>
-          </div>
-        </div>
+        </MaskedCredentialRow>
       )}
 
       {!status?.configured && (
@@ -603,13 +445,7 @@ function AwsSection() {
         </>
       )}
 
-      <StatusFeedback
-        error={
-          setAws.error?.message ??
-          (result?.startsWith("Invalid") ? result : null)
-        }
-        ok={result && !result.startsWith("Invalid") ? result : null}
-      />
+      <CredentialFeedback saveError={setAws.error?.message} result={result} />
     </div>
   );
 }
@@ -618,24 +454,23 @@ function KubeconfigSection() {
   const utils = api.useUtils();
   const { data: status } = api.account.kubeconfigStatus.useQuery();
   const [kubeconfig, setKubeconfig] = useState("");
-  const [result, setResult] = useState<string | null>(null);
+  const { result, setResult, onSave, onRemove } = useCredentialMutations(() =>
+    utils.account.kubeconfigStatus.invalidate(),
+  );
 
   const save = api.account.setKubeconfig.useMutation({
-    onSuccess: (r) => {
-      void utils.account.kubeconfigStatus.invalidate();
-      setKubeconfig("");
-      setResult(`Saved and verified ✓ ${r.version ?? ""}`);
-    },
+    onSuccess: (r) =>
+      onSave(
+        () => setKubeconfig(""),
+        `Saved and verified ✓ ${r.version ?? ""}`,
+      ),
   });
   const test = api.account.testKubeconfig.useMutation({
     onSuccess: (r) =>
       setResult(r.valid ? `Valid ✓ ${r.version ?? ""}` : `Invalid: ${r.error}`),
   });
   const remove = api.account.deleteKubeconfig.useMutation({
-    onSuccess: () => {
-      void utils.account.kubeconfigStatus.invalidate();
-      setResult(null);
-    },
+    onSuccess: onRemove,
   });
 
   return (
@@ -643,28 +478,17 @@ function KubeconfigSection() {
       <h3 className="text-sm font-semibold text-sky-300">Kubeconfig</h3>
 
       {status?.configured && (
-        <div className="flex items-center justify-between rounded-lg border border-white/10 bg-white/5 px-3 py-2.5 text-sm">
+        <MaskedCredentialRow
+          onTest={() => {
+            setResult("Testing…");
+            test.mutate();
+          }}
+          testPending={test.isPending}
+          onRemove={() => remove.mutate()}
+          removePending={remove.isPending}
+        >
           <span className="text-white/70">A kubeconfig is configured.</span>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => {
-                setResult("Testing…");
-                test.mutate();
-              }}
-              disabled={test.isPending}
-              className="rounded bg-white/10 px-2 py-1 text-xs hover:bg-white/20 disabled:opacity-50"
-            >
-              Test
-            </button>
-            <button
-              onClick={() => remove.mutate()}
-              disabled={remove.isPending}
-              className="rounded bg-red-500/10 px-2 py-1 text-xs text-red-400 hover:bg-red-500/20 disabled:opacity-50"
-            >
-              Remove
-            </button>
-          </div>
-        </div>
+        </MaskedCredentialRow>
       )}
 
       {!status?.configured && (
@@ -676,43 +500,30 @@ function KubeconfigSection() {
 
           <KubeconfigSetupHelp />
 
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
+          <SecretForm
+            accent="sky"
+            variant="textarea"
+            required
+            value={kubeconfig}
+            onChange={setKubeconfig}
+            onSubmit={() => {
               setResult(null);
               save.mutate({ kubeconfig });
             }}
-            className="space-y-2"
-          >
-            <textarea
-              required
-              rows={6}
-              value={kubeconfig}
-              onChange={(e) => setKubeconfig(e.target.value)}
-              placeholder={
-                "apiVersion: v1\nkind: Config\nclusters:\n  - cluster:\n      server: https://…"
-              }
-              className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 font-mono text-xs text-white placeholder-white/25 focus:border-sky-500/50 focus:outline-none"
-            />
-            <div className="flex justify-end">
-              <button
-                type="submit"
-                disabled={save.isPending || !kubeconfig}
-                className="rounded-lg bg-sky-600 px-3 py-2 text-sm font-medium text-black hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {save.isPending ? "Verifying…" : "Save & verify"}
-              </button>
-            </div>
-          </form>
+            rows={6}
+            placeholder={
+              "apiVersion: v1\nkind: Config\nclusters:\n  - cluster:\n      server: https://…"
+            }
+            submitLabel="Save & verify"
+            pendingLabel="Verifying…"
+            pending={save.isPending}
+            canSubmit={!!kubeconfig}
+            align="end"
+          />
         </>
       )}
 
-      <StatusFeedback
-        error={
-          save.error?.message ?? (result?.startsWith("Invalid") ? result : null)
-        }
-        ok={result && !result.startsWith("Invalid") ? result : null}
-      />
+      <CredentialFeedback saveError={save.error?.message} result={result} />
     </div>
   );
 }
@@ -793,9 +604,9 @@ function ComputeSection() {
           {save.isPending ? "Saving…" : "Save"}
         </button>
       </form>
-      <StatusFeedback
-        error={save.error?.message}
-        ok={saved ? "Saved ✓" : null}
+      <CredentialFeedback
+        saveError={save.error?.message}
+        result={saved ? "Saved ✓" : null}
       />
     </div>
   );
@@ -1015,7 +826,9 @@ function ApiKeysSection() {
         </button>
       </form>
 
-      <StatusFeedback error={create.error?.message ?? revoke.error?.message} />
+      <CredentialFeedback
+        saveError={create.error?.message ?? revoke.error?.message}
+      />
 
       <ApiKeyUsageExample token={newToken} />
     </div>

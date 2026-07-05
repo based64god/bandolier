@@ -7,29 +7,9 @@
 // Run against a dev server serving the harness route:
 //   pnpm next dev --port 3137 &
 //   node e2e/task-row.spec.mjs
-import { createRequire } from "node:module";
-const require = createRequire(import.meta.url);
-let chromium;
-try {
-  ({ chromium } = require("playwright"));
-} catch {
-  ({ chromium } = require("/usr/local/lib/node_modules/playwright/index.js"));
-}
+import { BASE, check, launch, finish } from "./helpers.mjs";
 
-const BASE = process.env.TASK_ROW_BASE_URL ?? "http://localhost:3137";
-let passed = 0;
-let failed = 0;
-function check(name, cond) {
-  if (cond) {
-    passed++;
-    console.log(`  ✓ ${name}`);
-  } else {
-    failed++;
-    console.log(`  ✗ ${name}`);
-  }
-}
-
-const browser = await chromium.launch();
+const browser = await launch();
 // A narrow, phone-width viewport where the Actions column is at its slimmest.
 const page = await browser.newPage({ viewport: { width: 360, height: 720 } });
 
@@ -95,6 +75,4 @@ check(
 );
 await wide.close();
 
-await browser.close();
-console.log(`\n${passed} passed, ${failed} failed`);
-process.exit(failed === 0 ? 0 : 1);
+await finish(browser);

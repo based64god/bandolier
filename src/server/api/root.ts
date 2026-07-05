@@ -1,6 +1,7 @@
 import { accountRouter } from "~/server/api/routers/account";
 import { agentsRouter } from "~/server/api/routers/agents";
 import { apiKeysRouter } from "~/server/api/routers/api-keys";
+import { clusterDeployRouter } from "~/server/api/routers/cluster-deploy";
 import { modelsRouter } from "~/server/api/routers/models";
 import { pushRouter } from "~/server/api/routers/push";
 import { reposRouter } from "~/server/api/routers/repos";
@@ -14,6 +15,7 @@ export const appRouter = createTRPCRouter({
   models: modelsRouter,
   webhooks: webhooksRouter,
   apiKeys: apiKeysRouter,
+  clusterDeploy: clusterDeployRouter,
   push: pushRouter,
 });
 

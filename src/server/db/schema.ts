@@ -412,6 +412,64 @@ export const userKubeconfig = pgTable("user_kubeconfig", {
     .notNull(),
 });
 
+// A one-click DigitalOcean agent-cluster deployment: the UI equivalent of the
+// agent_only=true OpenTofu configuration under deploy/terraform/digitalocean.
+// The row is the state machine's persistence: each client poll advances the
+// deployment one idempotent step (create DOKS cluster → wait running → create
+// Spaces bucket → mint bucket-scoped key → bootstrap a long-lived
+// ServiceAccount kubeconfig → save it as the user's kubeconfig).
+//
+// The user's admin credentials (API token + Spaces admin key pair) are held
+// ONLY while the deployment is active — they are nulled the moment it reaches
+// a terminal state (done, or a failure the user dismisses). The bucket-scoped
+// key secret is kept until the user dismisses the success screen, since it must
+// be pasted into per-repo artifact-storage settings. Resource ids (cluster id,
+// bucket name) are kept indefinitely: they are secret-free and feed the
+// terraform adoption bundle (import blocks + tfvars) for day-2.
+export const clusterDeployment = pgTable(
+  "cluster_deployment",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    // State-machine position: creating-cluster | waiting-cluster |
+    // creating-bucket | creating-key | bootstrapping-kubeconfig | saving |
+    // done | failed | dismissed. Non-terminal rows are advanced by polling;
+    // at most one non-terminal row per user (enforced in code).
+    status: text("status").notNull(),
+    error: text("error"),
+    // Requested shape; defaults mirror deploy/terraform/digitalocean/variables.tf.
+    clusterName: text("cluster_name").notNull(),
+    region: text("region").notNull(),
+    nodeSize: text("node_size").notNull(),
+    minNodes: integer("min_nodes").notNull(),
+    maxNodes: integer("max_nodes").notNull(),
+    spacesEnabled: boolean("spaces_enabled").notNull(),
+    // Provisioned resource identifiers (adoption-bundle inputs).
+    clusterId: text("cluster_id"),
+    k8sVersion: text("k8s_version"),
+    bucketName: text("bucket_name"),
+    // The bucket-scoped Spaces key minted for artifact storage. The access key
+    // id doubles as the key's DO identifier; the secret is shown once on the
+    // success screen and nulled on dismissal.
+    spacesAccessKeyId: text("spaces_access_key_id"),
+    spacesSecretAccessKey: text("spaces_secret_access_key"),
+    // One-shot admin credentials (see above). Named after the terraform vars.
+    doToken: text("do_token"),
+    spacesAccessId: text("spaces_access_id"),
+    spacesSecretKey: text("spaces_secret_key"),
+    createdAt: timestamp("created_at")
+      .$defaultFn(() => /* @__PURE__ */ new Date())
+      .notNull(),
+    updatedAt: timestamp("updated_at")
+      .$defaultFn(() => /* @__PURE__ */ new Date())
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (t) => [index("cluster_deployment_user_id_idx").on(t.userId)],
+);
+
 // Where the Bandolier GitHub App is installed. One row per repo the App can act
 // on; the bot's installation access token (for issue/PR comments and other
 // bot-voice actions) is minted on demand from the App key + this installationId.

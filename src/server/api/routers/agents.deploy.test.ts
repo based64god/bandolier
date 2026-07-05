@@ -1,6 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type * as ResolveCredentials from "~/server/agents/resolve-credentials";
 import type { ModelCredentials } from "~/server/agents/resolve-credentials";
 
 // Mock the I/O collaborators the deploy mutation composes along the path to the
@@ -41,17 +42,11 @@ vi.mock("~/server/agents/compute", () => ({
 }));
 
 const resolveModelCredentials = vi.fn<() => Promise<ModelCredentials>>();
-vi.mock("~/server/agents/resolve-credentials", () => ({
+vi.mock("~/server/agents/resolve-credentials", async (importOriginal) => ({
+  // Keep the real registry-derived routing (providerForCredentials,
+  // selectRunCredentials); only the I/O-bound resolver is stubbed.
+  ...(await importOriginal<typeof ResolveCredentials>()),
   resolveModelCredentials: () => resolveModelCredentials(),
-  // Keep the real precedence logic; the routing under test depends on it.
-  pickProvider: (creds: ModelCredentials) => ({
-    aws: creds.aws,
-    anthropicApiKey: creds.anthropicApiKey,
-    anthropicOauthToken: creds.anthropicOauthToken,
-    openaiApiKey: creds.openaiApiKey,
-    codexAuthJson: creds.codexAuthJson,
-    geminiApiKey: creds.geminiApiKey,
-  }),
 }));
 
 const runUsesRepoCredentials = vi

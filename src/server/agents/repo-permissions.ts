@@ -1,6 +1,6 @@
-import { type AwsCredentials } from "~/server/agents/aws";
 import { ghFetch } from "~/server/agents/github-api";
 import {
+  hasModelCredentials,
   type ModelCredentials,
   resolveModelCredentials,
 } from "~/server/agents/resolve-credentials";
@@ -94,25 +94,6 @@ export async function getUserRepoPermission(
   }
 }
 
-/** Whether a resolved credential set carries any model credential at all. */
-function hasModelCredential(creds: {
-  aws: AwsCredentials | null;
-  anthropicApiKey: string | null;
-  anthropicOauthToken: string | null;
-  openaiApiKey: string | null;
-  codexAuthJson: string | null;
-  geminiApiKey: string | null;
-}): boolean {
-  return (
-    !!creds.aws ||
-    !!creds.anthropicApiKey ||
-    !!creds.anthropicOauthToken ||
-    !!creds.openaiApiKey ||
-    !!creds.codexAuthJson ||
-    !!creds.geminiApiKey
-  );
-}
-
 /**
  * Whether a given agent run for a user would actually consume repo-level shared
  * credentials (a shared kubeconfig or shared model API key) rather than that
@@ -141,7 +122,7 @@ export async function runUsesRepoCredentials(
   // Model credentials: repo-sourced when the resolver picked the repo set.
   const creds =
     resolved ?? (await resolveModelCredentials(database, userId, repoFullName));
-  if (creds.source === "repo" && hasModelCredential(creds)) return true;
+  if (creds.source === "repo" && hasModelCredentials(creds)) return true;
 
   // Kubeconfig: repo-scoped when the repo prefers its own and has one, or the
   // user has no kubeconfig of their own and the repo provides one. We avoid a

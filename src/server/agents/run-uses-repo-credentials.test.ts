@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type * as ResolveCredentials from "~/server/agents/resolve-credentials";
 import type { db as Database } from "~/server/db";
 import type { ModelCredentials } from "~/server/agents/resolve-credentials";
 import type { RepoCredentials } from "~/server/agents/webhook-config";
@@ -13,7 +14,10 @@ const getUserKubeconfig = vi.fn<() => Promise<string | null>>();
 vi.mock("~/server/agents/webhook-config", () => ({
   getRepoCredentials: () => getRepoCredentials(),
 }));
-vi.mock("~/server/agents/resolve-credentials", () => ({
+vi.mock("~/server/agents/resolve-credentials", async (importOriginal) => ({
+  // Keep the real registry-derived helpers (hasModelCredentials); only the
+  // I/O-bound resolver is stubbed.
+  ...(await importOriginal<typeof ResolveCredentials>()),
   resolveModelCredentials: () => resolveModelCredentials(),
 }));
 vi.mock("~/server/agents/kubeconfig", () => ({

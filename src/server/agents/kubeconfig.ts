@@ -7,18 +7,21 @@ import { env } from "~/env";
 import { getRepoCredentials } from "~/server/agents/webhook-config";
 import { type db } from "~/server/db";
 import { userKubeconfig } from "~/server/db/schema";
+import type { Validation } from "~/server/agents/validation";
 import {
   getKubeconfigServer,
   getVersionApi,
   unsupportedKubeconfigAuth,
 } from "~/server/k8s/client";
 
-export interface KubeconfigValidation {
-  valid: boolean;
+/**
+ * The result of validating a kubeconfig: on success the reachable cluster's
+ * Kubernetes server version, on failure a human-readable reason.
+ */
+export type KubeconfigValidation = Validation<{
   /** The Kubernetes server version when reachable (e.g. "v1.31.0"). */
   version?: string;
-  error?: string;
-}
+}>;
 
 /**
  * Whether an IP is in the link-local range (IPv4 169.254.0.0/16, IPv6 fe80::/10),

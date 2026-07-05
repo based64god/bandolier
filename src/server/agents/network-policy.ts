@@ -7,6 +7,7 @@ import { isIP } from "node:net";
 import { dump as dumpYaml, load as loadYaml } from "js-yaml";
 import { z } from "zod";
 
+import type { Validation } from "~/server/agents/validation";
 import { env } from "~/env";
 
 /** Name of the per-namespace NetworkPolicy that isolates agent pods. */
@@ -265,9 +266,7 @@ const networkPolicySchema = z.strictObject({
   }),
 });
 
-export type NetworkPolicyYamlValidation =
-  | { valid: true }
-  | { valid: false; error: string };
+export type NetworkPolicyYamlValidation = Validation;
 
 /**
  * Validates a raw NetworkPolicy YAML document before it's saved as a repo's

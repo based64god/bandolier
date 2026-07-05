@@ -22,10 +22,9 @@ import {
   makeIssueBranch,
 } from "~/lib/issue-prompt";
 import {
+  type ComputeSpec,
   DEFAULT_CPU_LIMIT,
   DEFAULT_MEMORY_LIMIT,
-  validateCpuQuantity,
-  validateMemoryQuantity,
 } from "~/lib/compute";
 import { EFFORT_LEVELS, providerSupportsEffort } from "~/lib/effort";
 import { parseTokenUsageFromLogs, type TokenUsage } from "~/lib/tokens";
@@ -45,7 +44,11 @@ import {
   githubGitIdentity,
   type GitIdentity,
 } from "~/server/agents/github-token";
-import { mergeCompute, resolveCompute } from "~/server/agents/compute";
+import {
+  mergeCompute,
+  parseComputeInput,
+  resolveCompute,
+} from "~/server/agents/compute";
 import { resolveKubeconfig } from "~/server/agents/kubeconfig";
 import { repoToNamespace } from "~/server/agents/namespace";
 import { listModelsForUser, pickPrWriterModel } from "~/server/agents/models";
@@ -59,9 +62,7 @@ import {
   runUsesRepoCredentials,
 } from "~/server/agents/repo-permissions";
 import {
-  getRepoAgentImage,
-  getRepoNetworkPolicy,
-  getRepoSystemPrompt,
+  getRepoWebhookConfig,
   type RepoNetworkPolicy,
 } from "~/server/agents/webhook-config";
 import { type db } from "~/server/db";
@@ -1309,21 +1310,11 @@ export const agentsRouter = createTRPCRouter({
 
       // Validate a per-task compute override up front, so a malformed quantity
       // is a clear 400 rather than a failed job creation.
-      const computeOverride: { cpu?: string; memory?: string } = {};
-      if (input.cpu?.trim()) {
-        const v = validateCpuQuantity(input.cpu);
-        if (!v.valid) {
-          throw new TRPCError({ code: "BAD_REQUEST", message: v.error });
-        }
-        computeOverride.cpu = v.normalized;
-      }
-      if (input.memory?.trim()) {
-        const v = validateMemoryQuantity(input.memory);
-        if (!v.valid) {
-          throw new TRPCError({ code: "BAD_REQUEST", message: v.error });
-        }
-        computeOverride.memory = v.normalized;
-      }
+      const parsed = parseComputeInput(input.cpu, input.memory);
+      const computeOverride: ComputeSpec = {
+        cpu: parsed.cpu ?? undefined,
+        memory: parsed.memory ?? undefined,
+      };
 
       // A repo's shared cluster and credentials are only for users who can reach
       // that repo. Verify access before resolving anything repo-scoped, so a
@@ -1600,11 +1591,15 @@ export const agentsRouter = createTRPCRouter({
         let networkPolicy: RepoNetworkPolicy | undefined;
         if (input.repoFullName) {
           try {
-            agentImage =
-              (await getRepoAgentImage(ctx.db, input.repoFullName)) ??
-              undefined;
+            const repoConfig = await getRepoWebhookConfig(
+              ctx.db,
+              input.repoFullName,
+            );
+            agentImage = repoConfig?.agentImage ?? undefined;
+            repoSystemPrompt = repoConfig?.systemPrompt ?? undefined;
+            networkPolicy = repoConfig?.networkPolicy;
           } catch (err) {
-            console.warn("[bandolier:deploy] agent image lookup failed", {
+            console.warn("[bandolier:deploy] repo config lookup failed", {
               error: err instanceof Error ? err.message : String(err),
             });
           }
@@ -1615,27 +1610,6 @@ export const agentsRouter = createTRPCRouter({
           if (agentImage) {
             imagePullSecret =
               getRegistryPullSecret(agentImage, githubToken) ?? undefined;
-          }
-          try {
-            repoSystemPrompt =
-              (await getRepoSystemPrompt(ctx.db, input.repoFullName)) ??
-              undefined;
-          } catch (err) {
-            console.warn(
-              "[bandolier:deploy] repo system prompt lookup failed",
-              {
-                error: err instanceof Error ? err.message : String(err),
-              },
-            );
-          }
-          try {
-            networkPolicy =
-              (await getRepoNetworkPolicy(ctx.db, input.repoFullName)) ??
-              undefined;
-          } catch (err) {
-            console.warn("[bandolier:deploy] network policy lookup failed", {
-              error: err instanceof Error ? err.message : String(err),
-            });
           }
         }
 

@@ -82,7 +82,9 @@ describe("getRepoAccess", () => {
       accessible: true,
       isAdmin: true,
     });
-    expect(fetchMock.mock.calls[0]![0]).toBe("https://api.github.com/repos/o/r");
+    expect(fetchMock.mock.calls[0]![0]).toBe(
+      "https://api.github.com/repos/o/r",
+    );
   });
 
   it("is accessible but not admin when admin isn't boolean true", async () => {

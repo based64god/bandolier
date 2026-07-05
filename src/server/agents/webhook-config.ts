@@ -28,6 +28,12 @@ export interface RepoWebhookConfig {
    * produced its branch (the webhook's `workflow_run` handler). Off by default.
    */
   resumeOnCiFailure: boolean;
+  /**
+   * Whether every pull request a Bandolier run reports as its output should have
+   * GitHub auto-merge enabled when the run finishes (the harness ingest
+   * callback), so it lands once its required checks pass. Off by default.
+   */
+  autoMergeBandolierPrs: boolean;
   /** Per-repo network-policy egress toggles. See `RepoNetworkPolicy`. */
   networkPolicy: RepoNetworkPolicy;
 }
@@ -119,6 +125,7 @@ export async function getRepoWebhookConfig(
       defaultWebhookEffort: repoWebhookConfig.defaultWebhookEffort,
       systemPrompt: repoWebhookConfig.systemPrompt,
       resumeOnCiFailure: repoWebhookConfig.resumeOnCiFailure,
+      autoMergeBandolierPrs: repoWebhookConfig.autoMergeBandolierPrs,
       allowPrivateEgress: repoWebhookConfig.allowPrivateEgress,
       allowAllPortsEgress: repoWebhookConfig.allowAllPortsEgress,
       networkPolicyYaml: repoWebhookConfig.networkPolicyYaml,
@@ -134,6 +141,7 @@ export async function getRepoWebhookConfig(
     defaultWebhookEffort: row.defaultWebhookEffort ?? null,
     systemPrompt: row.systemPrompt ?? null,
     resumeOnCiFailure: row.resumeOnCiFailure,
+    autoMergeBandolierPrs: row.autoMergeBandolierPrs,
     networkPolicy: {
       allowPrivateEgress: row.allowPrivateEgress,
       allowAllPortsEgress: row.allowAllPortsEgress,

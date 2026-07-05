@@ -74,11 +74,68 @@ describe("applyFrames", () => {
       {
         type: "tool",
         id: "t-3",
+        toolCallId: "t1",
         kind: "edit",
         title: "Edit: src/app.ts",
         status: "pending",
       },
     ]);
+  });
+
+  it("attaches a tool_call_update's output and status to its originating call", () => {
+    const { items } = applyFrames(
+      [],
+      [
+        update(1, "s", {
+          sessionUpdate: "tool_call",
+          toolCallId: "tc-1",
+          kind: "execute",
+          title: "Bash: ls",
+          status: "pending",
+        }),
+        update(2, "s", {
+          sessionUpdate: "tool_call_update",
+          toolCallId: "tc-1",
+          status: "completed",
+          content: [
+            { type: "content", content: { type: "text", text: "a.ts\n" } },
+          ],
+        }),
+        update(3, "s", {
+          sessionUpdate: "tool_call_update",
+          toolCallId: "tc-1",
+          content: [
+            { type: "content", content: { type: "text", text: "b.ts" } },
+          ],
+        }),
+      ],
+    );
+    expect(items).toEqual<TimelineItem[]>([
+      {
+        type: "tool",
+        id: "t-1",
+        toolCallId: "tc-1",
+        kind: "execute",
+        title: "Bash: ls",
+        status: "completed",
+        output: "a.ts\nb.ts",
+      },
+    ]);
+  });
+
+  it("ignores a tool_call_update with no matching call", () => {
+    const { items } = applyFrames(
+      [],
+      [
+        update(1, "s", {
+          sessionUpdate: "tool_call_update",
+          toolCallId: "missing",
+          status: "completed",
+          content: [{ type: "content", content: { type: "text", text: "x" } }],
+        }),
+      ],
+    );
+    expect(items).toEqual([]);
   });
 
   it("coalesces assistant chunks sharing a messageId into one bubble", () => {

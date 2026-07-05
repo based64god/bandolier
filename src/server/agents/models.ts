@@ -4,7 +4,11 @@ import {
   ListFoundationModelsCommand,
 } from "@aws-sdk/client-bedrock";
 
-import { cleanSessionToken, type AwsCredentials } from "~/server/agents/aws";
+import {
+  cleanSessionToken,
+  friendlyAwsError,
+  type AwsCredentials,
+} from "~/server/agents/aws";
 import { listGeminiModels as fetchGeminiModels } from "~/server/agents/gemini";
 import { listOpenaiModels as fetchOpenaiModels } from "~/server/agents/openai";
 import { resolveModelCredentials } from "~/server/agents/resolve-credentials";
@@ -169,26 +173,9 @@ async function listBedrockModels(
       }))
       .sort((a, b) => a.label.localeCompare(b.label));
   } catch (err) {
-    throw new Error(friendlyAwsError(err));
+    throw new Error(friendlyAwsError(err, "bedrock"));
   } finally {
     client.destroy();
-  }
-}
-
-/** Maps AWS SDK error names to clear, user-facing messages. */
-export function friendlyAwsError(err: unknown): string {
-  const e = (err ?? {}) as { name?: string; message?: string };
-  switch (e.name) {
-    case "ExpiredTokenException":
-    case "ExpiredToken":
-      return "AWS credentials have expired. Update them in settings.";
-    case "InvalidSignatureException":
-    case "UnrecognizedClientException":
-      return "AWS credentials are invalid. Check them in settings.";
-    case "AccessDeniedException":
-      return "AWS credentials lack permission to list Bedrock models (bedrock:ListInferenceProfiles / ListFoundationModels).";
-    default:
-      return e.message ?? "Failed to query AWS Bedrock models.";
   }
 }
 

@@ -47,6 +47,64 @@ export const ACTION_ROW_MIN_H = "min-h-[1.875rem]";
  * any PR/issue output, plus a terminate control. Interactive tasks render as an
  * expandable InteractiveCard instead.
  */
+/**
+ * The task-table header/column layout, shared by the dashboard's TaskTable and
+ * kept beside the column counts above so the two stay in lockstep. Hoisted to
+ * module level: the geometry never changes between renders, so rebuilding the
+ * array inside the render path only churned garbage.
+ *
+ * Columns whose content is constant-width — status pills, output badges, the
+ * "Issue #N" source link, the expiry clock time, the action controls — get
+ * fixed rem widths from `md` up, sized to their widest real content (measured in
+ * the /dev/task-row harness: "Terminating" pill 87px, "Issue ⏺" badge 68px,
+ * "Issue #12345" link 109px, "Dec 28, 12:59 PM" 118px, Confirm/Cancel pair
+ * 123px, + cell padding). A percentage share here grows with the viewport while
+ * the content doesn't: it starved these columns at 1024px (the Expires time and
+ * Status pill bled into their neighbours) and wasted ~100px per column at 1920px
+ * that belongs to the Task column. Below `md` the percentage shares remain:
+ * those are header-bound ("STATUS" must fit its cell at 360px), and the compact
+ * layout has only four columns. Status/Output share the same widths as the
+ * overview panel so the two tables line up.
+ *
+ * The primary "Task" column is `w-auto` so it absorbs all the width the fixed
+ * columns leave behind. A fixed share here would clamp the description to a
+ * constant width — truncating as if the wide action controls (confirm/cancel,
+ * "End session") were always present even when only the compact terminate glyph
+ * is, and wasting the freed space. Mirrors the Repository column in the overview
+ * panel.
+ *
+ * The three secondary columns appear only in the full layout (lg+). Below `lg` —
+ * including the 768–1023 tablet band — the row stays readable with
+ * Status/Output/Task alone. (Showing all seven at `md` starved the pill columns:
+ * a centered Status pill wider than its cell overflowed symmetrically and bled
+ * out past the table's edge, and the "Issue #N" source spilled into Currently.)
+ * "Created by" is sized to the "Issue #12345" source badge; a long creator
+ * username truncates (see SourceBadge). "Currently" is truncating free text — the
+ * one secondary column that can use extra width, so it keeps a percentage share
+ * (its content caps at max-w-[16rem] anyway); it's deferred to `xl` because in
+ * the 1024–1279 band the fixed columns leave the Task column ~150px if Currently
+ * also takes a share, so the least-dense column sits out until the viewport can
+ * afford it. The final (label-less) column holds the "End session" control (on
+ * running interactive rows) alongside the terminate control; on mobile the "End
+ * session" button collapses to a compact icon (see InteractiveRow) so both
+ * controls sit on one line, and the fixed `md:w-40` holds the widest pair (123px)
+ * and the terminate glyph on one line without wrapping.
+ */
+export const TASK_TABLE_COLUMNS: {
+  label: string;
+  width: string;
+  center?: boolean;
+  optional?: "lg" | "xl";
+}[] = [
+  { label: "Status", width: "w-[18%] md:w-[7.5rem]", center: true },
+  { label: "Output", width: "w-[23%] md:w-[7rem]", center: true },
+  { label: "Task", width: "w-auto" },
+  { label: "Created by", width: "w-36", optional: "lg" },
+  { label: "Currently", width: "w-[13%]", optional: "xl" },
+  { label: "Expires", width: "w-[9.5rem]", optional: "lg" },
+  { label: "", width: "w-[30%] md:w-40" },
+];
+
 export function TaskRow({
   agent,
   namespace,

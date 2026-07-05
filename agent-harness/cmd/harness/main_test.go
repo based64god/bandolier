@@ -56,14 +56,6 @@ func TestShortUnique(t *testing.T) {
 	}
 }
 
-func TestIssueBranchName(t *testing.T) {
-	got := issueBranchName(42, "Fix the login bug")
-	re := regexp.MustCompile(`^issue-42-fix-the-login-bug-[0-9a-z]{6}$`)
-	if !re.MatchString(got) {
-		t.Errorf("issueBranchName = %q, want match %v", got, re)
-	}
-}
-
 func TestRepoBranchName(t *testing.T) {
 	got := repoBranchName("Add feature")
 	re := regexp.MustCompile(`^bandolier/add-feature-[0-9a-z]{6}$`)
@@ -82,63 +74,6 @@ func TestBuildRepoSystemPrompt(t *testing.T) {
 	}
 	if !strings.Contains(got, "Do NOT push or open a pull request") {
 		t.Error("buildRepoSystemPrompt should forbid pushing")
-	}
-}
-
-func TestBuildIssueSystemPrompt(t *testing.T) {
-	issue := &githubIssue{Number: 5, Title: "Crash on startup", Body: "It crashes."}
-	got := buildIssueSystemPrompt(issue, "issue-5-crash")
-
-	if !strings.Contains(got, `on branch "issue-5-crash"`) {
-		t.Error("missing branch instruction")
-	}
-	if !strings.Contains(got, `git commit -s -m "Crash on startup"`) {
-		t.Error("commit step should use the issue title as the subject")
-	}
-	if !strings.Contains(got, "Do NOT push or open a pull request") {
-		t.Error("missing no-push instruction")
-	}
-	// The issue body belongs in the user message, not the system prompt.
-	if strings.Contains(got, "It crashes.") {
-		t.Error("system prompt should not embed the issue body")
-	}
-}
-
-func TestBuildIssueUserMessage(t *testing.T) {
-	issue := &githubIssue{Number: 5, Title: "Crash on startup", Body: "It crashes."}
-	got := buildIssueUserMessage(issue, "")
-
-	if !strings.Contains(got, "## Issue #5: Crash on startup") {
-		t.Error("missing issue heading")
-	}
-	if !strings.Contains(got, "It crashes.") {
-		t.Error("missing issue body")
-	}
-	// The instructional framing belongs in the system prompt, not the message.
-	if strings.Contains(got, "Do NOT push") {
-		t.Error("user message should not embed the working agreement")
-	}
-	if strings.Contains(got, "Additional context from the operator") {
-		t.Error("should not include operator section when context is empty")
-	}
-}
-
-func TestBuildIssueUserMessageEmptyBody(t *testing.T) {
-	issue := &githubIssue{Number: 1, Title: "T", Body: "   "}
-	got := buildIssueUserMessage(issue, "")
-	if !strings.Contains(got, "(no description provided)") {
-		t.Error("empty body should be replaced with placeholder")
-	}
-}
-
-func TestBuildIssueUserMessageWithContext(t *testing.T) {
-	issue := &githubIssue{Number: 1, Title: "T", Body: "B"}
-	got := buildIssueUserMessage(issue, "  Focus on the parser.  ")
-	if !strings.Contains(got, "## Additional context from the operator") {
-		t.Error("should include operator section when context is provided")
-	}
-	if !strings.Contains(got, "Focus on the parser.") {
-		t.Error("should include the operator context text")
 	}
 }
 

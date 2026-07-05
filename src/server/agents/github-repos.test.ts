@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   fetchAccessibleRepos,
+  isRepoAdmin,
   userHasRepoAccess,
 } from "~/server/agents/github-repos";
 
@@ -182,5 +183,68 @@ describe("userHasRepoAccess", () => {
   it("fails closed when the lookup itself fails", async () => {
     stubFetch(vi.fn().mockRejectedValue(new Error("network down")));
     expect(await userHasRepoAccess("gho_tok", "acme/widgets")).toBe(false);
+  });
+});
+
+describe("isRepoAdmin", () => {
+  function mockFetchOnce(body: unknown, isOk = true, status = 200) {
+    const json = vi.fn(() => Promise.resolve(body));
+    const fetchMock = stubFetch(
+      vi.fn().mockResolvedValue({
+        ok: isOk,
+        status,
+        statusText: isOk ? "OK" : "Error",
+        json,
+      }),
+    );
+    return { fetchMock, json };
+  }
+
+  it("is true for an admin, asking GitHub with the user's token", async () => {
+    const { fetchMock } = mockFetchOnce({ permissions: { admin: true } });
+    expect(await isRepoAdmin("tok", "o/r")).toBe(true);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://api.github.com/repos/o/r");
+    expect((init.headers as Record<string, string>).Authorization).toBe(
+      "Bearer tok",
+    );
+  });
+
+  it("is false when admin is false", async () => {
+    mockFetchOnce({ permissions: { admin: false } });
+    expect(await isRepoAdmin("tok", "o/r")).toBe(false);
+  });
+
+  it("is false when the body has no permissions at all", async () => {
+    mockFetchOnce({});
+    expect(await isRepoAdmin("tok", "o/r")).toBe(false);
+  });
+
+  it("is false when admin is truthy but not boolean true", async () => {
+    mockFetchOnce({ permissions: { admin: 1 } });
+    expect(await isRepoAdmin("tok", "o/r")).toBe(false);
+  });
+
+  it("fails closed on an API error without reading the body", async () => {
+    const { json } = mockFetchOnce({}, false, 404);
+    expect(await isRepoAdmin("tok", "o/r")).toBe(false);
+    expect(json).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when fetch throws", async () => {
+    stubFetch(vi.fn().mockRejectedValue(new Error("network")));
+    expect(await isRepoAdmin("tok", "o/r")).toBe(false);
+  });
+
+  it("fails closed when the body is not valid JSON", async () => {
+    stubFetch(
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: () => Promise.reject(new Error("malformed body")),
+      }),
+    );
+    expect(await isRepoAdmin("tok", "o/r")).toBe(false);
   });
 });

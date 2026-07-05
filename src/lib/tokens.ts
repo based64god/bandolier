@@ -11,9 +11,11 @@ export interface TokenUsage {
   cacheCreationInputTokens: number;
 }
 
-// Marker prefix the harness logs the usage JSON behind. Kept in sync with the
-// Go harness's tokenMarkerPrefix.
-const TOKEN_MARKER = "BANDOLIER_TOKENS=";
+// Marker prefix the harness logs the usage JSON behind. This crosses the
+// process boundary (the Go harness emits it, this parses it), so its value is
+// pinned in wire-contract.json and asserted by both test suites — see
+// src/lib/wire-contract.test.ts.
+export const TOKEN_MARKER = "BANDOLIER_TOKENS=";
 
 function toInt(v: unknown): number {
   return typeof v === "number" && Number.isFinite(v) && v > 0

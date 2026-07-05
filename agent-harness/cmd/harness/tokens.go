@@ -11,7 +11,9 @@ import (
 // PR_URL/ISSUE_URL markers, it rides the pod log (and the persisted transcript)
 // so Bandolier can surface and persist the count without a side channel. The
 // server greps the most recent occurrence, so emitting the running total each
-// turn keeps the readout live for interactive sessions.
+// turn keeps the readout live for interactive sessions. This value crosses to
+// the server-side parser, so it's pinned in wire-contract.json and asserted by
+// both test suites (see wire_contract_test.go).
 const tokenMarkerPrefix = "BANDOLIER_TOKENS="
 
 // tokenUsage is the per-run token accounting reported by the agent CLIs. The

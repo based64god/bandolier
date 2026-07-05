@@ -6,12 +6,16 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestSlugify(t *testing.T) {
@@ -1051,5 +1055,111 @@ func TestSetupSerenaAntigravity(t *testing.T) {
 	want := []string{"start-mcp-server", "--context", "antigravity", "--project", "/repo"}
 	if strings.Join(serena.Args, " ") != strings.Join(want, " ") {
 		t.Errorf("serena args = %v, want %v", serena.Args, want)
+	}
+}
+
+func TestInteractiveIdleTimeout(t *testing.T) {
+	cases := []struct {
+		name string
+		set  bool
+		val  string
+		want time.Duration
+	}{
+		{name: "valid duration", set: true, val: "100ms", want: 100 * time.Millisecond},
+		{name: "invalid falls back to 30m", set: true, val: "bogus", want: 30 * time.Minute},
+		{name: "empty falls back to 30m", set: true, val: "", want: 30 * time.Minute},
+		{name: "unset falls back to 30m", set: false, want: 30 * time.Minute},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.set {
+				t.Setenv("INTERACTIVE_IDLE_TIMEOUT", tc.val)
+			} else {
+				t.Setenv("INTERACTIVE_IDLE_TIMEOUT", "")
+			}
+			if got := interactiveIdleTimeout(); got != tc.want {
+				t.Errorf("interactiveIdleTimeout() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// fakeInput is an in-memory stand-in for the Bandolier input endpoint: each GET
+// pops the next queued message; an empty queue answers 204 (no content).
+type fakeInput struct {
+	frames []string
+	i      int32
+}
+
+func (f *fakeInput) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	idx := atomic.AddInt32(&f.i, 1) - 1
+	if int(idx) >= len(f.frames) {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]string{"content": f.frames[int(idx)]})
+}
+
+func TestAwaitInputSentinel(t *testing.T) {
+	srv := httptest.NewServer(&fakeInput{frames: []string{endSessionSentinel}})
+	defer srv.Close()
+
+	content, ended := awaitInput(context.Background(), config{inputURL: srv.URL}, time.Minute)
+	if !ended {
+		t.Errorf("ended = false, want true on sentinel")
+	}
+	if content != "" {
+		t.Errorf("content = %q, want empty", content)
+	}
+}
+
+func TestAwaitInputContent(t *testing.T) {
+	srv := httptest.NewServer(&fakeInput{frames: []string{"hello there"}})
+	defer srv.Close()
+
+	content, ended := awaitInput(context.Background(), config{inputURL: srv.URL}, time.Minute)
+	if ended {
+		t.Errorf("ended = true, want false on content")
+	}
+	if content != "hello there" {
+		t.Errorf("content = %q, want %q", content, "hello there")
+	}
+}
+
+func TestAwaitInputIdleTimeout(t *testing.T) {
+	// A perpetual 204 (never any input) must end the session via the idle deadline.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	start := time.Now()
+	content, ended := awaitInput(context.Background(), config{inputURL: srv.URL}, 50*time.Millisecond)
+	if !ended {
+		t.Errorf("ended = false, want true on idle timeout")
+	}
+	if content != "" {
+		t.Errorf("content = %q, want empty", content)
+	}
+	if time.Since(start) > 30*time.Second {
+		t.Errorf("awaitInput took too long to hit idle deadline")
+	}
+}
+
+func TestAwaitInputContextCancel(t *testing.T) {
+	// A perpetual 204 with a cancelled context must exit via the ctx path.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	content, ended := awaitInput(ctx, config{inputURL: srv.URL}, time.Minute)
+	if !ended {
+		t.Errorf("ended = false, want true on ctx cancel")
+	}
+	if content != "" {
+		t.Errorf("content = %q, want empty", content)
 	}
 }

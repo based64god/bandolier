@@ -1,12 +1,10 @@
 import { eq } from "drizzle-orm";
 
+import { probeApiKey, type Validation } from "~/server/agents/validation";
 import { type db } from "~/server/db";
 import { userOpenaiCredentials } from "~/server/db/schema";
 
-export interface OpenaiValidation {
-  valid: boolean;
-  error?: string;
-}
+export type OpenaiValidation = Validation;
 
 const OPENAI_MODELS_URL = "https://api.openai.com/v1/models";
 
@@ -14,23 +12,12 @@ const OPENAI_MODELS_URL = "https://api.openai.com/v1/models";
  * Validates an OpenAI API key with a cheap GET /v1/models call. A 401 means the
  * key is bad; 200 means it works.
  */
-export async function validateOpenaiKey(
-  apiKey: string,
-): Promise<OpenaiValidation> {
-  try {
-    const res = await fetch(OPENAI_MODELS_URL, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-    });
-    if (res.ok) return { valid: true };
-    if (res.status === 401)
-      return { valid: false, error: "API key is invalid." };
-    return { valid: false, error: `OpenAI API error: ${res.status}` };
-  } catch (err) {
-    return {
-      valid: false,
-      error: err instanceof Error ? err.message : "Could not reach OpenAI API.",
-    };
-  }
+export function validateOpenaiKey(apiKey: string): Promise<OpenaiValidation> {
+  return probeApiKey(
+    OPENAI_MODELS_URL,
+    { Authorization: `Bearer ${apiKey}` },
+    "OpenAI",
+  );
 }
 
 /**

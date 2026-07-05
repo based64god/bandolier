@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { friendlyAwsError } from "~/server/agents/aws";
 import {
-  friendlyAwsError,
   fuzzyPickModel,
   pickDefaultModel,
   pickLatestGeminiFlash,
@@ -247,37 +247,43 @@ describe("fuzzyPickModel", () => {
   });
 });
 
-describe("friendlyAwsError", () => {
+describe("friendlyAwsError (bedrock)", () => {
   it("maps expired-token errors to an update-credentials message", () => {
-    expect(friendlyAwsError({ name: "ExpiredTokenException" })).toMatch(
+    expect(
+      friendlyAwsError({ name: "ExpiredTokenException" }, "bedrock"),
+    ).toMatch(/expired/i);
+    expect(friendlyAwsError({ name: "ExpiredToken" }, "bedrock")).toMatch(
       /expired/i,
     );
-    expect(friendlyAwsError({ name: "ExpiredToken" })).toMatch(/expired/i);
   });
 
   it("maps signature/client errors to an invalid-credentials message", () => {
-    expect(friendlyAwsError({ name: "InvalidSignatureException" })).toMatch(
-      /invalid/i,
-    );
-    expect(friendlyAwsError({ name: "UnrecognizedClientException" })).toMatch(
-      /invalid/i,
-    );
+    expect(
+      friendlyAwsError({ name: "InvalidSignatureException" }, "bedrock"),
+    ).toMatch(/invalid/i);
+    expect(
+      friendlyAwsError({ name: "UnrecognizedClientException" }, "bedrock"),
+    ).toMatch(/invalid/i);
   });
 
   it("explains the missing Bedrock permission on access denied", () => {
-    expect(friendlyAwsError({ name: "AccessDeniedException" })).toMatch(
-      /permission/i,
-    );
+    expect(
+      friendlyAwsError({ name: "AccessDeniedException" }, "bedrock"),
+    ).toMatch(/permission/i);
   });
 
   it("falls back to the error message for unknown errors", () => {
-    expect(friendlyAwsError({ name: "SomethingElse", message: "boom" })).toBe(
-      "boom",
-    );
+    expect(
+      friendlyAwsError({ name: "SomethingElse", message: "boom" }, "bedrock"),
+    ).toBe("boom");
   });
 
   it("uses a generic message when there's no name or message", () => {
-    expect(friendlyAwsError({})).toBe("Failed to query AWS Bedrock models.");
-    expect(friendlyAwsError(null)).toBe("Failed to query AWS Bedrock models.");
+    expect(friendlyAwsError({}, "bedrock")).toBe(
+      "Failed to query AWS Bedrock models.",
+    );
+    expect(friendlyAwsError(null, "bedrock")).toBe(
+      "Failed to query AWS Bedrock models.",
+    );
   });
 });

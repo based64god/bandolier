@@ -8,9 +8,11 @@ import (
 
 // ── Reasoning effort ────────────────────────────────────────────────────────
 
-// effortLevels are the values the `claude` CLI accepts for --effort, kept in
-// sync with the dashboard/webhook side (src/lib/effort.ts). Effort is a
-// Claude-only control; the Codex and Antigravity CLIs don't take it.
+// effortLevels are the values the `claude` CLI accepts for --effort. This
+// allow-list crosses to the dashboard/webhook side, so its values are pinned in
+// wire-contract.json and asserted by both test suites (see
+// wire_contract_test.go). Effort is a Claude-only control; the Codex and
+// Antigravity CLIs don't take it.
 var effortLevels = map[string]bool{
 	"low":    true,
 	"medium": true,

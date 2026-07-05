@@ -103,11 +103,32 @@ func buildEnv(provider providerKind) []string {
 // (injected as CODEX_AUTH_JSON) — ~/.codex/auth.json, where the Codex CLI
 // looks for its ChatGPT-subscription session.
 func codexAuthPath() string {
+	return filepath.Join(homeDir(), ".codex", "auth.json")
+}
+
+// homeDir returns the current user's home directory, falling back to /root when
+// it can't be determined (the harness runs as root in its container).
+func homeDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
-		home = "/root"
+		return "/root"
 	}
-	return filepath.Join(home, ".codex", "auth.json")
+	return home
+}
+
+// materializeSecret writes secret contents to path, creating the parent
+// directory 0700 and the file 0600. On any failure it logs a warning naming
+// what failed via label and returns false so callers can warn-and-continue.
+func materializeSecret(path, contents, label string) bool {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		log.Printf("[harness] warn: could not create %s: %v", filepath.Dir(path), err)
+		return false
+	}
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		log.Printf("[harness] warn: could not write %s: %v", label, err)
+		return false
+	}
+	return true
 }
 
 // setupCodexCredentials prepares Codex CLI authentication. With OPENAI_API_KEY
@@ -124,15 +145,7 @@ func setupCodexCredentials(env []string) []string {
 	if authJSON == "" {
 		return env
 	}
-	path := codexAuthPath()
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		log.Printf("[harness] warn: could not create %s: %v", filepath.Dir(path), err)
-		return env
-	}
-	if err := os.WriteFile(path, []byte(authJSON), 0o600); err != nil {
-		log.Printf("[harness] warn: could not write Codex auth.json: %v", err)
-		return env
-	}
+	materializeSecret(codexAuthPath(), authJSON, "Codex auth.json")
 	return env
 }
 
@@ -140,11 +153,7 @@ func setupCodexCredentials(env []string) []string {
 // credentials JSON. It lives under ~/.gemini so agy finds it alongside its own
 // config; GOOGLE_APPLICATION_CREDENTIALS points the google-genai auth at it.
 func geminiCredentialsPath() string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		home = "/root"
-	}
-	return filepath.Join(home, ".gemini", "credentials.json")
+	return filepath.Join(homeDir(), ".gemini", "credentials.json")
 }
 
 // setupGeminiCredentials writes the Google project credentials JSON (injected as
@@ -167,12 +176,7 @@ func setupGeminiCredentials(env []string) []string {
 	}
 
 	path := geminiCredentialsPath()
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		log.Printf("[harness] warn: could not create %s: %v", filepath.Dir(path), err)
-		return env
-	}
-	if err := os.WriteFile(path, []byte(creds), 0o600); err != nil {
-		log.Printf("[harness] warn: could not write Gemini credentials: %v", err)
+	if !materializeSecret(path, creds, "Gemini credentials") {
 		return env
 	}
 

@@ -1,34 +1,21 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 
 import { env } from "~/env";
 import { EFFORT_LEVELS, providerSupportsEffort } from "~/lib/effort";
 import { api } from "~/trpc/react";
+import {
+  CredentialFeedback,
+  MaskedCredentialRow,
+  SecretForm,
+  ToggleSection,
+  useCredentialMutations,
+} from "./credential-ui";
+import { Modal } from "./modal";
 import { parseAwsCredentials } from "./parse-aws";
 import { ProviderTag } from "./provider-tag";
 import { SearchableSelect } from "./searchable-select";
-
-function CredFeedback({
-  error,
-  ok,
-}: {
-  error?: string | null;
-  ok?: string | null;
-}) {
-  if (!error && !ok) return null;
-  return (
-    <p
-      className={`rounded-lg border px-3 py-2 text-xs ${
-        error
-          ? "border-red-500/30 bg-red-500/10 text-red-400"
-          : "border-green-500/30 bg-green-500/10 text-green-300"
-      }`}
-    >
-      {error ?? ok}
-    </p>
-  );
-}
 
 // Anthropic key shared by everyone working on this repo. Admin-only (the whole
 // modal is gated on repo admin server-side).
@@ -41,20 +28,15 @@ function RepoAnthropicSection({
 }) {
   const utils = api.useUtils();
   const [apiKey, setApiKey] = useState("");
-  const [result, setResult] = useState<string | null>(null);
+  const { result, setResult, onSave, onRemove } = useCredentialMutations(() =>
+    utils.webhooks.getCredentials.invalidate({ repoFullName }),
+  );
 
   const save = api.webhooks.setAnthropic.useMutation({
-    onSuccess: () => {
-      void utils.webhooks.getCredentials.invalidate({ repoFullName });
-      setApiKey("");
-      setResult("Saved and verified ✓");
-    },
+    onSuccess: () => onSave(() => setApiKey("")),
   });
   const remove = api.webhooks.deleteAnthropic.useMutation({
-    onSuccess: () => {
-      void utils.webhooks.getCredentials.invalidate({ repoFullName });
-      setResult(null);
-    },
+    onSuccess: onRemove,
   });
 
   return (
@@ -63,42 +45,29 @@ function RepoAnthropicSection({
         Anthropic API key
       </h4>
       {status?.configured ? (
-        <div className="flex items-center justify-between rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm">
+        <MaskedCredentialRow
+          onRemove={() => remove.mutate({ repoFullName })}
+          removePending={remove.isPending}
+        >
           <code className="text-purple-300">{status.apiKeyMasked}</code>
-          <button
-            onClick={() => remove.mutate({ repoFullName })}
-            disabled={remove.isPending}
-            className="rounded bg-red-500/10 px-2 py-1 text-xs text-red-400 hover:bg-red-500/20 disabled:opacity-50"
-          >
-            Remove
-          </button>
-        </div>
+        </MaskedCredentialRow>
       ) : (
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
+        <SecretForm
+          accent="purple"
+          value={apiKey}
+          onChange={setApiKey}
+          onSubmit={() => {
             setResult(null);
             save.mutate({ repoFullName, apiKey });
           }}
-          className="flex gap-2"
-        >
-          <input
-            type="password"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            placeholder="sk-ant-…"
-            className="flex-1 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 focus:border-purple-500/50 focus:outline-none"
-          />
-          <button
-            type="submit"
-            disabled={save.isPending || !apiKey}
-            className="rounded-lg bg-purple-600 px-3 py-2 text-sm font-medium text-black hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {save.isPending ? "Verifying…" : "Save"}
-          </button>
-        </form>
+          placeholder="sk-ant-…"
+          submitLabel="Save"
+          pendingLabel="Verifying…"
+          pending={save.isPending}
+          canSubmit={!!apiKey}
+        />
       )}
-      <CredFeedback error={save.error?.message} ok={result} />
+      <CredentialFeedback saveError={save.error?.message} result={result} />
     </div>
   );
 }
@@ -114,62 +83,42 @@ function RepoOpenAISection({
 }) {
   const utils = api.useUtils();
   const [apiKey, setApiKey] = useState("");
-  const [result, setResult] = useState<string | null>(null);
+  const { result, setResult, onSave, onRemove } = useCredentialMutations(() =>
+    utils.webhooks.getCredentials.invalidate({ repoFullName }),
+  );
 
   const save = api.webhooks.setOpenai.useMutation({
-    onSuccess: () => {
-      void utils.webhooks.getCredentials.invalidate({ repoFullName });
-      setApiKey("");
-      setResult("Saved and verified ✓");
-    },
+    onSuccess: () => onSave(() => setApiKey("")),
   });
-  const remove = api.webhooks.deleteOpenai.useMutation({
-    onSuccess: () => {
-      void utils.webhooks.getCredentials.invalidate({ repoFullName });
-      setResult(null);
-    },
-  });
+  const remove = api.webhooks.deleteOpenai.useMutation({ onSuccess: onRemove });
 
   return (
     <div className="space-y-2">
       <h4 className="text-xs font-semibold text-teal-300">OpenAI API key</h4>
       {status?.configured ? (
-        <div className="flex items-center justify-between rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm">
+        <MaskedCredentialRow
+          onRemove={() => remove.mutate({ repoFullName })}
+          removePending={remove.isPending}
+        >
           <code className="text-teal-300">{status.apiKeyMasked}</code>
-          <button
-            onClick={() => remove.mutate({ repoFullName })}
-            disabled={remove.isPending}
-            className="rounded bg-red-500/10 px-2 py-1 text-xs text-red-400 hover:bg-red-500/20 disabled:opacity-50"
-          >
-            Remove
-          </button>
-        </div>
+        </MaskedCredentialRow>
       ) : (
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
+        <SecretForm
+          accent="teal"
+          value={apiKey}
+          onChange={setApiKey}
+          onSubmit={() => {
             setResult(null);
             save.mutate({ repoFullName, apiKey });
           }}
-          className="flex gap-2"
-        >
-          <input
-            type="password"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            placeholder="sk-…"
-            className="flex-1 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 focus:border-teal-500/50 focus:outline-none"
-          />
-          <button
-            type="submit"
-            disabled={save.isPending || !apiKey}
-            className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-medium hover:bg-teal-500 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {save.isPending ? "Verifying…" : "Save"}
-          </button>
-        </form>
+          placeholder="sk-…"
+          submitLabel="Save"
+          pendingLabel="Verifying…"
+          pending={save.isPending}
+          canSubmit={!!apiKey}
+        />
       )}
-      <CredFeedback error={save.error?.message} ok={result} />
+      <CredentialFeedback saveError={save.error?.message} result={result} />
     </div>
   );
 }
@@ -190,21 +139,14 @@ function RepoGeminiSection({
 }) {
   const utils = api.useUtils();
   const [credentials, setCredentials] = useState("");
-  const [result, setResult] = useState<string | null>(null);
+  const { result, setResult, onSave, onRemove } = useCredentialMutations(() =>
+    utils.webhooks.getCredentials.invalidate({ repoFullName }),
+  );
 
   const save = api.webhooks.setGemini.useMutation({
-    onSuccess: () => {
-      void utils.webhooks.getCredentials.invalidate({ repoFullName });
-      setCredentials("");
-      setResult("Saved and verified ✓");
-    },
+    onSuccess: () => onSave(() => setCredentials("")),
   });
-  const remove = api.webhooks.deleteGemini.useMutation({
-    onSuccess: () => {
-      void utils.webhooks.getCredentials.invalidate({ repoFullName });
-      setResult(null);
-    },
-  });
+  const remove = api.webhooks.deleteGemini.useMutation({ onSuccess: onRemove });
 
   return (
     <div className="space-y-2">
@@ -212,7 +154,10 @@ function RepoGeminiSection({
         Gemini (Google Cloud project credentials)
       </h4>
       {status?.configured ? (
-        <div className="flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm">
+        <MaskedCredentialRow
+          onRemove={() => remove.mutate({ repoFullName })}
+          removePending={remove.isPending}
+        >
           <div className="min-w-0">
             <div className="truncate text-blue-300">
               {status.clientEmail ?? "service account"}
@@ -223,44 +168,29 @@ function RepoGeminiSection({
               </div>
             )}
           </div>
-          <button
-            onClick={() => remove.mutate({ repoFullName })}
-            disabled={remove.isPending}
-            className="shrink-0 rounded bg-red-500/10 px-2 py-1 text-xs text-red-400 hover:bg-red-500/20 disabled:opacity-50"
-          >
-            Remove
-          </button>
-        </div>
+        </MaskedCredentialRow>
       ) : (
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
+        <SecretForm
+          accent="blue"
+          variant="textarea"
+          value={credentials}
+          onChange={setCredentials}
+          onSubmit={() => {
             setResult(null);
             save.mutate({ repoFullName, credentials });
           }}
-          className="space-y-2"
-        >
-          <textarea
-            rows={5}
-            value={credentials}
-            onChange={(e) => setCredentials(e.target.value)}
-            placeholder={
-              '{\n  "type": "service_account",\n  "project_id": "…",\n  "client_email": "…",\n  "private_key": "-----BEGIN PRIVATE KEY-----…"\n}'
-            }
-            className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 font-mono text-xs text-white placeholder-white/25 focus:border-blue-500/50 focus:outline-none"
-          />
-          <div className="flex justify-end">
-            <button
-              type="submit"
-              disabled={save.isPending || !credentials}
-              className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-black hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {save.isPending ? "Verifying…" : "Save"}
-            </button>
-          </div>
-        </form>
+          rows={5}
+          placeholder={
+            '{\n  "type": "service_account",\n  "project_id": "…",\n  "client_email": "…",\n  "private_key": "-----BEGIN PRIVATE KEY-----…"\n}'
+          }
+          submitLabel="Save"
+          pendingLabel="Verifying…"
+          pending={save.isPending}
+          canSubmit={!!credentials}
+          align="end"
+        />
       )}
-      <CredFeedback error={save.error?.message} ok={result} />
+      <CredentialFeedback saveError={save.error?.message} result={result} />
     </div>
   );
 }
@@ -283,23 +213,19 @@ function RepoAwsSection({
   const [secretAccessKey, setSecretAccessKey] = useState("");
   const [sessionToken, setSessionToken] = useState("");
   const [region, setRegion] = useState("us-east-1");
-  const [result, setResult] = useState<string | null>(null);
+  const { result, setResult, onSave, onRemove } = useCredentialMutations(() =>
+    utils.webhooks.getCredentials.invalidate({ repoFullName }),
+  );
 
   const save = api.webhooks.setAws.useMutation({
-    onSuccess: () => {
-      void utils.webhooks.getCredentials.invalidate({ repoFullName });
-      setAccessKeyId("");
-      setSecretAccessKey("");
-      setSessionToken("");
-      setResult("Saved and verified ✓");
-    },
+    onSuccess: () =>
+      onSave(() => {
+        setAccessKeyId("");
+        setSecretAccessKey("");
+        setSessionToken("");
+      }),
   });
-  const remove = api.webhooks.deleteAws.useMutation({
-    onSuccess: () => {
-      void utils.webhooks.getCredentials.invalidate({ repoFullName });
-      setResult(null);
-    },
-  });
+  const remove = api.webhooks.deleteAws.useMutation({ onSuccess: onRemove });
 
   function handlePaste(text: string) {
     const parsed = parseAwsCredentials(text);
@@ -317,7 +243,10 @@ function RepoAwsSection({
         AWS Bedrock credentials
       </h4>
       {status?.configured ? (
-        <div className="flex items-center justify-between rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm">
+        <MaskedCredentialRow
+          onRemove={() => remove.mutate({ repoFullName })}
+          removePending={remove.isPending}
+        >
           <span>
             <code className="text-orange-300">{status.accessKeyIdMasked}</code>
             <span className="ml-2 text-white/40">{status.region}</span>
@@ -327,14 +256,7 @@ function RepoAwsSection({
               </span>
             )}
           </span>
-          <button
-            onClick={() => remove.mutate({ repoFullName })}
-            disabled={remove.isPending}
-            className="rounded bg-red-500/10 px-2 py-1 text-xs text-red-400 hover:bg-red-500/20 disabled:opacity-50"
-          >
-            Remove
-          </button>
-        </div>
+        </MaskedCredentialRow>
       ) : (
         <>
           <textarea
@@ -398,7 +320,7 @@ function RepoAwsSection({
           </form>
         </>
       )}
-      <CredFeedback error={save.error?.message} ok={result} />
+      <CredentialFeedback saveError={save.error?.message} result={result} />
     </div>
   );
 }
@@ -427,23 +349,21 @@ function RepoArtifactsSection({
   const [endpoint, setEndpoint] = useState("");
   const [accessKeyId, setAccessKeyId] = useState("");
   const [secretAccessKey, setSecretAccessKey] = useState("");
-  const [result, setResult] = useState<string | null>(null);
+  const { result, setResult, onSave, onRemove } = useCredentialMutations(() =>
+    utils.webhooks.getCredentials.invalidate({ repoFullName }),
+  );
 
   const save = api.webhooks.setArtifacts.useMutation({
-    onSuccess: () => {
-      void utils.webhooks.getCredentials.invalidate({ repoFullName });
-      setBucket("");
-      setEndpoint("");
-      setAccessKeyId("");
-      setSecretAccessKey("");
-      setResult("Saved and verified ✓");
-    },
+    onSuccess: () =>
+      onSave(() => {
+        setBucket("");
+        setEndpoint("");
+        setAccessKeyId("");
+        setSecretAccessKey("");
+      }),
   });
   const remove = api.webhooks.deleteArtifacts.useMutation({
-    onSuccess: () => {
-      void utils.webhooks.getCredentials.invalidate({ repoFullName });
-      setResult(null);
-    },
+    onSuccess: onRemove,
   });
 
   return (
@@ -457,7 +377,10 @@ function RepoArtifactsSection({
         stay on the server, never given to agents.
       </p>
       {status?.configured ? (
-        <div className="flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm">
+        <MaskedCredentialRow
+          onRemove={() => remove.mutate({ repoFullName })}
+          removePending={remove.isPending}
+        >
           <div className="min-w-0">
             <div className="truncate">
               <code className="text-emerald-300">{status.bucket}</code>
@@ -472,14 +395,7 @@ function RepoArtifactsSection({
               )}
             </div>
           </div>
-          <button
-            onClick={() => remove.mutate({ repoFullName })}
-            disabled={remove.isPending}
-            className="shrink-0 rounded bg-red-500/10 px-2 py-1 text-xs text-red-400 hover:bg-red-500/20 disabled:opacity-50"
-          >
-            Remove
-          </button>
-        </div>
+        </MaskedCredentialRow>
       ) : (
         <form
           onSubmit={(e) => {
@@ -545,7 +461,7 @@ function RepoArtifactsSection({
           </div>
         </form>
       )}
-      <CredFeedback error={save.error?.message} ok={result} />
+      <CredentialFeedback saveError={save.error?.message} result={result} />
     </div>
   );
 }
@@ -561,67 +477,54 @@ function RepoKubeconfigSection({
 }) {
   const utils = api.useUtils();
   const [kubeconfig, setKubeconfig] = useState("");
-  const [result, setResult] = useState<string | null>(null);
+  const { result, setResult, onSave, onRemove } = useCredentialMutations(() =>
+    utils.webhooks.getCredentials.invalidate({ repoFullName }),
+  );
 
   const save = api.webhooks.setKubeconfig.useMutation({
-    onSuccess: (r) => {
-      void utils.webhooks.getCredentials.invalidate({ repoFullName });
-      setKubeconfig("");
-      setResult(`Saved and verified ✓ ${r.version ?? ""}`);
-    },
+    onSuccess: (r) =>
+      onSave(
+        () => setKubeconfig(""),
+        `Saved and verified ✓ ${r.version ?? ""}`,
+      ),
   });
   const remove = api.webhooks.deleteKubeconfig.useMutation({
-    onSuccess: () => {
-      void utils.webhooks.getCredentials.invalidate({ repoFullName });
-      setResult(null);
-    },
+    onSuccess: onRemove,
   });
 
   return (
     <div className="space-y-2">
       <h4 className="text-xs font-semibold text-sky-300">Kubeconfig</h4>
       {configured ? (
-        <div className="flex items-center justify-between rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm">
+        <MaskedCredentialRow
+          onRemove={() => remove.mutate({ repoFullName })}
+          removePending={remove.isPending}
+        >
           <span className="text-white/70">A kubeconfig is configured.</span>
-          <button
-            onClick={() => remove.mutate({ repoFullName })}
-            disabled={remove.isPending}
-            className="rounded bg-red-500/10 px-2 py-1 text-xs text-red-400 hover:bg-red-500/20 disabled:opacity-50"
-          >
-            Remove
-          </button>
-        </div>
+        </MaskedCredentialRow>
       ) : (
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
+        <SecretForm
+          accent="sky"
+          variant="textarea"
+          required
+          value={kubeconfig}
+          onChange={setKubeconfig}
+          onSubmit={() => {
             setResult(null);
             save.mutate({ repoFullName, kubeconfig });
           }}
-          className="space-y-2"
-        >
-          <textarea
-            required
-            rows={5}
-            value={kubeconfig}
-            onChange={(e) => setKubeconfig(e.target.value)}
-            placeholder={
-              "apiVersion: v1\nkind: Config\nclusters:\n  - cluster:\n      server: https://…"
-            }
-            className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 font-mono text-xs text-white placeholder-white/25 focus:border-sky-500/50 focus:outline-none"
-          />
-          <div className="flex justify-end">
-            <button
-              type="submit"
-              disabled={save.isPending || !kubeconfig}
-              className="rounded-lg bg-sky-600 px-3 py-2 text-sm font-medium text-black hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {save.isPending ? "Verifying…" : "Save & verify"}
-            </button>
-          </div>
-        </form>
+          rows={5}
+          placeholder={
+            "apiVersion: v1\nkind: Config\nclusters:\n  - cluster:\n      server: https://…"
+          }
+          submitLabel="Save & verify"
+          pendingLabel="Verifying…"
+          pending={save.isPending}
+          canSubmit={!!kubeconfig}
+          align="end"
+        />
       )}
-      <CredFeedback error={save.error?.message} ok={result} />
+      <CredentialFeedback saveError={save.error?.message} result={result} />
     </div>
   );
 }
@@ -687,7 +590,10 @@ function RepoDefaultModelSection({ repoFullName }: { repoFullName: string }) {
         searchPlaceholder="Search models…"
         emptyText="No models available — configure credentials below."
       />
-      <CredFeedback error={setDefault.error?.message} ok={result} />
+      <CredentialFeedback
+        saveError={setDefault.error?.message}
+        result={result}
+      />
     </div>
   );
 }
@@ -759,7 +665,10 @@ function RepoDefaultEffortSection({ repoFullName }: { repoFullName: string }) {
           );
         })}
       </div>
-      <CredFeedback error={setDefault.error?.message} ok={result} />
+      <CredentialFeedback
+        saveError={setDefault.error?.message}
+        result={result}
+      />
     </div>
   );
 }
@@ -799,36 +708,15 @@ function RepoResumeSection({ repoFullName }: { repoFullName: string }) {
         <p className="text-xs text-white/30">Loading…</p>
       ) : (
         <div className="space-y-2">
-          <div className="flex items-start justify-between gap-3 rounded-lg border border-white/10 bg-white/[0.03] p-3">
-            <div className="min-w-0 space-y-1">
-              <h4 className="text-xs font-semibold text-white/70">
-                Auto-resume on failing CI
-              </h4>
-              <p className="text-[11px] text-white/40">
-                Runs as the task&apos;s owner, on their model and cluster
-                credentials.
-              </p>
-            </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={enabled}
-              aria-label="Resume tasks on CI failure"
-              onClick={() =>
-                setResume.mutate({ repoFullName, enabled: !enabled })
-              }
-              disabled={setResume.isPending}
-              className={`relative h-5 w-9 shrink-0 rounded-full transition-colors disabled:opacity-50 ${
-                enabled ? "bg-purple-500/70" : "bg-white/15"
-              }`}
-            >
-              <span
-                className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white transition-transform ${
-                  enabled ? "translate-x-4" : ""
-                }`}
-              />
-            </button>
-          </div>
+          <ToggleSection
+            label="Auto-resume on failing CI"
+            description="Runs as the task's owner, on their model and cluster credentials."
+            enabled={enabled}
+            disabled={setResume.isPending}
+            onChange={(v) => setResume.mutate({ repoFullName, enabled: v })}
+            accent="purple"
+            switchAriaLabel="Resume tasks on CI failure"
+          />
           {setResume.error && (
             <p className="text-xs text-red-400">{setResume.error.message}</p>
           )}
@@ -871,36 +759,15 @@ function RepoAutoMergeSection({ repoFullName }: { repoFullName: string }) {
         <p className="text-xs text-white/30">Loading…</p>
       ) : (
         <div className="space-y-2">
-          <div className="flex items-start justify-between gap-3 rounded-lg border border-white/10 bg-white/[0.03] p-3">
-            <div className="min-w-0 space-y-1">
-              <h4 className="text-xs font-semibold text-white/70">
-                Auto-merge on passing checks
-              </h4>
-              <p className="text-[11px] text-white/40">
-                Merges an agent&apos;s PR with no human click — enable only if
-                branch protection is a gate you trust.
-              </p>
-            </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={enabled}
-              aria-label="Auto-merge Bandolier PRs"
-              onClick={() =>
-                setAutoMerge.mutate({ repoFullName, enabled: !enabled })
-              }
-              disabled={setAutoMerge.isPending}
-              className={`relative h-5 w-9 shrink-0 rounded-full transition-colors disabled:opacity-50 ${
-                enabled ? "bg-purple-500/70" : "bg-white/15"
-              }`}
-            >
-              <span
-                className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white transition-transform ${
-                  enabled ? "translate-x-4" : ""
-                }`}
-              />
-            </button>
-          </div>
+          <ToggleSection
+            label="Auto-merge on passing checks"
+            description="Merges an agent's PR with no human click — enable only if branch protection is a gate you trust."
+            enabled={enabled}
+            disabled={setAutoMerge.isPending}
+            onChange={(v) => setAutoMerge.mutate({ repoFullName, enabled: v })}
+            accent="purple"
+            switchAriaLabel="Auto-merge Bandolier PRs"
+          />
           {setAutoMerge.error && (
             <p className="text-xs text-red-400">{setAutoMerge.error.message}</p>
           )}
@@ -1003,7 +870,10 @@ function RepoDefaultComputeSection({ repoFullName }: { repoFullName: string }) {
           {setDefault.isPending ? "Saving…" : "Save"}
         </button>
       </form>
-      <CredFeedback error={setDefault.error?.message} ok={result} />
+      <CredentialFeedback
+        saveError={setDefault.error?.message}
+        result={result}
+      />
     </div>
   );
 }
@@ -1205,7 +1075,7 @@ function RepoNetworkPolicySection({ repoFullName }: { repoFullName: string }) {
         <p className="text-xs text-white/30">Loading…</p>
       ) : (
         <div className="space-y-2">
-          <NetworkPolicyToggle
+          <ToggleSection
             label="Allow in-cluster (private) egress"
             description="Drop the block on RFC-1918 ranges so agents can reach other pods and in-cluster services. Lateral-movement risk."
             enabled={allowPrivate}
@@ -1214,7 +1084,7 @@ function RepoNetworkPolicySection({ repoFullName }: { repoFullName: string }) {
               setPolicy.mutate({ repoFullName, allowPrivateEgress: v })
             }
           />
-          <NetworkPolicyToggle
+          <ToggleSection
             label="Allow all egress ports"
             description="Permit outbound TCP on any port instead of only 80/443. Widens the exfiltration / arbitrary-protocol surface."
             enabled={allowAllPorts}
@@ -1320,58 +1190,14 @@ function RepoNetworkPolicySection({ repoFullName }: { repoFullName: string }) {
                     : "Validate & save custom policy"}
                 </button>
               </div>
-              <CredFeedback
-                error={setPolicyYaml.error?.message}
-                ok={yamlResult}
+              <CredentialFeedback
+                saveError={setPolicyYaml.error?.message}
+                result={yamlResult}
               />
             </div>
           )}
         </div>
       )}
-    </div>
-  );
-}
-
-// A single on/off egress toggle, styled to match the two-button preference
-// toggle used for credential preference.
-function NetworkPolicyToggle({
-  label,
-  description,
-  enabled,
-  disabled,
-  onChange,
-}: {
-  label: string;
-  description: string;
-  enabled: boolean;
-  disabled: boolean;
-  onChange: (value: boolean) => void;
-}) {
-  return (
-    <div className="space-y-2 rounded-lg border border-white/10 bg-white/[0.03] p-3">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 space-y-1">
-          <h4 className="text-xs font-semibold text-white/70">{label}</h4>
-          <p className="text-[11px] text-white/40">{description}</p>
-        </div>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={enabled}
-          aria-label={label}
-          onClick={() => onChange(!enabled)}
-          disabled={disabled}
-          className={`relative h-5 w-9 shrink-0 rounded-full transition-colors disabled:opacity-50 ${
-            enabled ? "bg-amber-500/70" : "bg-white/15"
-          }`}
-        >
-          <span
-            className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white transition-transform ${
-              enabled ? "translate-x-4" : "translate-x-0"
-            }`}
-          />
-        </button>
-      </div>
     </div>
   );
 }
@@ -1407,208 +1233,179 @@ export function RepoConfigModal({
   // guidance instead of a broken link.
   const installUrl = env.NEXT_PUBLIC_GITHUB_APP_SLUG;
 
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [onClose]);
-
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
-      onClick={onClose}
+    <Modal
+      onClose={onClose}
+      title="Repository configuration"
+      titleAccessory={
+        <code className="truncate rounded bg-purple-500/20 px-2 py-0.5 text-xs text-purple-300">
+          {repoFullName}
+        </code>
+      }
+      headerClassName="flex shrink-0 items-center justify-between gap-3 border-b border-white/10 px-5 py-4"
+      panelClassName="flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-xl border border-white/20 bg-[var(--surface-panel)]"
     >
-      <div
-        className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-xl border border-white/20 bg-[var(--surface-panel)]"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between gap-3 border-b border-white/10 px-5 py-4">
-          <div className="flex min-w-0 items-center gap-2">
-            <h2 className="shrink-0 text-sm font-semibold text-white">
-              Repository configuration
-            </h2>
-            <code className="truncate rounded bg-purple-500/20 px-2 py-0.5 text-xs text-purple-300">
-              {repoFullName}
-            </code>
-          </div>
-          <button
-            onClick={onClose}
-            className="shrink-0 text-white/40 hover:text-white"
-            aria-label="Close"
-          >
-            ✕
-          </button>
+      <div className="space-y-5 overflow-y-auto px-5 py-5">
+        <p className="text-xs text-white/40">
+          Repository-level settings for this repo: when agents trigger, the
+          image they run on, the system prompt they get, and the shared
+          credentials they use. Event delivery is handled by the Bandolier
+          GitHub App — install it on this repo (below) rather than configuring a
+          webhook by hand.
+        </p>
+
+        {/* GitHub App install */}
+        <div className="space-y-3 rounded-lg border border-white/10 bg-white/[0.03] p-4">
+          <h3 className="text-xs font-semibold tracking-wider text-white/50 uppercase">
+            Install the GitHub App
+          </h3>
+          <p className="text-xs text-white/60">
+            The Bandolier GitHub App delivers issue and pull-request events and
+            posts updates as the bot. Installing it on{" "}
+            <code className="text-white/80">{repoFullName}</code> wires up event
+            delivery automatically — there is no webhook secret to manage.
+          </p>
+          {installUrl ? (
+            <a
+              href={installUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-purple-600 px-3 py-2 text-sm font-medium text-black hover:bg-purple-500"
+            >
+              Install or configure on GitHub
+            </a>
+          ) : (
+            <p className="text-[11px] text-white/30">
+              Ask your Bandolier admin for the GitHub App install link (set{" "}
+              <code className="text-white/50">NEXT_PUBLIC_GITHUB_APP_SLUG</code>{" "}
+              to surface it here).
+            </p>
+          )}
         </div>
 
-        <div className="space-y-5 px-5 py-5">
-          <p className="text-xs text-white/40">
-            Repository-level settings for this repo: when agents trigger, the
-            image they run on, the system prompt they get, and the shared
-            credentials they use. Event delivery is handled by the Bandolier
-            GitHub App — install it on this repo (below) rather than configuring
-            a webhook by hand.
-          </p>
-
-          {/* GitHub App install */}
-          <div className="space-y-3 rounded-lg border border-white/10 bg-white/[0.03] p-4">
-            <h3 className="text-xs font-semibold tracking-wider text-white/50 uppercase">
-              Install the GitHub App
-            </h3>
-            <p className="text-xs text-white/60">
-              The Bandolier GitHub App delivers issue and pull-request events
-              and posts updates as the bot. Installing it on{" "}
-              <code className="text-white/80">{repoFullName}</code> wires up
-              event delivery automatically — there is no webhook secret to
-              manage.
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            setResult(null);
+            save.mutate({
+              repoFullName,
+              prefix: prefixRef.current?.value ?? "",
+              agentImage: agentImageRef.current?.value ?? "",
+              systemPrompt: systemPromptRef.current?.value ?? "",
+            });
+          }}
+          className="space-y-4"
+        >
+          {/* Trigger prefix */}
+          <div className="space-y-1.5">
+            <label className="block text-xs font-medium text-white/60">
+              Trigger prefix{" "}
+              <span className="font-normal text-white/30">(optional)</span>
+            </label>
+            <input
+              key={
+                config ? `prefix-${String(config.updatedAt)}` : "prefix-loading"
+              }
+              ref={prefixRef}
+              type="text"
+              defaultValue={config?.prefix ?? ""}
+              placeholder="e.g. @bando"
+              className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 focus:border-purple-500/50 focus:outline-none"
+            />
+            <p className="text-xs text-white/30">
+              When set, only events whose title or body contains this text
+              trigger an agent. Leave blank to act on all events.
             </p>
-            {installUrl ? (
-              <a
-                href={installUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 rounded-lg bg-purple-600 px-3 py-2 text-sm font-medium text-black hover:bg-purple-500"
-              >
-                Install or configure on GitHub
-              </a>
-            ) : (
-              <p className="text-[11px] text-white/30">
-                Ask your Bandolier admin for the GitHub App install link (set{" "}
-                <code className="text-white/50">
-                  NEXT_PUBLIC_GITHUB_APP_SLUG
-                </code>{" "}
-                to surface it here).
-              </p>
+          </div>
+
+          {/* Agent image */}
+          <div className="space-y-1.5">
+            <label className="block text-xs font-medium text-white/60">
+              Agent image{" "}
+              <span className="font-normal text-white/30">(optional)</span>
+            </label>
+            <input
+              key={
+                config ? `image-${String(config.updatedAt)}` : "image-loading"
+              }
+              ref={agentImageRef}
+              type="text"
+              defaultValue={config?.agentImage ?? ""}
+              placeholder="e.g. ghcr.io/based64god/bandolier-agent-harness:latest"
+              className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 font-mono text-sm text-white placeholder-white/30 placeholder:font-sans focus:border-purple-500/50 focus:outline-none"
+            />
+            <p className="text-xs text-white/30">
+              Container image agents for this repo run on. Leave blank to use
+              the server default.
+            </p>
+          </div>
+
+          {/* Repository system prompt */}
+          <div className="space-y-1.5">
+            <label className="block text-xs font-medium text-white/60">
+              Repository system prompt{" "}
+              <span className="font-normal text-white/30">(optional)</span>
+            </label>
+            <textarea
+              key={
+                config
+                  ? `sysprompt-${String(config.updatedAt)}`
+                  : "sysprompt-loading"
+              }
+              ref={systemPromptRef}
+              rows={5}
+              defaultValue={config?.systemPrompt ?? ""}
+              placeholder={
+                "e.g. Always write tests for new behaviour. Prefer small, focused commits. Follow the existing code style."
+              }
+              className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 focus:border-purple-500/50 focus:outline-none"
+            />
+            <p className="text-xs text-white/30">
+              A blanket instruction appended to the system prompt of every agent
+              run for this repo — dashboard tasks, issues, and webhook-triggered
+              runs alike. Layered on top of Bandolier&apos;s own framing, never
+              replacing it. Leave blank for none.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <button
+              type="submit"
+              disabled={save.isPending}
+              className="rounded-lg bg-purple-600 px-3 py-2 text-sm font-medium text-black hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {save.isPending ? "Saving…" : "Save settings"}
+            </button>
+            {save.error && (
+              <p className="text-xs text-red-400">{save.error.message}</p>
+            )}
+            {result && !save.error && (
+              <p className="text-xs text-green-300">{result}</p>
             )}
           </div>
+        </form>
 
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              setResult(null);
-              save.mutate({
-                repoFullName,
-                prefix: prefixRef.current?.value ?? "",
-                agentImage: agentImageRef.current?.value ?? "",
-                systemPrompt: systemPromptRef.current?.value ?? "",
-              });
-            }}
-            className="space-y-4"
-          >
-            {/* Trigger prefix */}
-            <div className="space-y-1.5">
-              <label className="block text-xs font-medium text-white/60">
-                Trigger prefix{" "}
-                <span className="font-normal text-white/30">(optional)</span>
-              </label>
-              <input
-                key={
-                  config
-                    ? `prefix-${String(config.updatedAt)}`
-                    : "prefix-loading"
-                }
-                ref={prefixRef}
-                type="text"
-                defaultValue={config?.prefix ?? ""}
-                placeholder="e.g. @bando"
-                className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 focus:border-purple-500/50 focus:outline-none"
-              />
-              <p className="text-xs text-white/30">
-                When set, only events whose title or body contains this text
-                trigger an agent. Leave blank to act on all events.
-              </p>
-            </div>
+        <p className="text-[11px] text-white/30">
+          Agents triggered by an event run with the credentials of the GitHub
+          user who initiated it (e.g. the issue opener), so that user must be
+          signed in to Bandolier with model and cluster credentials configured —
+          or this repo must provide shared ones below.
+        </p>
 
-            {/* Agent image */}
-            <div className="space-y-1.5">
-              <label className="block text-xs font-medium text-white/60">
-                Agent image{" "}
-                <span className="font-normal text-white/30">(optional)</span>
-              </label>
-              <input
-                key={
-                  config ? `image-${String(config.updatedAt)}` : "image-loading"
-                }
-                ref={agentImageRef}
-                type="text"
-                defaultValue={config?.agentImage ?? ""}
-                placeholder="e.g. ghcr.io/based64god/bandolier-agent-harness:latest"
-                className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 font-mono text-sm text-white placeholder-white/30 placeholder:font-sans focus:border-purple-500/50 focus:outline-none"
-              />
-              <p className="text-xs text-white/30">
-                Container image agents for this repo run on. Leave blank to use
-                the server default.
-              </p>
-            </div>
+        <RepoDefaultModelSection repoFullName={repoFullName} />
 
-            {/* Repository system prompt */}
-            <div className="space-y-1.5">
-              <label className="block text-xs font-medium text-white/60">
-                Repository system prompt{" "}
-                <span className="font-normal text-white/30">(optional)</span>
-              </label>
-              <textarea
-                key={
-                  config
-                    ? `sysprompt-${String(config.updatedAt)}`
-                    : "sysprompt-loading"
-                }
-                ref={systemPromptRef}
-                rows={5}
-                defaultValue={config?.systemPrompt ?? ""}
-                placeholder={
-                  "e.g. Always write tests for new behaviour. Prefer small, focused commits. Follow the existing code style."
-                }
-                className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 focus:border-purple-500/50 focus:outline-none"
-              />
-              <p className="text-xs text-white/30">
-                A blanket instruction appended to the system prompt of every
-                agent run for this repo — dashboard tasks, issues, and
-                webhook-triggered runs alike. Layered on top of Bandolier&apos;s
-                own framing, never replacing it. Leave blank for none.
-              </p>
-            </div>
+        <RepoDefaultEffortSection repoFullName={repoFullName} />
 
-            <div className="flex items-center gap-3">
-              <button
-                type="submit"
-                disabled={save.isPending}
-                className="rounded-lg bg-purple-600 px-3 py-2 text-sm font-medium text-black hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {save.isPending ? "Saving…" : "Save settings"}
-              </button>
-              {save.error && (
-                <p className="text-xs text-red-400">{save.error.message}</p>
-              )}
-              {result && !save.error && (
-                <p className="text-xs text-green-300">{result}</p>
-              )}
-            </div>
-          </form>
+        <RepoResumeSection repoFullName={repoFullName} />
 
-          <p className="text-[11px] text-white/30">
-            Agents triggered by an event run with the credentials of the GitHub
-            user who initiated it (e.g. the issue opener), so that user must be
-            signed in to Bandolier with model and cluster credentials configured
-            — or this repo must provide shared ones below.
-          </p>
+        <RepoAutoMergeSection repoFullName={repoFullName} />
 
-          <RepoDefaultModelSection repoFullName={repoFullName} />
+        <RepoDefaultComputeSection repoFullName={repoFullName} />
 
-          <RepoDefaultEffortSection repoFullName={repoFullName} />
+        <RepoCredentialsSection repoFullName={repoFullName} />
 
-          <RepoResumeSection repoFullName={repoFullName} />
-
-          <RepoAutoMergeSection repoFullName={repoFullName} />
-
-          <RepoDefaultComputeSection repoFullName={repoFullName} />
-
-          <RepoCredentialsSection repoFullName={repoFullName} />
-
-          <RepoNetworkPolicySection repoFullName={repoFullName} />
-        </div>
+        <RepoNetworkPolicySection repoFullName={repoFullName} />
       </div>
-    </div>
+    </Modal>
   );
 }

@@ -59,12 +59,6 @@ func shortUnique() string {
 	return s[len(s)-6:]
 }
 
-// issueBranchName is a fallback only; the server normally generates the unique
-// branch and passes it via AGENT_BRANCH (see lib/issue-prompt.ts).
-func issueBranchName(number int, title string) string {
-	return fmt.Sprintf("issue-%d-%s-%s", number, slugify(title), shortUnique())
-}
-
 func repoBranchName(title string) string {
 	return fmt.Sprintf("bandolier/%s-%s", slugify(title), shortUnique())
 }
@@ -85,31 +79,6 @@ When you have completed the task in the user message:
 Do NOT push or open a pull request — the harness will do that once you finish.
 Do not ask for clarification. Implement the best solution you can.`,
 		branchName)
-}
-
-// buildIssueSystemPrompt is the instructional framing for issue mode: the
-// objective, branch rules, and commit steps that surround the issue context.
-// It mirrors buildIssueSystemPrompt in lib/issue-prompt.ts — keep in sync. The
-// issue itself is delivered as the user message (see buildIssueUserMessage).
-func buildIssueSystemPrompt(issue *githubIssue, branchName string) string {
-	return fmt.Sprintf(`You are an AI agent working on a GitHub issue. The issue is provided in the user message.
-
-## Your objective
-
-Implement a complete solution for the issue.
-
-The repository has been cloned. You are on branch "%s" — do not switch branches.
-
-Steps:
-1. Explore the codebase to understand the existing patterns
-2. Implement a working solution for the issue
-3. Commit all changes:
-   git add -A
-   git commit -s -m "%s"
-
-Do NOT push or open a pull request — the harness will do that once you finish.
-Do not ask for clarification. Implement the best solution you can.`,
-		branchName, issue.Title)
 }
 
 // buildIssueOutputSystemPrompt frames an issue-output run: the agent analyses
@@ -139,24 +108,6 @@ Do not ask for clarification.`, scope)
 // issue from the conversation when the session ends.
 func buildIssueOutputInteractivePrompt() string {
 	return `This is an interactive session that produces a GitHub issue, NOT code. The repository is cloned; explore it read-only and do not modify files, commit, or open a pull request. The user will keep sending follow-up messages — refine the issue with them. When the session ends, the harness opens a GitHub issue written from the conversation.`
-}
-
-// buildIssueUserMessage is the user message for issue mode: the issue context
-// itself plus optional operator-supplied context from the dashboard task field.
-// It mirrors buildIssueUserMessage in lib/issue-prompt.ts — keep in sync.
-func buildIssueUserMessage(issue *githubIssue, extraContext string) string {
-	body := strings.TrimSpace(issue.Body)
-	if body == "" {
-		body = "(no description provided)"
-	}
-	message := fmt.Sprintf(`## Issue #%d: %s
-
-%s`, issue.Number, issue.Title, body)
-
-	if c := strings.TrimSpace(extraContext); c != "" {
-		message += fmt.Sprintf("\n\n## Additional context from the operator\n\n%s", c)
-	}
-	return message
 }
 
 // ── Git plumbing ──────────────────────────────────────────────────────────────
@@ -320,26 +271,50 @@ func openPR(ctx context.Context, cfg config, branchName, title, body string) err
 			log.Printf("[harness] %s", line)
 		}
 	}
-	if err != nil {
-		// gh exits non-zero when a PR for this branch already exists — that's
-		// idempotent success. Any other failure (auth, rate limit, branch
-		// protection) is propagated so the run doesn't report a false success.
-		if strings.Contains(strings.ToLower(out), "already exists") {
-			log.Printf("[harness] pull request already exists for %s", branchName)
-		} else {
-			return fmt.Errorf("gh pr create: %w", err)
-		}
+	res := classifyPRCreate(out, err)
+	if res.err != nil {
+		return res.err
+	}
+	if res.alreadyExists {
+		log.Printf("[harness] pull request already exists for %s", branchName)
 	}
 
 	// Emit the PR URL with a stable marker so the dashboard can surface it, and
 	// record it for the ingest callback so it outlives the pod logs.
-	if url := prURLRe.FindString(out); url != "" {
-		outputPRURL = url
-		log.Printf("[harness] PR_URL=%s", url)
+	if res.url != "" {
+		outputPRURL = res.url
+		log.Printf("[harness] PR_URL=%s", res.url)
 	} else {
 		log.Printf("[harness] pull request created (no URL parsed)")
 	}
 	return nil
+}
+
+// prCreateResult is the decision classifyPRCreate derives from a `gh pr create`
+// invocation: the scraped PR URL, whether the failure was an idempotent
+// "already exists", and the error to propagate for a genuine failure.
+type prCreateResult struct {
+	url           string
+	alreadyExists bool
+	err           error
+}
+
+// classifyPRCreate turns the combined output and exit error of `gh pr create`
+// into a decision. gh exits non-zero when a PR for this branch already exists —
+// that's idempotent success. Any other failure (auth, rate limit, branch
+// protection) is propagated so the run doesn't report a false success. The PR
+// URL is scraped regardless, since gh prints it on both the created and the
+// already-exists paths.
+func classifyPRCreate(out string, err error) prCreateResult {
+	res := prCreateResult{url: prURLRe.FindString(out)}
+	if err != nil {
+		if strings.Contains(strings.ToLower(out), "already exists") {
+			res.alreadyExists = true
+		} else {
+			res.err = fmt.Errorf("gh pr create: %w", err)
+		}
+	}
+	return res
 }
 
 // openIssue writes an issue title/body from the run transcript via the writer

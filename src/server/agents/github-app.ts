@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { eq } from "drizzle-orm";
 
+import { ghHeaders, TtlMap } from "~/server/agents/github-api";
 import { env } from "~/env";
 import { type db } from "~/server/db";
 import { githubInstallation } from "~/server/db/schema";
@@ -110,14 +111,7 @@ export async function getInstallationToken(
   const jwt = buildAppJwt(Math.floor(nowMs / 1000));
   const res = await fetch(
     `https://api.github.com/app/installations/${installationId}/access_tokens`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${jwt}`,
-        Accept: "application/vnd.github.v3+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-      },
-    },
+    { method: "POST", headers: ghHeaders(jwt) },
   );
   if (!res.ok) {
     throw new Error(
@@ -142,10 +136,10 @@ export async function getInstallationToken(
 // uninstalls take effect immediately; the TTL is only a backstop for a missed
 // webhook.
 const INSTALLATION_ID_TTL_MS = 60_000;
-const installationIdCache = new Map<
-  string,
-  { id: string | null; expiresAt: number }
->();
+const INSTALLATION_ID_CACHE_MAX = 5_000;
+const installationIdCache = new TtlMap<string, string | null>(
+  INSTALLATION_ID_CACHE_MAX,
+);
 
 /**
  * Looks up the installation id recorded for a repo, or null when the App isn't
@@ -155,8 +149,10 @@ export async function getInstallationIdForRepo(
   database: typeof db,
   repoFullName: string,
 ): Promise<string | null> {
-  const cached = installationIdCache.get(repoFullName);
-  if (cached && cached.expiresAt > Date.now()) return cached.id;
+  const now = Date.now();
+  const cached = installationIdCache.get(repoFullName, now);
+  // A fresh entry is `string | null`; `undefined` means absent or expired.
+  if (cached !== undefined) return cached;
 
   const [row] = await database
     .select({ installationId: githubInstallation.installationId })
@@ -164,10 +160,7 @@ export async function getInstallationIdForRepo(
     .where(eq(githubInstallation.repoFullName, repoFullName))
     .limit(1);
   const id = row?.installationId ?? null;
-  installationIdCache.set(repoFullName, {
-    id,
-    expiresAt: Date.now() + INSTALLATION_ID_TTL_MS,
-  });
+  installationIdCache.set(repoFullName, id, now, now + INSTALLATION_ID_TTL_MS);
   return id;
 }
 
@@ -194,6 +187,26 @@ export async function getRepoBotToken(
     });
     return null;
   }
+}
+
+/**
+ * The token to read PR/issue state with. Prefers the repo's GitHub App
+ * installation token (a bot-voice read that doesn't depend on the viewer having
+ * a GitHub account or spend their rate limit), falling back to the viewer's own
+ * token when the App isn't installed on the repo. Returns null when neither is
+ * available, so polling degrades to no state badge rather than failing.
+ */
+export async function resolvePollToken(
+  database: typeof db,
+  repoFullName: string | null,
+  userGithubToken: string | null,
+  nowMs: number,
+): Promise<string | null> {
+  if (repoFullName) {
+    const botToken = await getRepoBotToken(database, repoFullName, nowMs);
+    if (botToken) return botToken;
+  }
+  return userGithubToken;
 }
 
 // ── Installation tracking (webhook-maintained) ────────────────────────────────

@@ -24,6 +24,7 @@ import {
   getBatchV1Api,
   getCoreV1Api,
   getNetworkingV1Api,
+  getPolicyV1Api,
 } from "~/server/k8s/client";
 
 /** Seconds a finished Job (and its pod) is retained before Kubernetes deletes it. */
@@ -364,6 +365,11 @@ function pullSecretName(jobName: string): string {
   return `${jobName}-pull`;
 }
 
+/** Per-job PodDisruptionBudget pinning the agent pod until the run finishes. */
+function pdbName(jobName: string): string {
+  return `${jobName}-pdb`;
+}
+
 export async function createAgentJob(spec: JobSpec): Promise<string> {
   const ns = spec.namespace ?? DEFAULT_NAMESPACE;
   const jobName = `bandolier-agent-${Date.now()}`;
@@ -650,6 +656,47 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
     },
   });
 
+  // Owner reference tying a dependent resource's lifecycle to the Job, so
+  // Kubernetes garbage-collects it when the Job is deleted (manually or via TTL).
+  const jobOwnerRef = {
+    apiVersion: "batch/v1",
+    kind: "Job",
+    name: jobName,
+    uid: job.metadata?.uid ?? "",
+    blockOwnerDeletion: true,
+  };
+
+  // Agents run with backoffLimit 0, so a single eviction permanently fails the
+  // run. Voluntary disruptions (autoscaler consolidation, kubectl drain, the
+  // descheduler) all go through the eviction API, which refuses evictions that
+  // would violate a PodDisruptionBudget — so a PDB covering the pod pins it in
+  // place until the run finishes, regardless of which autoscaler (if any) backs
+  // the cluster. minAvailable must be an integer here: percentages require a
+  // scale subresource, which Jobs don't have. Best-effort — a cluster or role
+  // that can't create PDBs leaves the run unprotected but still deployable.
+  try {
+    await getPolicyV1Api(kc).createNamespacedPodDisruptionBudget({
+      namespace: ns,
+      body: {
+        metadata: {
+          name: pdbName(jobName),
+          namespace: ns,
+          labels: { "app.kubernetes.io/managed-by": "bandolier" },
+          ownerReferences: [jobOwnerRef],
+        },
+        spec: {
+          minAvailable: 1,
+          selector: { matchLabels: { "bandolier.io/job": jobName } },
+        },
+      },
+    });
+  } catch (error) {
+    console.warn(
+      "[bandolier:deploy] PDB creation failed; agent pod is not protected from voluntary eviction",
+      { job: jobName, error },
+    );
+  }
+
   // Store the acting user's credentials in a per-job secret owned by the Job, so
   // they're garbage-collected when the Job is deleted (manually or via TTL).
   const stringData: Record<string, string> = {};
@@ -678,16 +725,6 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
       stringData.AWS_SESSION_TOKEN = spec.awsCredentials!.sessionToken;
     }
   }
-
-  // Owner reference tying a secret's lifecycle to the Job, so Kubernetes
-  // garbage-collects it when the Job is deleted (manually or via TTL).
-  const jobOwnerRef = {
-    apiVersion: "batch/v1",
-    kind: "Job",
-    name: jobName,
-    uid: job.metadata?.uid ?? "",
-    blockOwnerDeletion: true,
-  };
 
   await getCoreV1Api(kc).createNamespacedSecret({
     namespace: ns,

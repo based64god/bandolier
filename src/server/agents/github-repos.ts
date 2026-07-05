@@ -1,3 +1,4 @@
+import { getRepoAccess, ghFetch } from "./github-api";
 import { repoToNamespace } from "./namespace";
 
 export interface AccessibleRepo {
@@ -47,18 +48,7 @@ export async function fetchAccessibleRepos(
       "owner,collaborator,organization_member",
     );
 
-    const res = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        Accept: "application/vnd.github.v3+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-      },
-    });
-
-    if (!res.ok) {
-      throw new Error(`GitHub API ${res.status}: ${res.statusText}`);
-    }
-
+    const res = await ghFetch(url, accessToken);
     const batch = (await res.json()) as GitHubRepo[];
     all.push(...batch);
 
@@ -87,16 +77,17 @@ export async function userHasRepoAccess(
   token: string,
   repoFullName: string,
 ): Promise<boolean> {
-  try {
-    const res = await fetch(`https://api.github.com/repos/${repoFullName}`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: "application/vnd.github.v3+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-      },
-    });
-    return res.ok;
-  } catch {
-    return false;
-  }
+  return (await getRepoAccess(token, repoFullName)).accessible;
+}
+
+/**
+ * Whether the user (via their GitHub token) has admin on the repo. Gates the
+ * repo-scoped configuration (trigger prefix, agent image, shared credentials).
+ * Returns false on any API error so callers fail closed.
+ */
+export async function isRepoAdmin(
+  token: string,
+  repoFullName: string,
+): Promise<boolean> {
+  return (await getRepoAccess(token, repoFullName)).isAdmin;
 }

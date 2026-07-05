@@ -1,8 +1,14 @@
+import { TRPCError } from "@trpc/server";
 import { eq } from "drizzle-orm";
 
-import { type ComputeSpec } from "~/lib/compute";
+import {
+  type ComputeSpec,
+  validateCpuQuantity,
+  validateMemoryQuantity,
+} from "~/lib/compute";
+import { loadRepoConfig } from "~/server/agents/webhook-config";
 import { type db } from "~/server/db";
-import { repoWebhookConfig, userCompute } from "~/server/db/schema";
+import { userCompute } from "~/server/db/schema";
 
 /**
  * A stored compute default (user- or repo-level). Either field may be null —
@@ -35,16 +41,13 @@ export async function getRepoCompute(
   database: typeof db,
   repoFullName: string,
 ): Promise<(ComputeDefaults & { preferRepoCredentials: boolean }) | null> {
-  const [row] = await database
-    .select({
-      cpu: repoWebhookConfig.computeCpu,
-      memory: repoWebhookConfig.computeMemory,
-      preferRepoCredentials: repoWebhookConfig.preferRepoCredentials,
-    })
-    .from(repoWebhookConfig)
-    .where(eq(repoWebhookConfig.repoFullName, repoFullName))
-    .limit(1);
-  return row ?? null;
+  const row = await loadRepoConfig(database, repoFullName);
+  if (!row) return null;
+  return {
+    cpu: row.computeCpu,
+    memory: row.computeMemory,
+    preferRepoCredentials: row.preferRepoCredentials,
+  };
 }
 
 /**
@@ -88,4 +91,35 @@ export function mergeCompute(
   const memory = override?.memory ?? defaults.memory ?? undefined;
   if (cpu === undefined && memory === undefined) return undefined;
   return { cpu, memory };
+}
+
+/**
+ * Validates the free-text CPU/memory fields from a settings or deploy form,
+ * returning the normalized quantities to store (null = the field was blank and
+ * should fall through to the next default). Throws a BAD_REQUEST so a typo'd
+ * quantity fails at save/deploy time with a clear message rather than as an
+ * unschedulable or instantly-OOM-killed pod. Shared by the deploy, user-default,
+ * and repo-default mutations, which all repeat this same per-field validation.
+ */
+export function parseComputeInput(
+  cpu?: string,
+  memory?: string,
+): ComputeDefaults {
+  let normalizedCpu: string | null = null;
+  if (cpu?.trim()) {
+    const v = validateCpuQuantity(cpu);
+    if (!v.valid) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: v.error });
+    }
+    normalizedCpu = v.normalized;
+  }
+  let normalizedMemory: string | null = null;
+  if (memory?.trim()) {
+    const v = validateMemoryQuantity(memory);
+    if (!v.valid) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: v.error });
+    }
+    normalizedMemory = v.normalized;
+  }
+  return { cpu: normalizedCpu, memory: normalizedMemory };
 }

@@ -223,9 +223,11 @@ func detectProvider() providerKind {
 
 // ── Reasoning effort ────────────────────────────────────────────────────────
 
-// effortLevels are the values the `claude` CLI accepts for --effort, kept in
-// sync with the dashboard/webhook side (src/lib/effort.ts). Effort is a
-// Claude-only control; the Codex and Antigravity CLIs don't take it.
+// effortLevels are the values the `claude` CLI accepts for --effort. This
+// allow-list crosses to the dashboard/webhook side, so its values are pinned in
+// wire-contract.json and asserted by both test suites (see
+// wire_contract_test.go). Effort is a Claude-only control; the Codex and
+// Antigravity CLIs don't take it.
 var effortLevels = map[string]bool{
 	"low":    true,
 	"medium": true,
@@ -431,12 +433,6 @@ func shortUnique() string {
 	return s[len(s)-6:]
 }
 
-// issueBranchName is a fallback only; the server normally generates the unique
-// branch and passes it via AGENT_BRANCH (see lib/issue-prompt.ts).
-func issueBranchName(number int, title string) string {
-	return fmt.Sprintf("issue-%d-%s-%s", number, slugify(title), shortUnique())
-}
-
 func repoBranchName(title string) string {
 	return fmt.Sprintf("bandolier/%s-%s", slugify(title), shortUnique())
 }
@@ -457,31 +453,6 @@ When you have completed the task in the user message:
 Do NOT push or open a pull request — the harness will do that once you finish.
 Do not ask for clarification. Implement the best solution you can.`,
 		branchName)
-}
-
-// buildIssueSystemPrompt is the instructional framing for issue mode: the
-// objective, branch rules, and commit steps that surround the issue context.
-// It mirrors buildIssueSystemPrompt in lib/issue-prompt.ts — keep in sync. The
-// issue itself is delivered as the user message (see buildIssueUserMessage).
-func buildIssueSystemPrompt(issue *githubIssue, branchName string) string {
-	return fmt.Sprintf(`You are an AI agent working on a GitHub issue. The issue is provided in the user message.
-
-## Your objective
-
-Implement a complete solution for the issue.
-
-The repository has been cloned. You are on branch "%s" — do not switch branches.
-
-Steps:
-1. Explore the codebase to understand the existing patterns
-2. Implement a working solution for the issue
-3. Commit all changes:
-   git add -A
-   git commit -s -m "%s"
-
-Do NOT push or open a pull request — the harness will do that once you finish.
-Do not ask for clarification. Implement the best solution you can.`,
-		branchName, issue.Title)
 }
 
 // buildIssueOutputSystemPrompt frames an issue-output run: the agent analyses
@@ -511,24 +482,6 @@ Do not ask for clarification.`, scope)
 // issue from the conversation when the session ends.
 func buildIssueOutputInteractivePrompt() string {
 	return `This is an interactive session that produces a GitHub issue, NOT code. The repository is cloned; explore it read-only and do not modify files, commit, or open a pull request. The user will keep sending follow-up messages — refine the issue with them. When the session ends, the harness opens a GitHub issue written from the conversation.`
-}
-
-// buildIssueUserMessage is the user message for issue mode: the issue context
-// itself plus optional operator-supplied context from the dashboard task field.
-// It mirrors buildIssueUserMessage in lib/issue-prompt.ts — keep in sync.
-func buildIssueUserMessage(issue *githubIssue, extraContext string) string {
-	body := strings.TrimSpace(issue.Body)
-	if body == "" {
-		body = "(no description provided)"
-	}
-	message := fmt.Sprintf(`## Issue #%d: %s
-
-%s`, issue.Number, issue.Title, body)
-
-	if c := strings.TrimSpace(extraContext); c != "" {
-		message += fmt.Sprintf("\n\n## Additional context from the operator\n\n%s", c)
-	}
-	return message
 }
 
 // hasCommits reports whether branchName carries commits of this run's own —
@@ -1229,10 +1182,11 @@ func run(ctx context.Context, cfg config) error {
 		log.Printf("[harness] issue #%d: %s", issue.Number, issue.Title)
 		parentIssue = issue
 
-		// The server passes the issue context as CLAUDE_TASK; only fall back to
-		// building it here if it's somehow missing.
+		// The server is the single source of truth for the issue prompt: it always
+		// passes the issue context as CLAUDE_TASK. Fail loudly if it's missing
+		// rather than silently rebuilding a divergent copy here.
 		if strings.TrimSpace(cfg.task) == "" {
-			cfg.task = buildIssueUserMessage(issue, "")
+			return fmt.Errorf("issue mode: CLAUDE_TASK is empty (the server must supply the issue context)")
 		}
 		if issueOutput {
 			// Produce a sub-task issue from the parent: no branch, analysis framing.
@@ -1241,16 +1195,17 @@ func run(ctx context.Context, cfg config) error {
 			}
 		} else {
 			// Produce a PR that closes the issue. The server generates the unique
-			// working branch and passes it; only fall back if it's missing.
+			// working branch and the instructional framing and passes both; require
+			// them rather than reconstructing a copy that could drift.
 			prBranch = cfg.agentBranch
 			if prBranch == "" {
-				prBranch = issueBranchName(issue.Number, issue.Title)
+				return fmt.Errorf("issue mode: AGENT_BRANCH is empty (the server must supply the working branch)")
+			}
+			if strings.TrimSpace(cfg.systemPrompt) == "" {
+				return fmt.Errorf("issue mode: CLAUDE_SYSTEM_PROMPT is empty (the server must supply the framing)")
 			}
 			prTitle = issue.Title
 			prBody = fmt.Sprintf("Closes #%d\n\nGenerated by Bandolier.", issue.Number)
-			if cfg.systemPrompt == "" {
-				cfg.systemPrompt = buildIssueSystemPrompt(issue, prBranch)
-			}
 		}
 
 	case cfg.repoURL != "":
@@ -2167,11 +2122,14 @@ func generateWriterContentGemini(ctx context.Context, cfg config, prompt string)
 // ── Interactive mode ────────────────────────────────────────────────────────────
 
 // endSessionSentinel is the input message that ends an interactive session.
-// Kept in sync with the server's matching constant (agents router).
+// This value crosses to the server, so it's pinned in wire-contract.json and
+// asserted by both test suites (see wire_contract_test.go).
 const endSessionSentinel = "__BANDOLIER_END_SESSION__"
 
 // Log markers the dashboard parses to know whether an interactive agent is
-// currently waiting for the user. Kept in sync with the agents router.
+// currently waiting for the user. These values cross to the server, so they're
+// pinned in wire-contract.json and asserted by both test suites (see
+// wire_contract_test.go).
 const (
 	awaitInputMarker = "BANDOLIER_AWAIT_INPUT"
 	resumeMarker     = "BANDOLIER_RESUME"

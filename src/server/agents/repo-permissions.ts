@@ -1,5 +1,6 @@
-import { type AwsCredentials } from "~/server/agents/aws";
+import { ghFetch } from "~/server/agents/github-api";
 import {
+  hasModelCredentials,
   type ModelCredentials,
   resolveModelCredentials,
 } from "~/server/agents/resolve-credentials";
@@ -79,17 +80,10 @@ export async function getUserRepoPermission(
   username: string,
 ): Promise<RepoPermission> {
   try {
-    const res = await fetch(
+    const res = await ghFetch(
       `https://api.github.com/repos/${repoFullName}/collaborators/${username}/permission`,
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          Accept: "application/vnd.github.v3+json",
-          "X-GitHub-Api-Version": "2022-11-28",
-        },
-      },
+      token,
     );
-    if (!res.ok) return "none";
     const data = (await res.json()) as RawPermission;
     const coarse = normalizePermission(data.permission);
     const role = normalizePermission(data.role_name);
@@ -98,25 +92,6 @@ export async function getUserRepoPermission(
   } catch {
     return "none";
   }
-}
-
-/** Whether a resolved credential set carries any model credential at all. */
-function hasModelCredential(creds: {
-  aws: AwsCredentials | null;
-  anthropicApiKey: string | null;
-  anthropicOauthToken: string | null;
-  openaiApiKey: string | null;
-  codexAuthJson: string | null;
-  geminiApiKey: string | null;
-}): boolean {
-  return (
-    !!creds.aws ||
-    !!creds.anthropicApiKey ||
-    !!creds.anthropicOauthToken ||
-    !!creds.openaiApiKey ||
-    !!creds.codexAuthJson ||
-    !!creds.geminiApiKey
-  );
 }
 
 /**
@@ -147,7 +122,7 @@ export async function runUsesRepoCredentials(
   // Model credentials: repo-sourced when the resolver picked the repo set.
   const creds =
     resolved ?? (await resolveModelCredentials(database, userId, repoFullName));
-  if (creds.source === "repo" && hasModelCredential(creds)) return true;
+  if (creds.source === "repo" && hasModelCredentials(creds)) return true;
 
   // Kubeconfig: repo-scoped when the repo prefers its own and has one, or the
   // user has no kubeconfig of their own and the repo provides one. We avoid a

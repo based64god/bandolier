@@ -50,8 +50,9 @@ import { resolveKubeconfig } from "~/server/agents/kubeconfig";
 import { repoToNamespace } from "~/server/agents/namespace";
 import { listModelsForUser, pickPrWriterModel } from "~/server/agents/models";
 import {
-  pickProvider,
+  providerForCredentials,
   resolveModelCredentials,
+  selectRunCredentials,
 } from "~/server/agents/resolve-credentials";
 import {
   getUserRepoPermission,
@@ -593,46 +594,18 @@ export const agentsRouter = createTRPCRouter({
         ctx.session.user.id,
         input?.repoFullName,
       );
-      const {
-        aws,
-        anthropicApiKey,
-        anthropicOauthToken,
-        openaiApiKey,
-        codexAuthJson,
-        geminiApiKey,
-      } = pickProvider(creds);
-      if (aws) {
+      const provider = providerForCredentials(creds);
+      if (!provider) {
         return {
-          provider: "bedrock" as const,
-          region: aws.region,
-          source: creds.source,
-        };
-      }
-      if (anthropicApiKey ?? anthropicOauthToken) {
-        return {
-          provider: "anthropic" as const,
+          provider: "none" as const,
           region: null,
-          source: creds.source,
-        };
-      }
-      if (openaiApiKey ?? codexAuthJson) {
-        return {
-          provider: "openai" as const,
-          region: null,
-          source: creds.source,
-        };
-      }
-      if (geminiApiKey) {
-        return {
-          provider: "gemini" as const,
-          region: null,
-          source: creds.source,
+          source: "none" as const,
         };
       }
       return {
-        provider: "none" as const,
-        region: null,
-        source: "none" as const,
+        provider,
+        region: provider === "bedrock" ? (creds.aws?.region ?? null) : null,
+        source: creds.source,
       };
     }),
 
@@ -1345,56 +1318,29 @@ export const agentsRouter = createTRPCRouter({
         computeOverride,
       );
 
-      // Resolve model credentials, then pick the set that matches the provider of
-      // the model the user chose (so a user with several providers configured
-      // gets the right one). When the provider is omitted — e.g. a REST/webhook
-      // client with no picker — fall back to the primary-provider precedence.
+      // Resolve model credentials, then select the exact set for this run: the
+      // provider of the model the user chose (falling back to the primary-provider
+      // precedence for REST/webhook clients with no picker), and — for Anthropic /
+      // OpenAI, which the picker offers once per credential kind — the auth kind
+      // they pinned (falling back to the API-key-beats-subscription precedence).
       const resolved = await resolveModelCredentials(
         ctx.db,
         userId,
         input.repoFullName,
       );
-      const primary = pickProvider(resolved);
-      const provider =
-        input.modelProvider ??
-        (resolved.aws
-          ? "bedrock"
-          : resolved.anthropicApiKey || resolved.anthropicOauthToken
-            ? "anthropic"
-            : resolved.openaiApiKey || resolved.codexAuthJson
-              ? "openai"
-              : resolved.geminiApiKey
-                ? "gemini"
-                : undefined);
-
-      // The picker offers a model once per credential kind, so an explicit
-      // modelAuth pins the run to that kind ("run this on my subscription" vs
-      // "on my API key"). Unset — programmatic clients — falls back to the
-      // API-key-beats-subscription precedence.
-      const wantSubscription = input.modelAuth === "subscription";
-      const wantApiKey = input.modelAuth === "api_key";
-      const awsCredentials =
-        provider === "bedrock" ? (resolved.aws ?? primary.aws) : null;
-      const anthropicApiKey =
-        provider === "anthropic" && !wantSubscription
-          ? (resolved.anthropicApiKey ?? primary.anthropicApiKey)
-          : null;
-      const anthropicOauthToken =
-        provider === "anthropic" && !wantApiKey && !anthropicApiKey
-          ? (resolved.anthropicOauthToken ?? primary.anthropicOauthToken)
-          : null;
-      const openaiApiKey =
-        provider === "openai" && !wantSubscription
-          ? (resolved.openaiApiKey ?? primary.openaiApiKey)
-          : null;
-      const codexAuthJson =
-        provider === "openai" && !wantApiKey && !openaiApiKey
-          ? (resolved.codexAuthJson ?? primary.codexAuthJson)
-          : null;
-      const geminiApiKey =
-        provider === "gemini"
-          ? (resolved.geminiApiKey ?? primary.geminiApiKey)
-          : null;
+      const {
+        provider,
+        authKind,
+        aws: awsCredentials,
+        anthropicApiKey,
+        anthropicOauthToken,
+        openaiApiKey,
+        codexAuthJson,
+        geminiApiKey,
+      } = selectRunCredentials(resolved, {
+        modelProvider: input.modelProvider,
+        modelAuth: input.modelAuth,
+      });
 
       if (
         !awsCredentials &&
@@ -1561,23 +1507,13 @@ export const agentsRouter = createTRPCRouter({
               userId,
               input.repoFullName,
             );
-            // The auth kind the run's credentials actually resolved to (the API
-            // key beats the subscription), mirroring the routing above.
-            const auth =
-              provider === "anthropic"
-                ? anthropicApiKey
-                  ? ("api_key" as const)
-                  : ("subscription" as const)
-                : provider === "openai"
-                  ? openaiApiKey
-                    ? ("api_key" as const)
-                    : ("subscription" as const)
-                  : undefined;
             prWriterModel = pickPrWriterModel(models, {
               id: input.model,
               label: input.model,
               provider,
-              auth,
+              // The auth kind the run's credentials actually resolved to (the
+              // API key beats the subscription), from selectRunCredentials.
+              auth: authKind ?? undefined,
             });
           } catch (err) {
             console.warn("[bandolier:deploy] PR-writer model lookup failed", {

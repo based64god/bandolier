@@ -7,12 +7,16 @@ import {
 import { cleanSessionToken, type AwsCredentials } from "~/server/agents/aws";
 import { listGeminiModels as fetchGeminiModels } from "~/server/agents/gemini";
 import { listOpenaiModels as fetchOpenaiModels } from "~/server/agents/openai";
-import { resolveModelCredentials } from "~/server/agents/resolve-credentials";
+import {
+  type ProviderName,
+  resolveModelCredentials,
+} from "~/server/agents/resolve-credentials";
 import type { db } from "~/server/db";
 
 /** Which provider a model is served by — used to label it and to route the
- * deploy to the right credentials. */
-export type ModelProvider = "anthropic" | "bedrock" | "openai" | "gemini";
+ * deploy to the right credentials. Aliases the provider registry's `ProviderName`
+ * so the provider union is defined in exactly one place. */
+export type ModelProvider = ProviderName;
 
 export interface ModelOption {
   /** The id passed to the harness as CLAUDE_MODEL. */

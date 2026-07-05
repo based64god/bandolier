@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AwsCredentials } from "~/server/agents/aws";
+import type { ModelCredentials } from "~/server/agents/resolve-credentials";
 import type { db as Database } from "~/server/db";
 import type { RepoCredentials } from "~/server/agents/webhook-config";
 
@@ -37,8 +38,14 @@ vi.mock("~/server/agents/webhook-config", () => ({
   getRepoCredentials: () => getRepoCredentials(),
 }));
 
-const { resolveModelCredentials, pickProvider } =
-  await import("~/server/agents/resolve-credentials");
+const {
+  resolveModelCredentials,
+  pickProvider,
+  providerForCredentials,
+  hasModelCredentials,
+  selectRunCredentials,
+  PROVIDERS,
+} = await import("~/server/agents/resolve-credentials");
 
 // The resolver only forwards `db` to the (mocked) getters, so a stub suffices.
 const db = {} as unknown as typeof Database;
@@ -349,5 +356,170 @@ describe("pickProvider", () => {
     expect(picked.anthropicApiKey).toBeNull();
     expect(picked.openaiApiKey).toBeNull();
     expect(picked.geminiApiKey).toBe("sk-gemini");
+  });
+});
+
+// The six credential fields, each paired with the provider it belongs to and a
+// sample value, so the exhaustive tests below can build every present/absent
+// combination and compare the registry against the (previously duplicated)
+// provider-selection logic. Order here is independent of the registry's order.
+const FIELDS = [
+  { key: "aws", provider: "bedrock", value: repoAws },
+  { key: "anthropicApiKey", provider: "anthropic", value: "sk-ant" },
+  { key: "anthropicOauthToken", provider: "anthropic", value: "sk-ant-oat" },
+  { key: "openaiApiKey", provider: "openai", value: "sk-openai" },
+  { key: "codexAuthJson", provider: "openai", value: '{"tokens":{}}' },
+  { key: "geminiApiKey", provider: "gemini", value: "sk-gemini" },
+] as const;
+
+/** Builds a ModelCredentials set from a bitmask over FIELDS. */
+function credsFromMask(mask: number) {
+  const set = {
+    aws: null,
+    anthropicApiKey: null,
+    anthropicOauthToken: null,
+    openaiApiKey: null,
+    codexAuthJson: null,
+    geminiApiKey: null,
+    source: "user" as const,
+  } as Record<string, unknown>;
+  FIELDS.forEach((f, i) => {
+    if (mask & (1 << i)) set[f.key] = f.value;
+  });
+  return set as unknown as ModelCredentials;
+}
+
+/** The provider create-job's flag cascade would route the set to (its old rule,
+ * kept here as the reference the registry must agree with). */
+function provider_ForCreateJobFlags(mask: number): string | null {
+  const has = (key: string) => FIELDS.some((f, i) => f.key === key && mask & (1 << i));
+  if (has("aws")) return "bedrock";
+  if (has("anthropicApiKey") || has("anthropicOauthToken")) return "anthropic";
+  if (has("openaiApiKey") || has("codexAuthJson")) return "openai";
+  if (has("geminiApiKey")) return "gemini";
+  return null;
+}
+
+describe("provider registry", () => {
+  it("orders providers by precedence: Bedrock > Anthropic > OpenAI > Gemini", () => {
+    expect(PROVIDERS.map((p) => p.name)).toEqual([
+      "bedrock",
+      "anthropic",
+      "openai",
+      "gemini",
+    ]);
+  });
+
+  it("providerForCredentials agrees with create-job's flag cascade for every credential combination", () => {
+    for (let mask = 0; mask < 1 << FIELDS.length; mask++) {
+      const creds = credsFromMask(mask);
+      expect(providerForCredentials(creds)).toBe(
+        provider_ForCreateJobFlags(mask),
+      );
+    }
+  });
+
+  it("hasModelCredentials is true iff a provider matches, for every combination", () => {
+    for (let mask = 0; mask < 1 << FIELDS.length; mask++) {
+      const creds = credsFromMask(mask);
+      expect(hasModelCredentials(creds)).toBe(mask !== 0);
+    }
+  });
+
+  it("pickProvider surfaces exactly the primary provider's fields for every combination", () => {
+    for (let mask = 0; mask < 1 << FIELDS.length; mask++) {
+      const creds = credsFromMask(mask);
+      const provider = providerForCredentials(creds);
+      const picked = pickProvider(creds);
+      // Every non-null field on the picked set must belong to the primary
+      // provider — no cross-provider leakage.
+      for (const f of FIELDS) {
+        const surfaced =
+          (picked as unknown as Record<string, unknown>)[f.key] != null;
+        expect(surfaced).toBe(
+          f.provider === provider &&
+            (creds as unknown as Record<string, unknown>)[f.key] != null,
+        );
+      }
+    }
+  });
+
+  it("selectRunCredentials with no picker routes to the same provider as pickProvider", () => {
+    for (let mask = 0; mask < 1 << FIELDS.length; mask++) {
+      const creds = credsFromMask(mask);
+      const run = selectRunCredentials(creds);
+      expect(run.provider).toBe(providerForCredentials(creds));
+    }
+  });
+});
+
+describe("selectRunCredentials", () => {
+  const set = {
+    aws: null,
+    anthropicApiKey: "sk-ant",
+    anthropicOauthToken: "sk-ant-oat",
+    openaiApiKey: "sk-openai",
+    codexAuthJson: '{"tokens":{}}',
+    geminiApiKey: "sk-gemini",
+    source: "user" as const,
+  };
+
+  it("routes to the picked provider even when a higher-precedence one is set", () => {
+    const run = selectRunCredentials(
+      { ...set, aws: repoAws },
+      { modelProvider: "openai" },
+    );
+    expect(run.provider).toBe("openai");
+    expect(run.aws).toBeNull();
+    expect(run.openaiApiKey).toBe("sk-openai");
+  });
+
+  it("pins to the API key when modelAuth is api_key (Anthropic)", () => {
+    const run = selectRunCredentials(set, {
+      modelProvider: "anthropic",
+      modelAuth: "api_key",
+    });
+    expect(run.authKind).toBe("api_key");
+    expect(run.anthropicApiKey).toBe("sk-ant");
+    expect(run.anthropicOauthToken).toBeNull();
+  });
+
+  it("pins to the subscription when modelAuth is subscription (Anthropic)", () => {
+    const run = selectRunCredentials(set, {
+      modelProvider: "anthropic",
+      modelAuth: "subscription",
+    });
+    expect(run.authKind).toBe("subscription");
+    expect(run.anthropicApiKey).toBeNull();
+    expect(run.anthropicOauthToken).toBe("sk-ant-oat");
+  });
+
+  it("lets the API key beat the subscription when modelAuth is unset (OpenAI)", () => {
+    const run = selectRunCredentials(set, { modelProvider: "openai" });
+    expect(run.authKind).toBe("api_key");
+    expect(run.openaiApiKey).toBe("sk-openai");
+    expect(run.codexAuthJson).toBeNull();
+  });
+
+  it("reports no auth kind for single-credential providers", () => {
+    const run = selectRunCredentials(set, { modelProvider: "gemini" });
+    expect(run.provider).toBe("gemini");
+    expect(run.authKind).toBeNull();
+    expect(run.geminiApiKey).toBe("sk-gemini");
+  });
+
+  it("returns a null provider and empty credentials for an empty set", () => {
+    const run = selectRunCredentials({
+      aws: null,
+      anthropicApiKey: null,
+      anthropicOauthToken: null,
+      openaiApiKey: null,
+      codexAuthJson: null,
+      geminiApiKey: null,
+      source: "none",
+    });
+    expect(run.provider).toBeNull();
+    expect(run.authKind).toBeNull();
+    expect(run.anthropicApiKey).toBeNull();
   });
 });

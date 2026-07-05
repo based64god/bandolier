@@ -18,6 +18,7 @@ import {
   NETWORK_POLICY_NAME,
   type NetworkPolicyOptions,
 } from "~/server/agents/network-policy";
+import { providerForCredentials } from "~/server/agents/resolve-credentials";
 import { db } from "~/server/db";
 import { taskRun } from "~/server/db/schema";
 import {
@@ -374,23 +375,27 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
   const ns = spec.namespace ?? DEFAULT_NAMESPACE;
   const jobName = `bandolier-agent-${Date.now()}`;
 
-  const useUserAws = !!spec.awsCredentials;
-  // Anthropic only applies when AWS isn't set (AWS Bedrock takes precedence).
-  // An API key and a subscription OAuth token are two routes to the same
-  // provider; a spec carries at most one of them.
-  const useUserAnthropic =
-    !useUserAws && (!!spec.anthropicApiKey || !!spec.anthropicOauthToken);
-  // OpenAI / Gemini are lower precedence — used only when no Claude provider is.
-  const useUserOpenai =
-    !useUserAws &&
-    !useUserAnthropic &&
-    (!!spec.openaiApiKey || !!spec.codexAuthJson);
-  const useUserGemini =
-    !useUserAws && !useUserAnthropic && !useUserOpenai && !!spec.geminiApiKey;
+  // Route by the single provider precedence the registry defines (Bedrock >
+  // Anthropic > OpenAI > Gemini), so this path can't drift from the resolver.
+  // The spec spells the Bedrock field `awsCredentials`; adapt it to the
+  // registry's `aws`. An API key and a subscription credential are two routes to
+  // the same provider; a spec carries at most one of each pair.
+  const provider = providerForCredentials({
+    aws: spec.awsCredentials ?? null,
+    anthropicApiKey: spec.anthropicApiKey ?? null,
+    anthropicOauthToken: spec.anthropicOauthToken ?? null,
+    openaiApiKey: spec.openaiApiKey ?? null,
+    codexAuthJson: spec.codexAuthJson ?? null,
+    geminiApiKey: spec.geminiApiKey ?? null,
+  });
+  const useUserAws = provider === "bedrock";
+  const useUserAnthropic = provider === "anthropic";
+  const useUserOpenai = provider === "openai";
+  const useUserGemini = provider === "gemini";
   const useUserToken = !!spec.githubToken;
 
   // Only user-provided credentials are ever used — there is no server fallback.
-  if (!useUserAws && !useUserAnthropic && !useUserOpenai && !useUserGemini) {
+  if (!provider) {
     throw new Error(
       "No model credentials available. Configure AWS, Anthropic, OpenAI, or Gemini credentials in account settings.",
     );
@@ -412,16 +417,9 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
   });
 
   // The model id is chosen by the user from their provider's live model list.
-  const provider = useUserAws
-    ? { type: "bedrock" as const, model: spec.model }
-    : useUserAnthropic
-      ? { type: "anthropic" as const, model: spec.model }
-      : useUserOpenai
-        ? { type: "openai" as const, model: spec.model }
-        : { type: "gemini" as const, model: spec.model };
   console.log("[bandolier:deploy] provider", {
-    type: provider.type,
-    model: provider.model,
+    type: provider,
+    model: spec.model,
   });
 
   // All credentials come from the per-job secret created below.
@@ -456,7 +454,7 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
 
   const envVars: EnvVar[] = [
     { name: "CLAUDE_TASK", value: spec.task },
-    { name: "CLAUDE_MODEL", value: provider.model },
+    { name: "CLAUDE_MODEL", value: spec.model },
     { name: "AGENT_TITLE", value: spec.displayName },
     { name: "REPO_URL", value: spec.repoUrl ?? "" },
     { name: "BRANCH", value: spec.branch },

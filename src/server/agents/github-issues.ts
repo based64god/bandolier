@@ -160,6 +160,7 @@ export interface PullRequestRefs {
   headRepoFullName: string | null;
   state: "open" | "closed";
   merged: boolean;
+  title: string;
 }
 
 /** Fetches a pull request's head/base refs and state. Null on any failure. */
@@ -177,6 +178,7 @@ export async function getPullRequestRefs(
     const data = (await res.json()) as {
       state: string;
       merged_at: string | null;
+      title: string;
       head: { ref: string; repo: { full_name: string } | null };
       base: { ref: string };
     };
@@ -186,6 +188,7 @@ export async function getPullRequestRefs(
       headRepoFullName: data.head.repo?.full_name ?? null,
       state: data.state === "closed" ? "closed" : "open",
       merged: !!data.merged_at,
+      title: data.title,
     };
   } catch {
     return null;

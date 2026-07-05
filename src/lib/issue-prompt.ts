@@ -117,6 +117,26 @@ ${body}`;
 }
 
 /**
+ * Builds the user message for a run auto-resumed by a failing CI pipeline: it
+ * tells the agent which pipeline failed on the PR it produced and asks it to
+ * investigate and push a fix. Like a comment resume, the harness prepends the
+ * parent run's transcript, so this only carries what's new.
+ */
+export function buildCiResumeUserMessage(opts: {
+  prNumber: number;
+  title: string;
+  workflowName: string;
+  runUrl: string | null;
+}): string {
+  const link = opts.runUrl ? `\n\nFailed run: ${opts.runUrl}` : "";
+  return `## CI failed on pull request #${opts.prNumber}: ${opts.title}
+
+The **${opts.workflowName}** pipeline failed on this pull request's latest commit.${link}
+
+Investigate why it failed and push a fix so the pipeline passes. Read the failing run's logs (e.g. via \`gh run view\`) to see what broke, reproduce the failure locally where you can, and address the root cause rather than papering over it. If the failure is unrelated to the changes on this branch, say so instead of forcing a fix.`;
+}
+
+/**
  * Builds the user message for a GitHub issue task: the issue context itself
  * (number, title, body) plus any operator-supplied context from the dashboard
  * task field. The surrounding instructions live in the system prompt (see

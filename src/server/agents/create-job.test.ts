@@ -734,6 +734,7 @@ describe("createAgentJob", () => {
         repoFullName: null,
         issueNumber: null,
         parentJobName: null,
+        ciResumeSha: null,
       });
     });
 

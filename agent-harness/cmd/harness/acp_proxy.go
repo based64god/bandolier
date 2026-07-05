@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -13,7 +12,6 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/bandolier/agent-harness/internal/acp"
 )
@@ -156,20 +154,10 @@ func (p *acpProxy) endSession() { p.endOnce.Do(func() { close(p.ended) }) }
 // the seed session/new response to capture the sessionId and send the seed
 // prompt.
 func (p *acpProxy) a2cPump(ctx context.Context, stdout io.Reader) {
-	reader := bufio.NewReaderSize(stdout, 1<<20)
-	for {
-		line, err := reader.ReadBytes('\n')
-		if frame := bytes.TrimSpace(line); len(frame) > 0 {
-			p.handleAgentFrame(ctx, frame)
-		}
-		if err != nil {
-			// The agent exited (or the stream broke): end the session so the
-			// caller can run its post-run step rather than waiting on the idle
-			// timeout.
-			p.endSession()
-			return
-		}
-	}
+	forEachLine(stdout, func(line []byte) { p.handleAgentFrame(ctx, bytes.TrimSpace(line)) })
+	// The agent exited (or the stream broke): end the session so the caller can
+	// run its post-run step rather than waiting on the idle timeout.
+	p.endSession()
 }
 
 func (p *acpProxy) handleAgentFrame(ctx context.Context, frame []byte) {
@@ -221,23 +209,21 @@ func (p *acpProxy) seedPrompt() {
 // intercepting the end-session control frame. It ends the session if no client
 // activity arrives within the idle timeout.
 func (p *acpProxy) c2aPump(ctx context.Context) {
-	idle := interactiveIdleTimeout()
-	deadline := time.Now().Add(idle)
-	for {
-		if ctx.Err() != nil {
-			return
-		}
+	// However pollLoop ends — ctx cancellation, the idle timeout, an end-session
+	// frame, or a fatal stdin write — the session is over, so make sure serve
+	// unblocks (endSession is idempotent).
+	defer p.endSession()
+	pollLoop(ctx, "client activity", interactiveIdleTimeout(), func(ctx context.Context) (bool, bool) {
 		frames, err := p.acpPull(ctx)
 		if err != nil {
 			log.Printf("[harness] warn: acp pull: %v", err)
 		}
 		for _, f := range frames {
-			deadline = time.Now().Add(idle)
 			switch frameMethod(f) {
 			case endSessionMethod:
 				log.Printf("[harness] received end-session control frame")
 				p.endSession()
-				return
+				return false, true
 			case "session/prompt":
 				// A follow-up turn is starting; mirror the resume marker so the
 				// dashboard's awaiting detection flips back to "working".
@@ -252,22 +238,11 @@ func (p *acpProxy) c2aPump(ctx context.Context) {
 			if _, err := p.stdin.Write(append([]byte(f), '\n')); err != nil {
 				log.Printf("[harness] warn: agent stdin write: %v", err)
 				p.endSession()
-				return
+				return false, true
 			}
 		}
-		if time.Now().After(deadline) {
-			log.Printf("[harness] no client activity for %s — ending interactive session", idle)
-			p.endSession()
-			return
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-p.ended:
-			return
-		case <-time.After(2 * time.Second):
-		}
-	}
+		return len(frames) > 0, false
+	}, p.ended)
 }
 
 // ── relay HTTP ────────────────────────────────────────────────────────────────
@@ -276,23 +251,13 @@ func (p *acpProxy) acpPull(ctx context.Context) ([]string, error) {
 	if p.cfg.acpURL == "" {
 		return nil, fmt.Errorf("no ACP relay URL configured")
 	}
-	resp, err := bando.get(ctx, p.cfg.acpURL)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNoContent {
-		return nil, nil
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("acp pull status %d", resp.StatusCode)
-	}
 	var body struct {
 		Frames []struct {
 			Payload string `json:"payload"`
 		} `json:"frames"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+	ok, err := bando.getJSON(ctx, "acp pull", p.cfg.acpURL, &body)
+	if err != nil || !ok {
 		return nil, err
 	}
 	out := make([]string, 0, len(body.Frames))
@@ -348,7 +313,7 @@ func userMessageFrame(sessionID, text string) string {
 		"params": map[string]any{
 			"sessionId": sessionID,
 			"update": map[string]any{
-				"sessionUpdate": "user_message_chunk",
+				"sessionUpdate": acp.UpdateUserMessageChunk,
 				"content":       map[string]any{"type": "text", "text": text},
 			},
 		},
@@ -467,15 +432,15 @@ func renderFrameToTranscript(raw []byte) {
 			return
 		}
 		switch u.SessionUpdate {
-		case "agent_message_chunk":
+		case acp.UpdateAgentMessageChunk:
 			if t := strings.TrimSpace(u.Content.Text); t != "" {
 				fmt.Fprintln(stdoutTee, t)
 			}
-		case "user_message_chunk":
+		case acp.UpdateUserMessageChunk:
 			if t := strings.TrimSpace(u.Content.Text); t != "" {
 				logUserInput(t)
 			}
-		case "tool_call":
+		case acp.UpdateToolCall:
 			if u.Title != "" {
 				log.Printf("[harness] → %s", u.Title)
 			}

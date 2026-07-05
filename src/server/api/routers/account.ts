@@ -27,6 +27,8 @@ import {
 } from "~/server/agents/openai";
 import { getUserAwsCredentials } from "~/server/agents/user-aws";
 import { getRepoCredentials } from "~/server/agents/webhook-config";
+import { type Validation } from "~/server/agents/validation";
+import { type db } from "~/server/db";
 import {
   userAnthropicCredentials,
   userAwsCredentials,
@@ -36,6 +38,61 @@ import {
   userOpenaiCredentials,
 } from "~/server/db/schema";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
+
+/**
+ * Builds a user-scoped credential `set` mutation. Every setter is the same
+ * shape — validate the input, reject with the validation error, then upsert —
+ * so they differ only in schema, validator, and how the validated input maps
+ * onto a row (`store`). `toResult` surfaces any success detail the UI shows (a
+ * cluster version) alongside `{ valid: true }`.
+ */
+function userCredentialSetter<
+  TSchema extends z.ZodTypeAny,
+  TValidation extends Validation,
+  TResult extends Record<string, unknown> = Record<string, never>,
+>(config: {
+  inputSchema: TSchema;
+  validate: (input: z.infer<TSchema>) => Promise<TValidation> | TValidation;
+  store: (
+    database: typeof db,
+    userId: string,
+    input: z.infer<TSchema>,
+  ) => Promise<void>;
+  invalidMessage: string;
+  toResult?: (validation: Extract<TValidation, { valid: true }>) => TResult;
+}) {
+  return protectedProcedure
+    .input(config.inputSchema)
+    .mutation(async ({ ctx, input }) => {
+      const parsed = input as z.infer<TSchema>;
+      const validation = await config.validate(parsed);
+      if (!validation.valid) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: validation.error || config.invalidMessage,
+        });
+      }
+      await config.store(ctx.db, ctx.session.user.id, parsed);
+      const extra = config.toResult?.(
+        validation as Extract<TValidation, { valid: true }>,
+      );
+      return { valid: true as const, ...(extra ?? ({} as Partial<TResult>)) };
+    });
+}
+
+/**
+ * Builds a user-scoped credential `delete` mutation that removes the whole row
+ * for the current user. `remove` is a closure so each provider keeps its own
+ * (fully typed) table reference.
+ */
+function userCredentialDelete(
+  remove: (database: typeof db, userId: string) => Promise<void>,
+) {
+  return protectedProcedure.mutation(async ({ ctx }) => {
+    await remove(ctx.db, ctx.session.user.id);
+    return { success: true };
+  });
+}
 
 export const accountRouter = createTRPCRouter({
   // Returns non-secret info about the user's stored AWS credentials.
@@ -60,38 +117,29 @@ export const accountRouter = createTRPCRouter({
   }),
 
   // Validates then stores (upserts) AWS credentials for the user.
-  setAws: protectedProcedure
-    .input(
-      z.object({
-        // Trim to avoid whitespace from pasted blocks corrupting the signature
-        // (AWS reports that as a generic "security token invalid" error).
-        accessKeyId: z.string().trim().min(16),
-        secretAccessKey: z.string().trim().min(1),
-        // Optional: blank / whitespace-only normalizes to undefined so a
-        // permanent-credential user is never treated as needing a session token.
-        sessionToken: z.string().optional().transform(cleanSessionToken),
-        region: z.string().trim().min(1).default("us-east-1"),
-      }),
-    )
-    .mutation(async ({ ctx, input }) => {
-      const validation = await validateAwsCredentials({
+  setAws: userCredentialSetter({
+    inputSchema: z.object({
+      // Trim to avoid whitespace from pasted blocks corrupting the signature
+      // (AWS reports that as a generic "security token invalid" error).
+      accessKeyId: z.string().trim().min(16),
+      secretAccessKey: z.string().trim().min(1),
+      // Optional: blank / whitespace-only normalizes to undefined so a
+      // permanent-credential user is never treated as needing a session token.
+      sessionToken: z.string().optional().transform(cleanSessionToken),
+      region: z.string().trim().min(1).default("us-east-1"),
+    }),
+    validate: (input) =>
+      validateAwsCredentials({
         accessKeyId: input.accessKeyId,
         secretAccessKey: input.secretAccessKey,
         sessionToken: input.sessionToken,
         region: input.region,
-      });
-
-      if (!validation.valid) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: validation.error ?? "AWS credentials are invalid.",
-        });
-      }
-
-      await ctx.db
+      }),
+    store: (database, userId, input) =>
+      database
         .insert(userAwsCredentials)
         .values({
-          userId: ctx.session.user.id,
+          userId,
           accessKeyId: input.accessKeyId,
           secretAccessKey: input.secretAccessKey,
           sessionToken: input.sessionToken ?? null,
@@ -106,17 +154,18 @@ export const accountRouter = createTRPCRouter({
             region: input.region,
             updatedAt: new Date(),
           },
-        });
-
-      return { valid: true as const, arn: validation.arn };
-    }),
-
-  deleteAws: protectedProcedure.mutation(async ({ ctx }) => {
-    await ctx.db
-      .delete(userAwsCredentials)
-      .where(eq(userAwsCredentials.userId, ctx.session.user.id));
-    return { success: true };
+        })
+        .then(() => undefined),
+    invalidMessage: "AWS credentials are invalid.",
+    toResult: (validation) => ({ arn: validation.arn }),
   }),
+
+  deleteAws: userCredentialDelete((database, userId) =>
+    database
+      .delete(userAwsCredentials)
+      .where(eq(userAwsCredentials.userId, userId))
+      .then(() => undefined),
+  ),
 
   // ── Anthropic credentials (API key or Claude subscription OAuth token) ─────
 
@@ -158,60 +207,45 @@ export const accountRouter = createTRPCRouter({
       return validateAnthropicKey(creds.apiKey);
     }),
 
-  setAnthropic: protectedProcedure
+  setAnthropic: userCredentialSetter({
     // Strip ALL whitespace, not just the ends: a key copied from a wrapped
     // terminal line arrives with interior spaces/newlines that survive trim().
-    .input(z.object({ apiKey: stripWhitespace.pipe(z.string().min(1)) }))
-    .mutation(async ({ ctx, input }) => {
-      const validation = await validateAnthropicKey(input.apiKey);
-      if (!validation.valid) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: validation.error ?? "Anthropic API key is invalid.",
-        });
-      }
-
-      // Both kinds can coexist — setting the key leaves any OAuth token alone
-      // (the key takes precedence at run time).
-      await ctx.db
+    inputSchema: z.object({ apiKey: stripWhitespace.pipe(z.string().min(1)) }),
+    validate: (input) => validateAnthropicKey(input.apiKey),
+    // Both kinds can coexist — setting the key leaves any OAuth token alone
+    // (the key takes precedence at run time).
+    store: (database, userId, input) =>
+      database
         .insert(userAnthropicCredentials)
-        .values({ userId: ctx.session.user.id, apiKey: input.apiKey })
+        .values({ userId, apiKey: input.apiKey })
         .onConflictDoUpdate({
           target: userAnthropicCredentials.userId,
           set: { apiKey: input.apiKey, updatedAt: new Date() },
-        });
+        })
+        .then(() => undefined),
+    invalidMessage: "Anthropic API key is invalid.",
+  }),
 
-      return { valid: true as const };
-    }),
-
-  setAnthropicOauth: protectedProcedure
+  setAnthropicOauth: userCredentialSetter({
     // Strip ALL whitespace, not just the ends: a setup-token copied from a
     // wrapped terminal line arrives with interior spaces that survive trim(),
     // pass the format check, and only fail at run time as the claude CLI's
     // "401 Invalid bearer token" (OAuth tokens can't be probed at save time).
-    .input(z.object({ oauthToken: stripWhitespace.pipe(z.string().min(1)) }))
-    .mutation(async ({ ctx, input }) => {
-      const validation = validateAnthropicOauthToken(input.oauthToken);
-      if (!validation.valid) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: validation.error ?? "OAuth token is invalid.",
-        });
-      }
-
-      await ctx.db
+    inputSchema: z.object({
+      oauthToken: stripWhitespace.pipe(z.string().min(1)),
+    }),
+    validate: (input) => validateAnthropicOauthToken(input.oauthToken),
+    store: (database, userId, input) =>
+      database
         .insert(userAnthropicCredentials)
-        .values({
-          userId: ctx.session.user.id,
-          oauthToken: input.oauthToken,
-        })
+        .values({ userId, oauthToken: input.oauthToken })
         .onConflictDoUpdate({
           target: userAnthropicCredentials.userId,
           set: { oauthToken: input.oauthToken, updatedAt: new Date() },
-        });
-
-      return { valid: true as const };
-    }),
+        })
+        .then(() => undefined),
+    invalidMessage: "OAuth token is invalid.",
+  }),
 
   deleteAnthropic: protectedProcedure
     .input(
@@ -278,54 +312,37 @@ export const accountRouter = createTRPCRouter({
       return validateOpenaiKey(creds.apiKey);
     }),
 
-  setOpenai: protectedProcedure
-    .input(z.object({ apiKey: z.string().min(1) }))
-    .mutation(async ({ ctx, input }) => {
-      const validation = await validateOpenaiKey(input.apiKey);
-      if (!validation.valid) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: validation.error ?? "OpenAI API key is invalid.",
-        });
-      }
-
-      // Both kinds can coexist — setting the key leaves any ChatGPT auth alone
-      // (the key takes precedence at run time).
-      await ctx.db
+  setOpenai: userCredentialSetter({
+    inputSchema: z.object({ apiKey: z.string().min(1) }),
+    validate: (input) => validateOpenaiKey(input.apiKey),
+    // Both kinds can coexist — setting the key leaves any ChatGPT auth alone
+    // (the key takes precedence at run time).
+    store: (database, userId, input) =>
+      database
         .insert(userOpenaiCredentials)
-        .values({ userId: ctx.session.user.id, apiKey: input.apiKey })
+        .values({ userId, apiKey: input.apiKey })
         .onConflictDoUpdate({
           target: userOpenaiCredentials.userId,
           set: { apiKey: input.apiKey, updatedAt: new Date() },
-        });
-
-      return { valid: true as const };
-    }),
-
-  setCodexAuth: protectedProcedure
-    .input(z.object({ authJson: z.string().trim().min(1) }))
-    .mutation(async ({ ctx, input }) => {
-      const validation = validateCodexAuthJson(input.authJson);
-      if (!validation.valid) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: validation.error ?? "auth.json is invalid.",
-        });
-      }
-
-      await ctx.db
-        .insert(userOpenaiCredentials)
-        .values({
-          userId: ctx.session.user.id,
-          codexAuthJson: input.authJson,
         })
+        .then(() => undefined),
+    invalidMessage: "OpenAI API key is invalid.",
+  }),
+
+  setCodexAuth: userCredentialSetter({
+    inputSchema: z.object({ authJson: z.string().trim().min(1) }),
+    validate: (input) => validateCodexAuthJson(input.authJson),
+    store: (database, userId, input) =>
+      database
+        .insert(userOpenaiCredentials)
+        .values({ userId, codexAuthJson: input.authJson })
         .onConflictDoUpdate({
           target: userOpenaiCredentials.userId,
           set: { codexAuthJson: input.authJson, updatedAt: new Date() },
-        });
-
-      return { valid: true as const };
-    }),
+        })
+        .then(() => undefined),
+    invalidMessage: "auth.json is invalid.",
+  }),
 
   deleteOpenai: protectedProcedure
     .input(
@@ -371,34 +388,27 @@ export const accountRouter = createTRPCRouter({
     return validateGeminiCredentials(creds);
   }),
 
-  setGemini: protectedProcedure
-    .input(z.object({ credentials: z.string().min(1) }))
-    .mutation(async ({ ctx, input }) => {
-      const validation = await validateGeminiCredentials(input.credentials);
-      if (!validation.valid) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: validation.error ?? "Gemini credentials are invalid.",
-        });
-      }
-
-      await ctx.db
+  setGemini: userCredentialSetter({
+    inputSchema: z.object({ credentials: z.string().min(1) }),
+    validate: (input) => validateGeminiCredentials(input.credentials),
+    store: (database, userId, input) =>
+      database
         .insert(userGeminiCredentials)
-        .values({ userId: ctx.session.user.id, apiKey: input.credentials })
+        .values({ userId, apiKey: input.credentials })
         .onConflictDoUpdate({
           target: userGeminiCredentials.userId,
           set: { apiKey: input.credentials, updatedAt: new Date() },
-        });
-
-      return { valid: true as const };
-    }),
-
-  deleteGemini: protectedProcedure.mutation(async ({ ctx }) => {
-    await ctx.db
-      .delete(userGeminiCredentials)
-      .where(eq(userGeminiCredentials.userId, ctx.session.user.id));
-    return { success: true };
+        })
+        .then(() => undefined),
+    invalidMessage: "Gemini credentials are invalid.",
   }),
+
+  deleteGemini: userCredentialDelete((database, userId) =>
+    database
+      .delete(userGeminiCredentials)
+      .where(eq(userGeminiCredentials.userId, userId))
+      .then(() => undefined),
+  ),
 
   // ── Kubeconfig ────────────────────────────────────────────────────────────
 
@@ -446,34 +456,28 @@ export const accountRouter = createTRPCRouter({
     return validateKubeconfig(kc);
   }),
 
-  setKubeconfig: protectedProcedure
-    .input(z.object({ kubeconfig: z.string().min(1) }))
-    .mutation(async ({ ctx, input }) => {
-      const validation = await validateKubeconfig(input.kubeconfig);
-      if (!validation.valid) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: validation.error ?? "Kubeconfig is invalid.",
-        });
-      }
-
-      await ctx.db
+  setKubeconfig: userCredentialSetter({
+    inputSchema: z.object({ kubeconfig: z.string().min(1) }),
+    validate: (input) => validateKubeconfig(input.kubeconfig),
+    store: (database, userId, input) =>
+      database
         .insert(userKubeconfig)
-        .values({ userId: ctx.session.user.id, kubeconfig: input.kubeconfig })
+        .values({ userId, kubeconfig: input.kubeconfig })
         .onConflictDoUpdate({
           target: userKubeconfig.userId,
           set: { kubeconfig: input.kubeconfig, updatedAt: new Date() },
-        });
-
-      return { valid: true as const, version: validation.version };
-    }),
-
-  deleteKubeconfig: protectedProcedure.mutation(async ({ ctx }) => {
-    await ctx.db
-      .delete(userKubeconfig)
-      .where(eq(userKubeconfig.userId, ctx.session.user.id));
-    return { success: true };
+        })
+        .then(() => undefined),
+    invalidMessage: "Kubeconfig is invalid.",
+    toResult: (validation) => ({ version: validation.version }),
   }),
+
+  deleteKubeconfig: userCredentialDelete((database, userId) =>
+    database
+      .delete(userKubeconfig)
+      .where(eq(userKubeconfig.userId, userId))
+      .then(() => undefined),
+  ),
 
   // ── Compute (agent CPU / memory limits) ───────────────────────────────────
 
@@ -510,10 +514,10 @@ export const accountRouter = createTRPCRouter({
       return { success: true };
     }),
 
-  deleteCompute: protectedProcedure.mutation(async ({ ctx }) => {
-    await ctx.db
+  deleteCompute: userCredentialDelete((database, userId) =>
+    database
       .delete(userCompute)
-      .where(eq(userCompute.userId, ctx.session.user.id));
-    return { success: true };
-  }),
+      .where(eq(userCompute.userId, userId))
+      .then(() => undefined),
+  ),
 });

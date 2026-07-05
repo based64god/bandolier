@@ -1,40 +1,21 @@
 // Browser smoke test for the shared credential building blocks
 // (SecretForm → MaskedCredentialRow → Remove, and ToggleSection).
-// Playwright is installed globally in this environment; resolve it locally
-// first, else fall back to the global install.
 //
 // Run against a dev server serving the harness route:
 //   pnpm next dev --port 3137 &
 //   node e2e/credential-ui.spec.mjs
-import { createRequire } from "node:module";
-const require = createRequire(import.meta.url);
-let chromium;
-try {
-  ({ chromium } = require("playwright"));
-} catch {
-  ({ chromium } = require("/usr/local/lib/node_modules/playwright/index.js"));
-}
+import { BASE, check, launch, finish } from "./helpers.mjs";
 
-const BASE = process.env.CREDENTIAL_UI_BASE_URL ?? "http://localhost:3137";
-let passed = 0;
-let failed = 0;
-function check(name, cond) {
-  if (cond) {
-    passed++;
-    console.log(`  ✓ ${name}`);
-  } else {
-    failed++;
-    console.log(`  ✗ ${name}`);
-  }
-}
-
-const browser = await chromium.launch();
+const browser = await launch();
 const page = await browser.newPage();
 
 await page.goto(`${BASE}/dev/credential-ui`);
 
-// Save button is disabled until the field has a value.
-const save = page.getByRole("button", { name: "Save" });
+// Save button is disabled until the field has a value. Scoped to the secret
+// form so it doesn't collide with the compute form's Save button below.
+const save = page
+  .locator("form", { has: page.getByPlaceholder("secret") })
+  .getByRole("button", { name: "Save" });
 check("save disabled when empty", await save.isDisabled());
 
 await page.getByPlaceholder("secret").fill("sk-secret-123");
@@ -77,6 +58,20 @@ check(
   (await page.getByTestId("toggle").innerText()) === "on",
 );
 
-await browser.close();
-console.log(`\n${passed} passed, ${failed} failed`);
-process.exit(failed ? 1 : 0);
+// ComputeForm: Save is disabled until an input is touched, then reports the
+// entered CPU/memory to onSave.
+const computeForm = page.locator("form", {
+  has: page.getByPlaceholder("2Gi"),
+});
+const computeSave = computeForm.getByRole("button", { name: "Save" });
+check("compute save disabled when untouched", await computeSave.isDisabled());
+await computeForm.getByPlaceholder("2", { exact: true }).fill("4");
+await computeForm.getByPlaceholder("2Gi").fill("8Gi");
+check("compute save enabled after typing", await computeSave.isEnabled());
+await computeSave.click();
+check(
+  "compute values reported",
+  (await page.getByTestId("compute").innerText()) === "4/8Gi",
+);
+
+await finish(browser);

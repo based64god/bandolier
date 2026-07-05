@@ -31,7 +31,9 @@ const MAX_CI_RESUMES = 3;
  * back toward the root run. Used to cap auto-resumes per pull request. The walk
  * is bounded so a corrupt parent cycle can't spin.
  */
-async function countCiResumesInLineage(jobName: string): Promise<number> {
+export async function countCiResumesInLineage(
+  jobName: string,
+): Promise<number> {
   let count = 0;
   let cursor: string | null = jobName;
   for (let i = 0; cursor && i < MAX_CI_RESUMES + 5; i++) {

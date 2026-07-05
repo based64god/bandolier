@@ -1,22 +1,37 @@
-// Compact source tag shown next to each model in the picker so it's clear which
-// provider it comes from. Shared by the deploy modal and the webhook config
-// modal so the badges stay consistent.
-const PROVIDER_TAGS: Record<string, { label: string; style: string }> = {
+// The provider → accent convention in one place: the Tailwind color token, the
+// badge style built from it, and the two label variants each provider is shown
+// under (a compact tag in the model picker, a fuller name in the deploy badge).
+// The `color` token matches the accent keys in credential-ui's ACCENTS map, so
+// changing a provider's color is a single edit here.
+export type ProviderColor = "purple" | "teal" | "blue" | "orange";
+
+export const PROVIDER_ACCENT: Record<
+  string,
+  { color: ProviderColor; badge: string; tagLabel: string; fullLabel: string }
+> = {
   anthropic: {
-    label: "Anthropic",
-    style: "border-purple-500/40 bg-purple-500/10 text-purple-300",
+    color: "purple",
+    badge: "border-purple-500/40 bg-purple-500/10 text-purple-300",
+    tagLabel: "Anthropic",
+    fullLabel: "Anthropic API",
   },
   bedrock: {
-    label: "Bedrock",
-    style: "border-orange-500/40 bg-orange-500/10 text-orange-300",
+    color: "orange",
+    badge: "border-orange-500/40 bg-orange-500/10 text-orange-300",
+    tagLabel: "Bedrock",
+    fullLabel: "AWS Bedrock",
   },
   openai: {
-    label: "OpenAI",
-    style: "border-teal-500/40 bg-teal-500/10 text-teal-300",
+    color: "teal",
+    badge: "border-teal-500/40 bg-teal-500/10 text-teal-300",
+    tagLabel: "OpenAI",
+    fullLabel: "OpenAI API",
   },
   gemini: {
-    label: "Gemini",
-    style: "border-blue-500/40 bg-blue-500/10 text-blue-300",
+    color: "blue",
+    badge: "border-blue-500/40 bg-blue-500/10 text-blue-300",
+    tagLabel: "Gemini",
+    fullLabel: "Google Gemini",
   },
 };
 
@@ -34,8 +49,8 @@ export function ProviderTag({
   provider: string;
   auth?: string;
 }) {
-  const tag = PROVIDER_TAGS[provider];
-  if (!tag) return null;
+  const accent = PROVIDER_ACCENT[provider];
+  if (!accent) return null;
   const authLabel = auth ? AUTH_TAGS[auth] : undefined;
   return (
     <span className="flex shrink-0 items-center gap-1">
@@ -45,9 +60,9 @@ export function ProviderTag({
         </span>
       )}
       <span
-        className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] ${tag.style}`}
+        className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] ${accent.badge}`}
       >
-        {tag.label}
+        {accent.tagLabel}
       </span>
     </span>
   );

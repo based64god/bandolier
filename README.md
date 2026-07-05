@@ -189,7 +189,7 @@ When an issue is opened, Bandolier verifies the App's signature, finds the Bando
 
 The "Bando picked up this issue…" comment is posted exclusively via the App installation token, so it is always attributed to `bandolier[bot]`. On a repo where the App isn't installed there's no bot identity to comment as, so the comment is skipped rather than posted under a user or service token.
 
-Optionally, each repo can set a trigger phrase that issue text must contain (set in the repo-config UI).
+Optionally, each repo can set a trigger phrase that issue text must contain (set in the repo-config UI). When a trigger phrase is configured, **editing** an existing issue to newly include it launches an agent just as opening it would — so an issue that predates the phrase, or one the author fills in later, can still kick off a run. Only the edit that first introduces the phrase fires; later edits of an already-triggering issue don't re-run it.
 
 ### Resuming a run by commenting
 

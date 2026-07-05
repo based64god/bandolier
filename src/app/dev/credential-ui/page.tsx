@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import {
+  ComputeForm,
   CredentialFeedback,
   MaskedCredentialRow,
   SecretForm,
@@ -20,6 +21,7 @@ export default function CredentialUiHarness() {
   const [saved, setSaved] = useState<string | null>(null);
   const [removed, setRemoved] = useState(false);
   const [toggle, setToggle] = useState(false);
+  const [compute, setCompute] = useState<string | null>(null);
 
   // Dev/test only — never expose this route in a deployed app.
   if (process.env.NODE_ENV === "production") {
@@ -64,6 +66,20 @@ export default function CredentialUiHarness() {
           disabled={false}
           onChange={setToggle}
         />
+
+        <ComputeForm
+          accent="emerald"
+          containerClassName="space-y-3 border-t border-white/10 pt-6"
+          title="Agent compute"
+          titleClassName="text-sm font-semibold text-emerald-300"
+          description="CPU / memory limits"
+          values={{}}
+          onSave={(c) => {
+            setCompute(`${c.cpu}/${c.memory}`);
+            return Promise.resolve();
+          }}
+          pending={false}
+        />
       </div>
 
       <p data-testid="removed" className="font-mono text-sm">
@@ -71,6 +87,9 @@ export default function CredentialUiHarness() {
       </p>
       <p data-testid="toggle" className="font-mono text-sm">
         {toggle ? "on" : "off"}
+      </p>
+      <p data-testid="compute" className="font-mono text-sm">
+        {compute ?? "unset"}
       </p>
     </div>
   );

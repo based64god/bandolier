@@ -8,8 +8,9 @@ import type { ModelCredentials } from "~/server/agents/resolve-credentials";
 // database, Kubernetes, or GitHub. Everything downstream of the gate
 // (createAgentJob et al.) is never reached, so it needs no mocking. The
 // factories defer to top-level vi.fn()s through arrows to dodge hoisting TDZ.
-const getUserGithubToken =
-  vi.fn<() => Promise<string | null>>().mockResolvedValue("gh-tok");
+const getUserGithubToken = vi
+  .fn<() => Promise<string | null>>()
+  .mockResolvedValue("gh-tok");
 const getGithubIdentity = vi
   .fn<() => Promise<{ id: number; login: string }>>()
   .mockResolvedValue({ id: 1, login: "octocat" });
@@ -22,7 +23,9 @@ vi.mock("~/server/agents/github-token", () => ({
   }),
 }));
 
-const userHasRepoAccess = vi.fn<() => Promise<boolean>>().mockResolvedValue(true);
+const userHasRepoAccess = vi
+  .fn<() => Promise<boolean>>()
+  .mockResolvedValue(true);
 vi.mock("~/server/agents/github-repos", () => ({
   userHasRepoAccess: () => userHasRepoAccess(),
 }));
@@ -34,6 +37,7 @@ vi.mock("~/server/agents/kubeconfig", () => ({
 vi.mock("~/server/agents/compute", () => ({
   resolveCompute: () => Promise.resolve({}),
   mergeCompute: (base: unknown) => base,
+  parseComputeInput: () => ({ cpu: null, memory: null }),
 }));
 
 const resolveModelCredentials = vi.fn<() => Promise<ModelCredentials>>();
@@ -50,8 +54,9 @@ vi.mock("~/server/agents/resolve-credentials", () => ({
   }),
 }));
 
-const runUsesRepoCredentials =
-  vi.fn<() => Promise<boolean>>().mockResolvedValue(true);
+const runUsesRepoCredentials = vi
+  .fn<() => Promise<boolean>>()
+  .mockResolvedValue(true);
 const getUserRepoPermission = vi.fn<() => Promise<string>>();
 vi.mock("~/server/agents/repo-permissions", () => ({
   runUsesRepoCredentials: () => runUsesRepoCredentials(),

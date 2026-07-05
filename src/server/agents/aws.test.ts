@@ -125,18 +125,20 @@ describe("validateAwsCredentials", () => {
     sendMock.mockRejectedValue(stsError("InvalidClientTokenId"));
     const r = await validateAwsCredentials(creds);
     expect(r.valid).toBe(false);
-    expect(r.error).toBe(
-      "Access key ID is not recognized by AWS — it may be disabled, deleted, mistyped, or from a different account.",
-    );
+    if (!r.valid)
+      expect(r.error).toBe(
+        "Access key ID is not recognized by AWS — it may be disabled, deleted, mistyped, or from a different account.",
+      );
   });
 
   it("maps SignatureDoesNotMatch to a secret-key message", async () => {
     sendMock.mockRejectedValue(stsError("SignatureDoesNotMatch"));
     const r = await validateAwsCredentials(creds);
     expect(r.valid).toBe(false);
-    expect(r.error).toBe(
-      "Secret access key doesn't match the access key ID — check for a typo or copy/paste error.",
-    );
+    if (!r.valid)
+      expect(r.error).toBe(
+        "Secret access key doesn't match the access key ID — check for a typo or copy/paste error.",
+      );
   });
 
   it.each(["AccessDenied", "AccessDeniedException"])(

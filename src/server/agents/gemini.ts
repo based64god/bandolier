@@ -2,13 +2,11 @@ import { createSign } from "node:crypto";
 
 import { eq } from "drizzle-orm";
 
+import type { Validation } from "~/server/agents/validation";
 import { type db } from "~/server/db";
 import { userGeminiCredentials } from "~/server/db/schema";
 
-export interface GeminiValidation {
-  valid: boolean;
-  error?: string;
-}
+export type GeminiValidation = Validation;
 
 /**
  * A Google service-account key JSON (the file downloaded from the Cloud
@@ -132,7 +130,8 @@ export async function validateGeminiCredentials(
   raw: string,
 ): Promise<GeminiValidation> {
   const { creds, error } = parseGoogleCredentials(raw);
-  if (!creds) return { valid: false, error };
+  if (!creds)
+    return { valid: false, error: error ?? "Invalid Gemini credentials." };
   try {
     await mintGoogleAccessToken(creds);
     return { valid: true };

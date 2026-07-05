@@ -24,7 +24,7 @@ import {
 } from "./notifications";
 import { OverviewPanel } from "./overview-panel";
 import { recordRecentRepo } from "./recent-repos";
-import { RepoConfigModal } from "./repo-config-modal";
+import { RepoConfigModal } from "./repo-config";
 import { SettingsModal } from "./settings-modal";
 import { TaskTable, TaskTableSkeleton } from "./task-table";
 

@@ -4,10 +4,8 @@ import {
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
-import { eq } from "drizzle-orm";
-
 import { type db } from "~/server/db";
-import { repoWebhookConfig } from "~/server/db/schema";
+import { loadRepoConfig } from "~/server/agents/webhook-config";
 
 /**
  * A resolved artifact store: the bucket a run's artifacts are written to and
@@ -70,17 +68,7 @@ export async function resolveArtifactStore(
   repoFullName: string | null,
 ): Promise<ArtifactStore | null> {
   if (!repoFullName) return null;
-  const [row] = await database
-    .select({
-      artifactsS3Bucket: repoWebhookConfig.artifactsS3Bucket,
-      artifactsS3Region: repoWebhookConfig.artifactsS3Region,
-      artifactsS3Endpoint: repoWebhookConfig.artifactsS3Endpoint,
-      artifactsAccessKeyId: repoWebhookConfig.artifactsAccessKeyId,
-      artifactsSecretAccessKey: repoWebhookConfig.artifactsSecretAccessKey,
-    })
-    .from(repoWebhookConfig)
-    .where(eq(repoWebhookConfig.repoFullName, repoFullName))
-    .limit(1);
+  const row = await loadRepoConfig(database, repoFullName);
   return row ? repoArtifactStore(row) : null;
 }
 

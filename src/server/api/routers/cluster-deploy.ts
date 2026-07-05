@@ -1,0 +1,217 @@
+import { TRPCError } from "@trpc/server";
+import { desc, eq } from "drizzle-orm";
+import { z } from "zod";
+
+import {
+  CLUSTER_DEPLOY_DEFAULTS,
+  DO_REGIONS,
+  isTerminalStatus,
+} from "~/lib/cluster-deploy";
+import {
+  advanceClusterDeployment,
+  cancelClusterDeployment,
+  createClusterDeployment,
+  dismissClusterDeployment,
+} from "~/server/agents/cluster-deploy";
+import { validateDoToken } from "~/server/agents/digitalocean";
+import { stripWhitespace } from "~/server/api/credentials";
+import { type db } from "~/server/db";
+import { clusterDeployment } from "~/server/db/schema";
+import { createTRPCRouter, protectedProcedure } from "../trpc";
+import { buildAdoptionBundle } from "~/server/agents/terraform-adoption";
+
+// One-click DigitalOcean agent-cluster deploy. All procedures are user-scoped:
+// a deployment belongs to the user who started it and ends in their personal
+// kubeconfig slot. The client drives the state machine by polling `tick` —
+// there is no server-side background work, so this holds on serverless too.
+
+type DeploymentRow = typeof clusterDeployment.$inferSelect;
+
+/** What the client is allowed to see. The one-shot admin credentials never
+ * leave the server; the scoped artifact-storage key secret is exposed only on
+ * the success screen (status "done") until the user dismisses it. */
+function toClientDeployment(row: DeploymentRow) {
+  return {
+    id: row.id,
+    status: row.status,
+    error: row.error,
+    clusterName: row.clusterName,
+    region: row.region,
+    nodeSize: row.nodeSize,
+    minNodes: row.minNodes,
+    maxNodes: row.maxNodes,
+    spacesEnabled: row.spacesEnabled,
+    clusterId: row.clusterId,
+    bucketName: row.bucketName,
+    spacesEndpoint: row.spacesEnabled
+      ? `https://${row.region}.digitaloceanspaces.com`
+      : null,
+    spacesAccessKeyId: row.spacesAccessKeyId,
+    spacesSecretAccessKey:
+      row.status === "done" ? row.spacesSecretAccessKey : null,
+    createdAt: row.createdAt,
+  };
+}
+
+async function latestDeployment(
+  database: typeof db,
+  userId: string,
+): Promise<DeploymentRow | null> {
+  const [row] = await database
+    .select()
+    .from(clusterDeployment)
+    .where(eq(clusterDeployment.userId, userId))
+    .orderBy(desc(clusterDeployment.createdAt))
+    .limit(1);
+  return row ?? null;
+}
+
+async function ownedDeployment(
+  database: typeof db,
+  userId: string,
+  id: string,
+): Promise<DeploymentRow> {
+  const [row] = await database
+    .select()
+    .from(clusterDeployment)
+    .where(eq(clusterDeployment.id, id))
+    .limit(1);
+  if (row?.userId !== userId) throw new TRPCError({ code: "NOT_FOUND" });
+  return row;
+}
+
+export const clusterDeployRouter = createTRPCRouter({
+  // The latest deployment, unless the user has dismissed it. Drives the whole
+  // wizard: null → offer the form; non-terminal → progress; done/failed →
+  // success/failure screen.
+  status: protectedProcedure.query(async ({ ctx }) => {
+    const row = await latestDeployment(ctx.db, ctx.session.user.id);
+    if (!row || row.status === "dismissed") return null;
+    return toClientDeployment(row);
+  }),
+
+  start: protectedProcedure
+    .input(
+      z
+        .object({
+          // Strip pasted-token artifacts (the subscription-token lesson:
+          // terminal line wraps smuggle interior whitespace past format-only
+          // checks).
+          doToken: stripWhitespace.pipe(z.string().min(1)),
+          spacesAccessId: stripWhitespace,
+          spacesSecretKey: stripWhitespace,
+          region: z.enum(DO_REGIONS).default(CLUSTER_DEPLOY_DEFAULTS.region),
+          nodeSize: z
+            .string()
+            .regex(/^[a-z0-9-]+$/, "Invalid droplet size slug.")
+            .default(CLUSTER_DEPLOY_DEFAULTS.nodeSize),
+          minNodes: z
+            .number()
+            .int()
+            .min(1)
+            .max(100)
+            .default(CLUSTER_DEPLOY_DEFAULTS.minNodes),
+          maxNodes: z
+            .number()
+            .int()
+            .min(1)
+            .max(100)
+            .default(CLUSTER_DEPLOY_DEFAULTS.maxNodes),
+          spacesEnabled: z.boolean().default(true),
+        })
+        .refine((input) => input.maxNodes >= input.minNodes, {
+          message: "maxNodes must be >= minNodes.",
+        })
+        .refine(
+          (input) =>
+            !input.spacesEnabled ||
+            (input.spacesAccessId !== "" && input.spacesSecretKey !== ""),
+          {
+            message:
+              "Spaces admin keys are required to create the artifacts bucket.",
+          },
+        ),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const existing = await latestDeployment(ctx.db, ctx.session.user.id);
+      if (existing && !isTerminalStatus(existing.status)) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "A cluster deployment is already in progress.",
+        });
+      }
+
+      const probe = await validateDoToken(input.doToken);
+      if (!probe.valid) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: probe.error });
+      }
+
+      const row = await createClusterDeployment(ctx.db, ctx.session.user.id, {
+        doToken: input.doToken,
+        spacesAccessId: input.spacesAccessId,
+        spacesSecretKey: input.spacesSecretKey,
+        region: input.region,
+        nodeSize: input.nodeSize,
+        minNodes: input.minNodes,
+        maxNodes: input.maxNodes,
+        spacesEnabled: input.spacesEnabled,
+      });
+      return toClientDeployment(row);
+    }),
+
+  // One poll = one state-machine step. Safe to call repeatedly; a terminal or
+  // still-waiting deployment just returns unchanged.
+  tick: protectedProcedure
+    .input(z.object({ id: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      const row = await ownedDeployment(ctx.db, ctx.session.user.id, input.id);
+      return toClientDeployment(await advanceClusterDeployment(ctx.db, row));
+    }),
+
+  // Best-effort teardown of whatever was created so a failed or abandoned
+  // deploy doesn't keep billing; wipes the one-shot credentials.
+  cancel: protectedProcedure
+    .input(z.object({ id: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      const row = await ownedDeployment(ctx.db, ctx.session.user.id, input.id);
+      if (row.status === "done") {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message:
+            "Deployment already completed — manage the cluster from DigitalOcean or terraform.",
+        });
+      }
+      return toClientDeployment(await cancelClusterDeployment(ctx.db, row));
+    }),
+
+  // Acknowledge a terminal deployment: hides it from status and wipes every
+  // remaining secret (including the scoped key shown on the success screen).
+  dismiss: protectedProcedure
+    .input(z.object({ id: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      const row = await ownedDeployment(ctx.db, ctx.session.user.id, input.id);
+      if (!isTerminalStatus(row.status)) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "Cancel the in-progress deployment instead.",
+        });
+      }
+      return toClientDeployment(await dismissClusterDeployment(ctx.db, row));
+    }),
+
+  // Terraform adoption bundle for the most recent deployment that actually
+  // created a cluster. Secret-free, so it stays available after dismissal.
+  adoptionBundle: protectedProcedure.query(async ({ ctx }) => {
+    const [row] = await ctx.db
+      .select()
+      .from(clusterDeployment)
+      .where(eq(clusterDeployment.userId, ctx.session.user.id))
+      .orderBy(desc(clusterDeployment.createdAt))
+      .limit(1);
+    if (!row?.clusterId) return null;
+    return {
+      clusterName: row.clusterName,
+      ...buildAdoptionBundle({ ...row, clusterId: row.clusterId }),
+    };
+  }),
+});

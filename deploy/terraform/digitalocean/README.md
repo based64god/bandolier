@@ -96,6 +96,27 @@ After the apply, create the long-lived ServiceAccount kubeconfig (see
 [Agent-cluster kubeconfig](#agent-cluster-kubeconfig)) and paste it into your
 Bandolier instance's Kubernetes settings.
 
+### Adopting a cluster deployed from the app
+
+The app's **one-click cluster deploy** (Settings → _One-click cluster deploy_)
+creates the same agent-only footprint through the DigitalOcean API: a DOKS
+cluster and, optionally, a Spaces bucket with a bucket-scoped key. On success
+it offers a generated `imports.tf` + `terraform.tfvars` download. Drop both in
+this directory, export your credentials, and run:
+
+```bash
+tofu init && tofu plan   # plan shows the resources being adopted
+tofu apply               # materializes state; delete imports.tf afterwards
+```
+
+The plan adopts the existing cluster and bucket via [import
+blocks](https://opentofu.org/docs/language/import/) — no resources are
+recreated. One exception: the bucket-scoped Spaces key can't be imported
+(`digitalocean_spaces_key` has no importer and its secret is only revealed at
+creation), so the first apply mints a fresh scoped key. The key created at
+deploy time keeps working until you rotate your repos' artifact-storage
+settings to the new one and delete it.
+
 ## After the apply
 
 1. **Sign in** with GitHub at the `app_url` output.

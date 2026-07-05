@@ -81,7 +81,6 @@ function repoConfig(
     defaultWebhookEffort: null,
     systemPrompt: null,
     resumeOnCiFailure: false,
-    autoMergeBandolierPrs: false,
     networkPolicy: noPolicy,
     ...overrides,
   };

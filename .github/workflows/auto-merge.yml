@@ -48,4 +48,4 @@ jobs:
           # --auto hands the merge back to GitHub: the PR lands once every
           # required status check passes and it's mergeable. Branch protection
           # still gates it, so a repo with none merges right away.
-          gh pr merge "$pr" --repo "$REPO" --auto --squash
+          gh pr merge "$pr" --repo "$REPO" --auto --merge

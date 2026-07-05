@@ -22,29 +22,6 @@ vi.mock("~/server/agents/artifacts", () => ({
   transcriptKey: (jobName: string) => `transcripts/${jobName}.txt`,
 }));
 
-const getRepoWebhookConfig = vi.fn<() => Promise<unknown>>();
-vi.mock("~/server/agents/webhook-config", () => ({
-  getRepoWebhookConfig: () => getRepoWebhookConfig(),
-}));
-
-const getRepoBotToken = vi.fn<() => Promise<string | null>>();
-vi.mock("~/server/agents/github-app", () => ({
-  getRepoBotToken: () => getRepoBotToken(),
-}));
-
-const enablePullRequestAutoMerge =
-  vi.fn<
-    (
-      token: string,
-      repo: string,
-      pr: number,
-    ) => Promise<{ ok: boolean; error?: string }>
-  >();
-vi.mock("~/server/agents/github-issues", () => ({
-  enablePullRequestAutoMerge: (token: string, repo: string, pr: number) =>
-    enablePullRequestAutoMerge(token, repo, pr),
-}));
-
 const sendPushToUser =
   vi.fn<(userId: string, payload: unknown) => Promise<void>>();
 vi.mock("~/server/push", () => ({
@@ -106,9 +83,6 @@ beforeEach(() => {
   resolveArtifactStore.mockReset().mockResolvedValue(null);
   putArtifact.mockReset().mockResolvedValue(undefined);
   getArtifact.mockReset().mockResolvedValue(null);
-  getRepoWebhookConfig.mockReset().mockResolvedValue(null);
-  getRepoBotToken.mockReset().mockResolvedValue(null);
-  enablePullRequestAutoMerge.mockReset().mockResolvedValue({ ok: true });
   sendPushToUser.mockReset().mockResolvedValue(undefined);
   vi.spyOn(console, "log").mockImplementation(() => undefined);
   vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -220,80 +194,6 @@ describe("POST ingest — output persistence resilience", () => {
     expect(res.status).toBe(200);
     expect(putArtifact).not.toHaveBeenCalled();
     expect(updateSets[0]).not.toHaveProperty("transcriptKey");
-  });
-});
-
-describe("POST ingest — auto-merge gate", () => {
-  it("enables auto-merge with the parsed PR number when the repo opted in", async () => {
-    selectRows.push([
-      { repoFullName: "acme/app", spawnedBy: null, displayName: null },
-    ]);
-    getRepoWebhookConfig.mockResolvedValue({ autoMergeBandolierPrs: true });
-    getRepoBotToken.mockResolvedValue("bot-token");
-
-    await POST(
-      post({
-        ...authHeaders("job-3"),
-        "x-bandolier-pr-url": "https://github.com/acme/app/pull/42",
-      }) as never,
-    );
-
-    expect(enablePullRequestAutoMerge).toHaveBeenCalledWith(
-      "bot-token",
-      "acme/app",
-      42,
-    );
-  });
-
-  it("does not enable auto-merge for an opted-out repo", async () => {
-    selectRows.push([
-      { repoFullName: "acme/app", spawnedBy: null, displayName: null },
-    ]);
-    getRepoWebhookConfig.mockResolvedValue({ autoMergeBandolierPrs: false });
-
-    await POST(
-      post({
-        ...authHeaders("job-4"),
-        "x-bandolier-pr-url": "https://github.com/acme/app/pull/42",
-      }) as never,
-    );
-
-    expect(enablePullRequestAutoMerge).not.toHaveBeenCalled();
-  });
-
-  it("does not enable auto-merge when the PR url has no /pull/<n> segment", async () => {
-    selectRows.push([
-      { repoFullName: "acme/app", spawnedBy: null, displayName: null },
-    ]);
-    getRepoWebhookConfig.mockResolvedValue({ autoMergeBandolierPrs: true });
-    getRepoBotToken.mockResolvedValue("bot-token");
-
-    await POST(
-      post({
-        ...authHeaders("job-5"),
-        "x-bandolier-pr-url": "https://github.com/acme/app/issues/42",
-      }) as never,
-    );
-
-    expect(getRepoWebhookConfig).not.toHaveBeenCalled();
-    expect(enablePullRequestAutoMerge).not.toHaveBeenCalled();
-  });
-
-  it("does not enable auto-merge when no bot token is available", async () => {
-    selectRows.push([
-      { repoFullName: "acme/app", spawnedBy: null, displayName: null },
-    ]);
-    getRepoWebhookConfig.mockResolvedValue({ autoMergeBandolierPrs: true });
-    getRepoBotToken.mockResolvedValue(null);
-
-    await POST(
-      post({
-        ...authHeaders("job-6"),
-        "x-bandolier-pr-url": "https://github.com/acme/app/pull/1",
-      }) as never,
-    );
-
-    expect(enablePullRequestAutoMerge).not.toHaveBeenCalled();
   });
 });
 

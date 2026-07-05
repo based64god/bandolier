@@ -4,10 +4,11 @@ import {
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
-import { eq } from "drizzle-orm";
 
+import { friendlyAwsError } from "~/server/agents/aws";
+import type { Validation } from "~/server/agents/validation";
 import { type db } from "~/server/db";
-import { repoWebhookConfig } from "~/server/db/schema";
+import { loadRepoConfig } from "~/server/agents/webhook-config";
 
 /**
  * A resolved artifact store: the bucket a run's artifacts are written to and
@@ -70,17 +71,7 @@ export async function resolveArtifactStore(
   repoFullName: string | null,
 ): Promise<ArtifactStore | null> {
   if (!repoFullName) return null;
-  const [row] = await database
-    .select({
-      artifactsS3Bucket: repoWebhookConfig.artifactsS3Bucket,
-      artifactsS3Region: repoWebhookConfig.artifactsS3Region,
-      artifactsS3Endpoint: repoWebhookConfig.artifactsS3Endpoint,
-      artifactsAccessKeyId: repoWebhookConfig.artifactsAccessKeyId,
-      artifactsSecretAccessKey: repoWebhookConfig.artifactsSecretAccessKey,
-    })
-    .from(repoWebhookConfig)
-    .where(eq(repoWebhookConfig.repoFullName, repoFullName))
-    .limit(1);
+  const row = await loadRepoConfig(database, repoFullName);
   return row ? repoArtifactStore(row) : null;
 }
 
@@ -137,30 +128,7 @@ export async function getArtifact(
   }
 }
 
-export interface ArtifactStoreValidation {
-  valid: boolean;
-  /** Human-readable reason when invalid. */
-  error?: string;
-}
-
-// Maps S3 error codes to messages that name the real cause, mirroring the
-// friendly STS errors in aws.ts.
-function friendlyS3Error(name?: string, message?: string): string {
-  switch (name) {
-    case "NoSuchBucket":
-      return "The bucket does not exist — check the name, region, and endpoint.";
-    case "InvalidAccessKeyId":
-      return "Access key ID is not recognized — it may be disabled, deleted, or mistyped.";
-    case "SignatureDoesNotMatch":
-      return "Secret access key doesn't match the access key ID — check for a typo or copy/paste error.";
-    case "AccessDenied":
-      return "Credentials are valid but not allowed to write to this bucket — grant s3:PutObject on it.";
-    case "PermanentRedirect":
-      return "The bucket lives in a different region than the one given.";
-    default:
-      return message ?? "Could not write to the bucket.";
-  }
-}
+export type ArtifactStoreValidation = Validation;
 
 /**
  * Validates an artifact store by writing (then best-effort deleting) a small
@@ -193,8 +161,7 @@ export async function validateArtifactStore(
     }
     return { valid: true };
   } catch (err) {
-    const e = err as { name?: string; message?: string };
-    return { valid: false, error: friendlyS3Error(e.name, e.message) };
+    return { valid: false, error: friendlyAwsError(err, "s3") };
   } finally {
     client.destroy();
   }

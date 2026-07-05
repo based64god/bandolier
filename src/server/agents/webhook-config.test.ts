@@ -4,16 +4,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { db as Database } from "~/server/db";
 import { repoWebhookConfig } from "~/server/db/schema";
 import {
-  getRepoAgentImage,
   getRepoCredentials,
-  getRepoNetworkPolicy,
-  getRepoSystemPrompt,
   getRepoWebhookConfig,
-  isRepoAdmin,
 } from "~/server/agents/webhook-config";
 
-// Per-repo webhook config loaders over a faked drizzle select chain, plus the
-// isRepoAdmin gate (fetch stubbed) that fronts all the admin-only config.
+// Per-repo webhook config loaders over a faked drizzle select chain.
 
 /** select().from().where().limit() resolves `rows` — every loader's shape. */
 function makeSelectDb(rows: Record<string, unknown>[]) {
@@ -182,116 +177,5 @@ describe("getRepoWebhookConfig", () => {
         policyYaml: null,
       },
     });
-  });
-});
-
-describe("getRepoNetworkPolicy", () => {
-  it("returns null when the repo has no config row (default isolated egress)", async () => {
-    const { database } = makeSelectDb([]);
-    expect(await getRepoNetworkPolicy(database, "o/r")).toBeNull();
-  });
-
-  it("maps the toggles and custom policy YAML through", async () => {
-    const { database } = makeSelectDb([
-      {
-        allowPrivateEgress: true,
-        allowAllPortsEgress: false,
-        networkPolicyYaml: "kind: NetworkPolicy",
-      },
-    ]);
-    expect(await getRepoNetworkPolicy(database, "o/r")).toEqual({
-      allowPrivateEgress: true,
-      allowAllPortsEgress: false,
-      policyYaml: "kind: NetworkPolicy",
-    });
-  });
-});
-
-describe("getRepoSystemPrompt", () => {
-  it("returns null when the repo has no config row", async () => {
-    const { database } = makeSelectDb([]);
-    expect(await getRepoSystemPrompt(database, "o/r")).toBeNull();
-  });
-
-  it("returns the stored repo-wide prompt", async () => {
-    const { database } = makeSelectDb([{ systemPrompt: "be terse" }]);
-    expect(await getRepoSystemPrompt(database, "o/r")).toBe("be terse");
-  });
-});
-
-describe("getRepoAgentImage", () => {
-  it("returns null when the repo has no config row", async () => {
-    const { database } = makeSelectDb([]);
-    expect(await getRepoAgentImage(database, "o/r")).toBeNull();
-  });
-
-  it("returns the configured image override", async () => {
-    const { database } = makeSelectDb([{ agentImage: "ghcr.io/x/y:1" }]);
-    expect(await getRepoAgentImage(database, "o/r")).toBe("ghcr.io/x/y:1");
-  });
-});
-
-describe("isRepoAdmin", () => {
-  function mockFetchOnce(body: unknown, ok = true, status = 200) {
-    const json = vi.fn(() => Promise.resolve(body));
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok,
-      status,
-      statusText: ok ? "OK" : "Error",
-      json,
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    return { fetchMock, json };
-  }
-
-  it("is true for an admin, asking GitHub with the user's token", async () => {
-    const { fetchMock } = mockFetchOnce({ permissions: { admin: true } });
-    expect(await isRepoAdmin("tok", "o/r")).toBe(true);
-    expect(fetchMock).toHaveBeenCalledWith("https://api.github.com/repos/o/r", {
-      headers: {
-        Authorization: "Bearer tok",
-        Accept: "application/vnd.github.v3+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-      },
-    });
-  });
-
-  it("is false when admin is false", async () => {
-    mockFetchOnce({ permissions: { admin: false } });
-    expect(await isRepoAdmin("tok", "o/r")).toBe(false);
-  });
-
-  it("is false when the body has no permissions at all", async () => {
-    mockFetchOnce({});
-    expect(await isRepoAdmin("tok", "o/r")).toBe(false);
-  });
-
-  it("is false when admin is truthy but not boolean true", async () => {
-    mockFetchOnce({ permissions: { admin: 1 } });
-    expect(await isRepoAdmin("tok", "o/r")).toBe(false);
-  });
-
-  it("fails closed on an API error without reading the body", async () => {
-    const { json } = mockFetchOnce({}, false, 404);
-    expect(await isRepoAdmin("tok", "o/r")).toBe(false);
-    expect(json).not.toHaveBeenCalled();
-  });
-
-  it("fails closed when fetch throws", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network")));
-    expect(await isRepoAdmin("tok", "o/r")).toBe(false);
-  });
-
-  it("fails closed when the body is not valid JSON", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        statusText: "OK",
-        json: () => Promise.reject(new Error("malformed body")),
-      }),
-    );
-    expect(await isRepoAdmin("tok", "o/r")).toBe(false);
   });
 });

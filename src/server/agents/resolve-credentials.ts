@@ -253,7 +253,9 @@ export function selectRunCredentials(
       ? (resolved.codexAuthJson ?? primary.codexAuthJson)
       : null;
   const geminiApiKey =
-    provider === "gemini" ? (resolved.geminiApiKey ?? primary.geminiApiKey) : null;
+    provider === "gemini"
+      ? (resolved.geminiApiKey ?? primary.geminiApiKey)
+      : null;
 
   // The auth kind this actually landed on (the API key beats the subscription),
   // for the two-kind providers; null for Bedrock/Gemini and empty sets.

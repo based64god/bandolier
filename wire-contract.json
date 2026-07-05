@@ -1,0 +1,8 @@
+{
+  "_comment": "Single source of truth for the wire constants shared across the TypeScript server and the Go harness — values that cross the process boundary (log markers, control sentinels, effort allow-list) and so cannot share a package. The vitest suite (src/lib/wire-contract.test.ts) and the Go suite (agent-harness/cmd/harness/wire_contract_test.go) both assert their in-code constants against this file, so any drift breaks CI instead of production.",
+  "tokenMarkerPrefix": "BANDOLIER_TOKENS=",
+  "awaitInputMarker": "BANDOLIER_AWAIT_INPUT",
+  "resumeMarker": "BANDOLIER_RESUME",
+  "endSessionSentinel": "__BANDOLIER_END_SESSION__",
+  "effortLevels": ["low", "medium", "high", "xhigh", "max"]
+}

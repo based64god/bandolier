@@ -392,7 +392,8 @@ function credsFromMask(mask: number) {
 /** The provider create-job's flag cascade would route the set to (its old rule,
  * kept here as the reference the registry must agree with). */
 function provider_ForCreateJobFlags(mask: number): string | null {
-  const has = (key: string) => FIELDS.some((f, i) => f.key === key && mask & (1 << i));
+  const has = (key: string) =>
+    FIELDS.some((f, i) => f.key === key && mask & (1 << i));
   if (has("aws")) return "bedrock";
   if (has("anthropicApiKey") || has("anthropicOauthToken")) return "anthropic";
   if (has("openaiApiKey") || has("codexAuthJson")) return "openai";

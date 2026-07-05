@@ -62,6 +62,10 @@ export function getBatchV1Api(kubeconfig: string): k8s.BatchV1Api {
   return buildKubeConfig(kubeconfig).makeApiClient(k8s.BatchV1Api);
 }
 
+export function getPolicyV1Api(kubeconfig: string): k8s.PolicyV1Api {
+  return buildKubeConfig(kubeconfig).makeApiClient(k8s.PolicyV1Api);
+}
+
 export function getVersionApi(kubeconfig: string): k8s.VersionApi {
   return buildKubeConfig(kubeconfig).makeApiClient(k8s.VersionApi);
 }

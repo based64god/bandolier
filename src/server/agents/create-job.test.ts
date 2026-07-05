@@ -82,6 +82,28 @@ interface SecretCall {
   };
 }
 
+interface PdbCall {
+  namespace: string;
+  body: {
+    metadata: {
+      name: string;
+      namespace: string;
+      labels: Record<string, string>;
+      ownerReferences: {
+        apiVersion: string;
+        kind: string;
+        name: string;
+        uid: string;
+        blockOwnerDeletion: boolean;
+      }[];
+    };
+    spec: {
+      minAvailable: number;
+      selector: { matchLabels: Record<string, string> };
+    };
+  };
+}
+
 interface ServiceAccountCall {
   namespace: string;
   body: {
@@ -109,6 +131,8 @@ const createNamespacedJob =
   vi.fn<(call: JobCall) => Promise<{ metadata?: { uid?: string } }>>();
 const createNamespacedNetworkPolicy =
   vi.fn<(call: { namespace: string; body: object }) => Promise<object>>();
+const createNamespacedPodDisruptionBudget =
+  vi.fn<(call: PdbCall) => Promise<object>>();
 const replaceNamespacedNetworkPolicy =
   vi.fn<
     (call: { name: string; namespace: string; body: object }) => Promise<object>
@@ -124,11 +148,15 @@ const getNetworkingV1Api = vi.fn((_kc: string) => ({
   createNamespacedNetworkPolicy,
   replaceNamespacedNetworkPolicy,
 }));
+const getPolicyV1Api = vi.fn((_kc: string) => ({
+  createNamespacedPodDisruptionBudget,
+}));
 
 vi.mock("~/server/k8s/client", () => ({
   getCoreV1Api: (kc: string) => getCoreV1Api(kc),
   getBatchV1Api: (kc: string) => getBatchV1Api(kc),
   getNetworkingV1Api: (kc: string) => getNetworkingV1Api(kc),
+  getPolicyV1Api: (kc: string) => getPolicyV1Api(kc),
 }));
 
 interface TaskRunInsertValues {
@@ -250,6 +278,7 @@ beforeEach(() => {
   createNamespacedJob.mockResolvedValue({ metadata: { uid: "job-uid-1" } });
   createNamespacedNetworkPolicy.mockResolvedValue({});
   replaceNamespacedNetworkPolicy.mockResolvedValue({});
+  createNamespacedPodDisruptionBudget.mockResolvedValue({});
   insertValues.mockResolvedValue(undefined);
   ingestToken.mockReturnValue("tok-123");
 });
@@ -634,6 +663,41 @@ describe("createAgentJob", () => {
         createAgentJob(baseSpec({ compute: { memory: "lots" } })),
       ).rejects.toThrow(/Invalid memory quantity/);
       expect(createNamespacedJob).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("disruption budget", () => {
+    it("pins the agent pod with a job-owned PDB so voluntary evictions are refused", async () => {
+      const jobName = await createAgentJob(baseSpec());
+      expect(createNamespacedPodDisruptionBudget).toHaveBeenCalledTimes(1);
+      expect(getPolicyV1Api).toHaveBeenCalledWith("kc-yaml");
+      const pdb = createNamespacedPodDisruptionBudget.mock.calls[0]![0];
+      expect(pdb.namespace).toBe("bandolier-agents");
+      expect(pdb.body.metadata.name).toBe(`${jobName}-pdb`);
+      expect(pdb.body.metadata.ownerReferences).toEqual([
+        {
+          apiVersion: "batch/v1",
+          kind: "Job",
+          name: jobName,
+          uid: "job-uid-1",
+          blockOwnerDeletion: true,
+        },
+      ]);
+      expect(pdb.body.spec).toEqual({
+        minAvailable: 1,
+        selector: { matchLabels: { "bandolier.io/job": jobName } },
+      });
+    });
+
+    it("still deploys the run when PDB creation fails", async () => {
+      createNamespacedPodDisruptionBudget.mockRejectedValue(
+        Object.assign(new Error("forbidden"), { code: 403 }),
+      );
+      const jobName = await createAgentJob(baseSpec());
+      expect(jobName).toMatch(/^bandolier-agent-\d+$/);
+      // The creds secret and DB row are still created after the failed PDB.
+      expect(credsSecret().body.metadata.name).toBe(`${jobName}-creds`);
+      expect(insertValues).toHaveBeenCalledTimes(1);
     });
   });
 

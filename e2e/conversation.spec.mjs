@@ -51,11 +51,15 @@ await scroller.evaluate((el) => {
 });
 check("scrolls up away from the bottom", (await distanceFromBottom()) > 40);
 
-// The generic "Scroll to bottom" affordance appears once unpinned.
-check(
-  "'Scroll to bottom' button shows when scrolled up",
-  (await page.getByRole("button", { name: "Scroll to bottom" }).count()) === 1,
-);
+// The generic "Scroll to bottom" affordance appears once unpinned. It renders
+// only after React handles the scroll event, so wait for it instead of
+// counting immediately.
+const scrollToBottomShown = await page
+  .getByRole("button", { name: "Scroll to bottom" })
+  .waitFor({ state: "visible", timeout: 5000 })
+  .then(() => true)
+  .catch(() => false);
+check("'Scroll to bottom' button shows when scrolled up", scrollToBottomShown);
 
 // Simulate the awaiting-input transition (parent bumps scrollSignal): the view
 // snaps back to the bottom.

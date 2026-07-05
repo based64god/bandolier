@@ -36,10 +36,16 @@ const panel = page.getByRole("dialog");
 await panel.waitFor({ state: "visible", timeout: 5000 });
 
 // ── Body scroll is locked while the modal is open ────────────────────────────
-const overflowWhileOpen = await page.evaluate(
-  () => document.body.style.overflow,
-);
-check("body scroll locked while open", overflowWhileOpen === "hidden");
+// The lock is applied in a client effect after hydration, so the dialog can be
+// visible (SSR paint) before body.style.overflow is set — poll instead of a
+// one-shot read.
+const scrollLocked = await page
+  .waitForFunction(() => document.body.style.overflow === "hidden", null, {
+    timeout: 5000,
+  })
+  .then(() => true)
+  .catch(() => false);
+check("body scroll locked while open", scrollLocked);
 
 // ── A drag that starts inside the panel and ends on the backdrop keeps it open
 const box = await panel.boundingBox();

@@ -239,7 +239,28 @@ curl -H "Authorization: Bearer bnd_…" \
 curl -X POST -H "Authorization: Bearer bnd_…" -H "Content-Type: application/json" \
   -d '{"task":"Fix the flaky test in auth.spec.ts"}' \
   https://<your-host>/api/v1/repos/<owner>/<repo>/tasks
+
+# Read one task
+curl -H "Authorization: Bearer bnd_…" \
+  https://<your-host>/api/v1/repos/<owner>/<repo>/tasks/<id>
+
+# Rename a task
+curl -X PATCH -H "Authorization: Bearer bnd_…" -H "Content-Type: application/json" \
+  -d '{"displayName":"New name"}' \
+  https://<your-host>/api/v1/repos/<owner>/<repo>/tasks/<id>
+
+# Terminate a task
+curl -X DELETE -H "Authorization: Bearer bnd_…" \
+  https://<your-host>/api/v1/repos/<owner>/<repo>/tasks/<id>
 ```
+
+| Method   | Path                                          | Body                    | Purpose               |
+| -------- | --------------------------------------------- | ----------------------- | --------------------- |
+| `GET`    | `/api/v1/repos/{owner}/{repo}/tasks`          | —                       | List tasks for a repo |
+| `POST`   | `/api/v1/repos/{owner}/{repo}/tasks`          | launch fields (below)   | Launch a task         |
+| `GET`    | `/api/v1/repos/{owner}/{repo}/tasks/{id}`     | —                       | Read one task         |
+| `PATCH`  | `/api/v1/repos/{owner}/{repo}/tasks/{id}`     | `{ "displayName": … }`  | Rename a task         |
+| `DELETE` | `/api/v1/repos/{owner}/{repo}/tasks/{id}`     | —                       | Terminate a task      |
 
 The launch endpoint accepts everything the dashboard's deploy dialog can set,
 except interactive sessions (the REST API only starts one-shot runs). The body

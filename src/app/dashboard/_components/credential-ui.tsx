@@ -212,6 +212,102 @@ export function SecretForm({
   );
 }
 
+// The CPU / memory compute form shared by the user-scoped (SettingsModal) and
+// repo-scoped (RepoConfigModal) sections. Owns the "null = untouched" input
+// state and the dirty check both used to duplicate; the caller supplies the
+// stored `values`, an async `onSave` (typically a mutation's `mutateAsync`) and
+// its `pending`/`error`, plus the accent and heading/container copy that differ.
+export function ComputeForm({
+  accent,
+  containerClassName,
+  title,
+  titleClassName,
+  description,
+  values,
+  onSave,
+  pending,
+  error,
+}: {
+  accent: Accent;
+  containerClassName: string;
+  title: string;
+  titleClassName: string;
+  description: ReactNode;
+  values: { cpu?: string | null; memory?: string | null };
+  onSave: (compute: { cpu: string; memory: string }) => Promise<unknown>;
+  pending: boolean;
+  error?: string | null;
+}) {
+  const a = ACCENTS[accent];
+  // null = untouched; the stored value (or blank) shows until the user types.
+  const [cpu, setCpu] = useState<string | null>(null);
+  const [memory, setMemory] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  const cpuValue = cpu ?? values.cpu ?? "";
+  const memoryValue = memory ?? values.memory ?? "";
+  const dirty = cpu !== null || memory !== null;
+
+  const handleSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    setSaved(false);
+    void onSave({ cpu: cpuValue, memory: memoryValue })
+      .then(() => {
+        setCpu(null);
+        setMemory(null);
+        setSaved(true);
+      })
+      .catch(() => {
+        // error surfaced via the `error` prop
+      });
+  };
+
+  return (
+    <div className={containerClassName}>
+      <h3 className={titleClassName}>{title}</h3>
+      <p className="text-xs text-white/40">{description}</p>
+      <form onSubmit={handleSubmit} className="flex items-end gap-3">
+        <div className="space-y-1.5">
+          <label className="block text-xs font-medium text-white/60">CPU</label>
+          <input
+            type="text"
+            value={cpuValue}
+            onChange={(e) => {
+              setCpu(e.target.value);
+              setSaved(false);
+            }}
+            placeholder="2"
+            className={`w-28 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 ${a.focus} focus:outline-none`}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className="block text-xs font-medium text-white/60">
+            Memory
+          </label>
+          <input
+            type="text"
+            value={memoryValue}
+            onChange={(e) => {
+              setMemory(e.target.value);
+              setSaved(false);
+            }}
+            placeholder="2Gi"
+            className={`w-28 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 ${a.focus} focus:outline-none`}
+          />
+        </div>
+        <button
+          type="submit"
+          disabled={pending || !dirty}
+          className={`rounded-lg px-3 py-2 text-sm font-medium ${a.button} disabled:cursor-not-allowed disabled:opacity-50`}
+        >
+          {pending ? "Saving…" : "Save"}
+        </button>
+      </form>
+      <CredentialFeedback saveError={error} result={saved ? "Saved ✓" : null} />
+    </div>
+  );
+}
+
 // A labelled on/off pill switch inside a bordered card. Generalized from the
 // per-repo network-policy toggle so config toggles are a few lines of props.
 export function ToggleSection({

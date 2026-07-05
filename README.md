@@ -44,7 +44,7 @@ Browser ──▶ Next.js app ──▶ Kubernetes API ──▶ Job (harness po
 
 ## Prerequisites
 
-- **Node.js 20+** and **pnpm 10** (`corepack enable` will pick up the pinned version).
+- **Node.js 24** and **pnpm 11** (`corepack enable` picks up the pinned version).
 - **Docker** or **Podman** — for the local Postgres database (and for building the harness image).
 - **A PostgreSQL database** — the included script starts one in a container.
 - **A Kubernetes cluster** the web app can reach and create Jobs in. For local development, [kind](https://kind.sigs.k8s.io/), [k3d](https://k3d.io/), or minikube all work. The cluster must be able to pull the harness image (see [The agent harness image](#the-agent-harness-image)).
@@ -100,8 +100,13 @@ See [Configuration reference](#configuration-reference) for every variable.
 
 ```bash
 ./start-database.sh     # starts a Postgres container from DATABASE_URL
-pnpm db:push            # creates the tables (no migration files are used)
+pnpm db:push            # syncs the schema straight to your local database
 ```
+
+`db:push` is for local development only. Self-host deploys apply the checked-in
+SQL migrations under `drizzle/` instead (via the migrator image, run as a Helm
+hook). If you change `src/server/db/schema.ts`, run `pnpm db:generate` to emit a
+new migration and commit it, or self-host upgrades won't pick up your change.
 
 ### 5. Run the app
 
@@ -116,7 +121,7 @@ Open <http://localhost:3000> and sign in with GitHub.
 Open **Settings** in the dashboard and add:
 
 - **A model provider** — AWS Bedrock credentials, an API key, or a subscription login. For Claude Pro/Max, run `claude setup-token` locally and paste the `sk-ant-oat01-…` token; for ChatGPT, run `codex login` locally and paste the contents of `~/.codex/auth.json`. API keys are validated before they're saved and the model picker is populated live from your provider; subscription credentials can't be probed via the API, so they get a static list of current models and are verified on the first run.
-- **A kubeconfig** — the cluster your agents deploy into (a repo can also provide a shared one).
+- **A kubeconfig** — the cluster your agents deploy into (a repo can also provide a shared one). Bandolier runs the Kubernetes client on its server, so exec-plugin kubeconfigs (the `aws`/`gcloud` credential plugins EKS/GKE emit) and ones that reference cert/key files on your laptop won't work — the server has neither those binaries nor those files. Generate a self-contained, token-based kubeconfig from your current cluster instead: `curl -fsSL https://<your-host>/setup.sh | bash` (hosted) or `./scripts/create-bandolier-kubeconfig.sh` (local checkout), then paste the output here. Add `--scoped` (e.g. `curl -fsSL https://<your-host>/setup.sh | bash -s -- --scoped`) to bind a least-privilege ClusterRole instead of cluster-admin.
 
 You can now select a repo, deploy an agent, and watch it work.
 
@@ -136,6 +141,8 @@ docker push <your-registry>/bandolier-agent-harness:latest
 **Private registries.** If the override points at a **private `ghcr.io` package**, Bandolier pulls it automatically: at deploy time it attaches a short-lived `kubernetes.io/dockerconfigjson` image-pull Secret (owned by the Job, so it's garbage-collected with the run) to the agent pod, authenticated with the **triggering user's GitHub OAuth token**. GHCR does not accept GitHub App installation tokens, so the pull is attributed to the user who opened the issue / deployed the agent — the same identity used for clone, push, and PR authorship. This requires the user's OAuth grant to include the `read:packages` scope (Bandolier requests it at sign-in) and that user to have access to the package; the cluster otherwise needs no standing GHCR credentials. For private images on any **other** registry, configure the cluster's nodes (or the `bandolier-agent` ServiceAccount) with the appropriate pull credentials yourself; Bandolier only brokers GHCR.
 
 `agent-harness/k8s/manifest.yaml` is a standalone reference Job you can apply directly to test the image in isolation; the running app generates equivalent Jobs itself and does not use that file.
+
+**The self-host image.** A second agent image, `ghcr.io/based64god/bandolier-self-host:latest` (built by `.github/workflows/self-host-image.yml`, layered on `bandolier-agent-harness`), exists for **dogfooding**: it adds the Go and Node toolchains this repo builds with — plus Chromium and Playwright — so an agent can build, test, and run Bandolier itself rather than just drive other projects. Point a repo's agent-image override at it when the agent's task is working on Bandolier. See [`self-host/Dockerfile`](self-host/Dockerfile).
 
 ---
 
@@ -239,7 +246,28 @@ curl -H "Authorization: Bearer bnd_…" \
 curl -X POST -H "Authorization: Bearer bnd_…" -H "Content-Type: application/json" \
   -d '{"task":"Fix the flaky test in auth.spec.ts"}' \
   https://<your-host>/api/v1/repos/<owner>/<repo>/tasks
+
+# Read one task
+curl -H "Authorization: Bearer bnd_…" \
+  https://<your-host>/api/v1/repos/<owner>/<repo>/tasks/<id>
+
+# Rename a task
+curl -X PATCH -H "Authorization: Bearer bnd_…" -H "Content-Type: application/json" \
+  -d '{"displayName":"New name"}' \
+  https://<your-host>/api/v1/repos/<owner>/<repo>/tasks/<id>
+
+# Terminate a task
+curl -X DELETE -H "Authorization: Bearer bnd_…" \
+  https://<your-host>/api/v1/repos/<owner>/<repo>/tasks/<id>
 ```
+
+| Method   | Path                                          | Body                    | Purpose               |
+| -------- | --------------------------------------------- | ----------------------- | --------------------- |
+| `GET`    | `/api/v1/repos/{owner}/{repo}/tasks`          | —                       | List tasks for a repo |
+| `POST`   | `/api/v1/repos/{owner}/{repo}/tasks`          | launch fields (below)   | Launch a task         |
+| `GET`    | `/api/v1/repos/{owner}/{repo}/tasks/{id}`     | —                       | Read one task         |
+| `PATCH`  | `/api/v1/repos/{owner}/{repo}/tasks/{id}`     | `{ "displayName": … }`  | Rename a task         |
+| `DELETE` | `/api/v1/repos/{owner}/{repo}/tasks/{id}`     | —                       | Terminate a task      |
 
 The launch endpoint accepts everything the dashboard's deploy dialog can set,
 except interactive sessions (the REST API only starts one-shot runs). The body
@@ -326,6 +354,19 @@ configuration modal (Network policy egress). Both toggles are **off by default**
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `APP_PASSWORD` | When set, a shared password is required before reaching any page or API (webhooks and the REST API are exempt — they authenticate on their own). |
 
+### Web Push (optional)
+
+Push notifications alert a user when their agent finishes even with the app
+closed. Generate a keypair with `pnpm vapid:generate` and set all three
+variables; leave them unset to disable push (in-tab foreground alerts still
+work regardless). The public and private keys must be from the same pair.
+
+| Variable                       | Description                                                        |
+| ------------------------------ | ------------------------------------------------------------------ |
+| `VAPID_SUBJECT`                | A `mailto:` or `https:` URL identifying the sender to push services. |
+| `VAPID_PRIVATE_KEY`            | The private key from `pnpm vapid:generate`. Server-side only.       |
+| `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | The public key from `pnpm vapid:generate`. Exposed to the browser as the subscription's `applicationServerKey`. |
+
 ### Run artifacts (optional)
 
 Each run's full transcript can be uploaded to S3 so it survives the Job's one-week TTL. Storage is configured **per repository** in the repo-config modal (admin-only, under Shared credentials → Run artifact storage): the repo names an S3 bucket it owns (AWS or any S3-compatible endpoint such as MinIO) plus credentials scoped to it. There is deliberately no server-wide bucket — run data belongs to the repo, never the Bandolier operator — so runs for repos without a configured bucket (and runs with no repo) simply aren't persisted. The credentials stay server-side; they are never injected into agent pods.
@@ -356,6 +397,9 @@ agent-harness/
   Dockerfile                 Harness image (Go binary + Node + Claude Code CLI + git/gh)
   k8s/manifest.yaml          Standalone reference Job for testing the image
 
+self-host/
+  Dockerfile                 Dogfooding image: harness + Go/Node toolchains + Chromium/Playwright, for agents that build Bandolier itself
+
 Dockerfile                   Web-app production image (Next.js standalone + migrator stages)
 deploy/
   helm/bandolier/            Helm chart to self-host the web app on Kubernetes
@@ -371,7 +415,9 @@ deploy/
 | ----------------------------------------- | -------------------------------------------------------------------------- |
 | `pnpm dev`                                | Run the app in development (Turbopack).                                    |
 | `pnpm build` / `pnpm start`               | Production build / serve.                                                  |
-| `pnpm db:push`                            | Sync the Drizzle schema to the database (used instead of migration files). |
+| `pnpm db:push`                            | Sync the Drizzle schema straight to the database (local development).      |
+| `pnpm db:generate`                        | Emit a new SQL migration under `drizzle/` from schema changes.             |
+| `pnpm db:migrate`                         | Apply the checked-in `drizzle/` migrations (what self-host deploys run).   |
 | `pnpm db:studio`                          | Open Drizzle Studio.                                                       |
 | `pnpm typecheck`                          | `tsc --noEmit`.                                                            |
 | `pnpm lint` / `pnpm lint:fix`             | ESLint.                                                                    |
@@ -380,13 +426,16 @@ deploy/
 | `pnpm test`                               | Run the unit-test suite once (Vitest).                                     |
 | `pnpm test:watch`                         | Run Vitest in watch mode.                                                  |
 | `pnpm test:coverage`                      | Run the suite and emit a coverage report under `coverage/`.                |
+| `pnpm test:e2e`                           | Run the Playwright browser smoke tests against the `/dev/*` harness routes. |
+| `pnpm vapid:generate`                     | Generate a Web Push (VAPID) keypair for the push env vars.                 |
 
 ---
 
 ## Tests
 
-Two suites cover the project's pure logic — fast, hermetic, and free of any
-database, network, or Kubernetes access:
+Three suites cover the project. The first two exercise the pure logic — fast,
+hermetic, and free of any database, network, or Kubernetes access; the third
+drives the UI components in a real browser against inert harness routes:
 
 - **Web app (Vitest).** Unit tests live next to the code they cover as
   `*.test.ts` files under `src/`. They exercise the parsing, validation,
@@ -400,8 +449,27 @@ database, network, or Kubernetes access:
   parsing, issue-closing keyword handling, provider detection, and tool-use
   rendering. Run them with `go test ./...` from `agent-harness/`.
 
-Both suites run in CI on every push and pull request (see
+- **Browser smoke tests (Playwright).** `e2e/*.spec.mjs` drive the UI
+  components — the composer, conversation view, credential UI, effort picker,
+  modal, searchable select, status badge, and task row — in a real Chromium
+  against the `/dev/*` harness routes, which contact no real services.
+  `e2e/run.mjs` boots `next dev`, waits for the routes, then runs each spec.
+  This suite needs a browser, so install one first with
+  `pnpm exec playwright install chromium` (add `--with-deps` on Linux to also
+  fetch the system libraries), then run `pnpm test:e2e`. Set `E2E_BASE_URL` to
+  reuse an already-running server instead of having the runner boot its own.
+
+All three suites run in CI on every push and pull request (see
 `.github/workflows/ci.yml`).
+
+---
+
+## Contributing
+
+Before pushing, run the full verification loop — `pnpm check`, `pnpm test`,
+`pnpm test:e2e`, and `go test ./...` (from `agent-harness/`). See
+[CONTRIBUTING.md](CONTRIBUTING.md) for the details, plus the cross-language
+wire-contract rule and notes on `patches/` and `skills-lock.json`.
 
 ---
 

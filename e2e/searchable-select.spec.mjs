@@ -1,33 +1,11 @@
-// Browser smoke test for SearchableSelect arrow-key navigation. Playwright is
-// installed globally in this environment; resolve it locally first, else fall
-// back to the global install.
+// Browser smoke test for SearchableSelect arrow-key navigation.
 //
 // Run against a dev server serving the harness route:
 //   pnpm next dev --port 3137 &
 //   node e2e/searchable-select.spec.mjs
-import { createRequire } from "node:module";
-const require = createRequire(import.meta.url);
-let chromium;
-try {
-  ({ chromium } = require("playwright"));
-} catch {
-  ({ chromium } = require("/usr/local/lib/node_modules/playwright/index.js"));
-}
+import { BASE, check, launch, finish } from "./helpers.mjs";
 
-const BASE = process.env.SELECT_BASE_URL ?? "http://localhost:3137";
-let passed = 0;
-let failed = 0;
-function check(name, cond) {
-  if (cond) {
-    passed++;
-    console.log(`  ✓ ${name}`);
-  } else {
-    failed++;
-    console.log(`  ✗ ${name}`);
-  }
-}
-
-const browser = await chromium.launch();
+const browser = await launch();
 const page = await browser.newPage();
 const value = () => page.getByTestId("value").innerText();
 
@@ -138,6 +116,4 @@ check(
 await recentSearch.press("Enter");
 check("search + Enter picks first match 'alpha'", (await recentValue()) === "alpha");
 
-await browser.close();
-console.log(`\n${passed} passed, ${failed} failed`);
-process.exit(failed === 0 ? 0 : 1);
+await finish(browser);

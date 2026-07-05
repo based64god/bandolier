@@ -107,6 +107,11 @@ config:
   # -- The Bandolier GitHub App's public slug (links the repo-config UI to its
   # install page). Optional.
   githubAppSlug: ""
+  # -- Web Push (VAPID) public key exposed to the browser
+  # (NEXT_PUBLIC_VAPID_PUBLIC_KEY). Optional; set with secrets.vapidPrivateKey
+  # and secrets.vapidSubject to enable push. Generate a pair with
+  # `pnpm vapid:generate`.
+  vapidPublicKey: ""
 
 # Secret values. Provide them here (discouraged for real secrets — they'd sit in
 # release history), or set secrets.create=false and point secrets.existingSecret
@@ -141,6 +146,13 @@ secrets:
 
   # -- Optional shared password gate in front of the whole app (APP_PASSWORD).
   appPassword: ""
+
+  # -- Optional Web Push (VAPID) credentials for background notifications. Set
+  # all three (with config.vapidPublicKey) to enable push; generate the pair
+  # with `pnpm vapid:generate`. A mailto:/https: URL identifying the sender.
+  vapidSubject: ""
+  # -- The VAPID private key (must match config.vapidPublicKey).
+  vapidPrivateKey: ""
 
 # ── Database migrations ───────────────────────────────────────────────────────
 # Runs `drizzle-kit migrate` (the migrator stage of the app image) as a Helm

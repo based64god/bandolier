@@ -126,7 +126,6 @@ describe("getRepoWebhookConfig", () => {
         defaultWebhookEffort: "high",
         systemPrompt: "be terse",
         resumeOnCiFailure: true,
-        autoMergeBandolierPrs: true,
         allowPrivateEgress: true,
         allowAllPortsEgress: false,
         networkPolicyYaml: "kind: NetworkPolicy",
@@ -139,7 +138,6 @@ describe("getRepoWebhookConfig", () => {
       defaultWebhookEffort: "high",
       systemPrompt: "be terse",
       resumeOnCiFailure: true,
-      autoMergeBandolierPrs: true,
       networkPolicy: {
         allowPrivateEgress: true,
         allowAllPortsEgress: false,
@@ -157,7 +155,6 @@ describe("getRepoWebhookConfig", () => {
         defaultWebhookEffort: null,
         systemPrompt: null,
         resumeOnCiFailure: false,
-        autoMergeBandolierPrs: false,
         allowPrivateEgress: false,
         allowAllPortsEgress: false,
         networkPolicyYaml: null,
@@ -170,7 +167,6 @@ describe("getRepoWebhookConfig", () => {
       defaultWebhookEffort: null,
       systemPrompt: null,
       resumeOnCiFailure: false,
-      autoMergeBandolierPrs: false,
       networkPolicy: {
         allowPrivateEgress: false,
         allowAllPortsEgress: false,

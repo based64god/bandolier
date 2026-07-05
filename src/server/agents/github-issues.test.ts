@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  enablePullRequestAutoMerge,
   getGithubItemState,
   getIssue,
   getPullRequestRefs,
@@ -370,93 +369,6 @@ describe("getPullRequestRefs", () => {
     expect(await getPullRequestRefs("tok", "o/r", 7)).toBeNull();
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("down")));
     expect(await getPullRequestRefs("tok", "o/r", 7)).toBeNull();
-  });
-});
-
-describe("enablePullRequestAutoMerge", () => {
-  // Queues one JSON body per fetch call, so the lookup query and the mutation
-  // can each get their own response.
-  function mockGraphql(bodies: unknown[]) {
-    let call = 0;
-    const fetchMock = vi.fn().mockImplementation(() => {
-      const body = bodies[call++];
-      return Promise.resolve({
-        ok: true,
-        status: 200,
-        statusText: "OK",
-        json: () => Promise.resolve(body),
-      });
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    return fetchMock;
-  }
-
-  it("enables auto-merge with the first allowed merge method", async () => {
-    const fetchMock = mockGraphql([
-      {
-        data: {
-          repository: {
-            mergeCommitAllowed: false,
-            squashMergeAllowed: true,
-            rebaseMergeAllowed: true,
-            pullRequest: { id: "PR_node" },
-          },
-        },
-      },
-      { data: { enablePullRequestAutoMerge: { clientMutationId: null } } },
-    ]);
-    expect(await enablePullRequestAutoMerge("tok", "o/r", 5)).toEqual({
-      ok: true,
-    });
-    // Second call is the mutation, sending the PR node id and SQUASH (merge
-    // commits disallowed, squash is the first permitted method).
-    const [, init] = fetchMock.mock.calls[1] as [string, RequestInit];
-    const sent = JSON.parse(init.body as string) as {
-      variables: { id: string; method: string };
-    };
-    expect(sent.variables).toEqual({ id: "PR_node", method: "SQUASH" });
-  });
-
-  it("fails when the repo allows no merge method", async () => {
-    mockGraphql([
-      {
-        data: {
-          repository: {
-            mergeCommitAllowed: false,
-            squashMergeAllowed: false,
-            rebaseMergeAllowed: false,
-            pullRequest: { id: "PR_node" },
-          },
-        },
-      },
-    ]);
-    const result = await enablePullRequestAutoMerge("tok", "o/r", 5);
-    expect(result.ok).toBe(false);
-    expect(result.error).toMatch(/no merge method/i);
-  });
-
-  it("surfaces a GraphQL error from the mutation", async () => {
-    mockGraphql([
-      {
-        data: {
-          repository: {
-            mergeCommitAllowed: true,
-            squashMergeAllowed: true,
-            rebaseMergeAllowed: true,
-            pullRequest: { id: "PR_node" },
-          },
-        },
-      },
-      { data: null, errors: [{ message: "Protected branch rules not met" }] },
-    ]);
-    const result = await enablePullRequestAutoMerge("tok", "o/r", 5);
-    expect(result.ok).toBe(false);
-    expect(result.error).toBe("Protected branch rules not met");
-  });
-
-  it("fails cleanly when the PR can't be resolved", async () => {
-    mockGraphql([{ data: { repository: null } }]);
-    expect((await enablePullRequestAutoMerge("tok", "o/r", 5)).ok).toBe(false);
   });
 });
 

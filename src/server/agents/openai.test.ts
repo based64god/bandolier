@@ -109,7 +109,7 @@ describe("validateCodexAuthJson", () => {
   it("rejects invalid JSON", () => {
     const r = validateCodexAuthJson("not json");
     expect(r.valid).toBe(false);
-    expect(r.error).toMatch(/JSON/);
+    if (!r.valid) expect(r.error).toMatch(/JSON/);
   });
 
   it("rejects non-object JSON", () => {
@@ -120,13 +120,13 @@ describe("validateCodexAuthJson", () => {
     const raw = JSON.stringify({ OPENAI_API_KEY: "sk-abc", tokens: null });
     const r = validateCodexAuthJson(raw);
     expect(r.valid).toBe(false);
-    expect(r.error).toMatch(/API key/);
+    if (!r.valid) expect(r.error).toMatch(/API key/);
   });
 
   it("rejects an object without session tokens", () => {
     const r = validateCodexAuthJson("{}");
     expect(r.valid).toBe(false);
-    expect(r.error).toMatch(/codex login/);
+    if (!r.valid) expect(r.error).toMatch(/codex login/);
   });
 });
 

@@ -3,6 +3,7 @@
 import { useState, useSyncExternalStore } from "react";
 
 import { api } from "~/trpc/react";
+import { ClusterDeploySection } from "./cluster-deploy-section";
 import {
   ComputeForm,
   CredentialFeedback,
@@ -809,6 +810,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         <div className="border-t border-white/10" />
         <AwsSection />
         <KubeconfigSection />
+        <ClusterDeploySection />
         <ComputeSection />
         <ApiKeysSection />
       </div>

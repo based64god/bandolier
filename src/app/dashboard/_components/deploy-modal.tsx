@@ -89,6 +89,9 @@ export function DeployModal({
   const [contextPinned, setContextPinned] = useState(false);
   const [contextHovered, setContextHovered] = useState(false);
   const contextRef = useRef<HTMLSpanElement>(null);
+  // Tracks whether the current mouse gesture began on the backdrop, so a drag
+  // that ends outside the modal doesn't count as a backdrop click.
+  const backdropMouseDown = useRef(false);
   const showContext = contextPinned || contextHovered;
 
   const { data: providerInfo } = api.agents.providerInfo.useQuery({
@@ -236,7 +239,16 @@ export function DeployModal({
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
-      onClick={onClose}
+      // Only close when the press *starts* on the backdrop. A click whose
+      // mousedown began inside the modal (e.g. selecting text and releasing
+      // outside) shares the backdrop as its common ancestor and would
+      // otherwise close the modal.
+      onMouseDown={(e) => {
+        backdropMouseDown.current = e.target === e.currentTarget;
+      }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget && backdropMouseDown.current) onClose();
+      }}
     >
       <div
         className="flex max-h-full w-full max-w-lg flex-col overflow-hidden rounded-xl border border-white/20 bg-[var(--surface-panel)]"

@@ -662,6 +662,159 @@ func TestDiffBase(t *testing.T) {
 	}
 }
 
+// clearConfigEnv zeroes every environment variable loadConfig reads so a test's
+// t.Setenv calls define the whole input — otherwise the runner's own
+// environment (e.g. a real CLAUDE_MODEL) would leak into the result.
+func clearConfigEnv(t *testing.T) {
+	for _, k := range []string{
+		"GITHUB_ISSUE_NUMBER", "CLAUDE_TASK", "WORKING_DIR", "CLAUDE_MODEL",
+		"CLAUDE_EFFORT", "MAX_TURNS", "GITHUB_BASE_BRANCH", "BRANCH", "OUTPUT_TYPE",
+		"CLAUDE_SYSTEM_PROMPT", "REPO_SYSTEM_PROMPT", "AGENT_TITLE", "PR_WRITER_MODEL",
+		"REPO_URL", "GIT_NAME", "GIT_EMAIL", "GITHUB_REPO", "AGENT_BRANCH",
+		"INTERACTIVE", "BANDOLIER_INPUT_URL", "BANDOLIER_ACP_URL", "RESUME_BRANCH",
+		"BANDOLIER_CONTEXT_URL",
+	} {
+		t.Setenv(k, "")
+	}
+}
+
+func TestLoadConfigRequiresTaskOrIssue(t *testing.T) {
+	clearConfigEnv(t)
+	if _, err := loadConfig(); err == nil {
+		t.Fatal("loadConfig() with empty CLAUDE_TASK and GITHUB_ISSUE_NUMBER = nil error, want error")
+	}
+
+	// Issue mode: an empty task is fine as long as an issue number is present.
+	clearConfigEnv(t)
+	t.Setenv("GITHUB_ISSUE_NUMBER", "42")
+	c, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig() in issue mode = %v, want nil", err)
+	}
+	if c.task != "" {
+		t.Errorf("issue-mode task = %q, want empty", c.task)
+	}
+	if c.issueNumber != "42" {
+		t.Errorf("issueNumber = %q, want 42", c.issueNumber)
+	}
+
+	// Whitespace-only CLAUDE_TASK trims to empty, so issue mode must still carry
+	// the run rather than erroring on the blank task.
+	clearConfigEnv(t)
+	t.Setenv("GITHUB_ISSUE_NUMBER", "7")
+	t.Setenv("CLAUDE_TASK", "   \t  ")
+	c, err = loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig() whitespace task in issue mode = %v, want nil", err)
+	}
+	if c.task != "" {
+		t.Errorf("whitespace task = %q, want empty after trim", c.task)
+	}
+
+	// Whitespace-only task with no issue number still fails: the trim leaves it
+	// empty and the required-input check fires.
+	clearConfigEnv(t)
+	t.Setenv("CLAUDE_TASK", "   \n ")
+	if _, err := loadConfig(); err == nil {
+		t.Fatal("loadConfig() with whitespace-only task and no issue = nil error, want error")
+	}
+}
+
+func TestLoadConfigBaseBranchFallback(t *testing.T) {
+	tests := []struct {
+		name       string
+		githubBase string
+		branch     string
+		want       string
+	}{
+		{"github base wins", "release", "feature", "release"},
+		{"falls back to BRANCH", "", "feature", "feature"},
+		{"defaults to main", "", "", "main"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearConfigEnv(t)
+			t.Setenv("CLAUDE_TASK", "do a thing")
+			t.Setenv("GITHUB_BASE_BRANCH", tt.githubBase)
+			t.Setenv("BRANCH", tt.branch)
+			c, err := loadConfig()
+			if err != nil {
+				t.Fatalf("loadConfig() = %v, want nil", err)
+			}
+			if c.baseBranch != tt.want {
+				t.Errorf("baseBranch = %q, want %q", c.baseBranch, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadConfigDefaults(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("CLAUDE_TASK", "do a thing")
+	c, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig() = %v, want nil", err)
+	}
+	if c.workDir != "/workspace" {
+		t.Errorf("workDir = %q, want /workspace", c.workDir)
+	}
+	if c.model != "claude-sonnet-4-6" {
+		t.Errorf("model = %q, want claude-sonnet-4-6", c.model)
+	}
+	// Mirrors the server's DEFAULT_MAX_TURNS (Number.MAX_SAFE_INTEGER).
+	if c.maxTurns != "9007199254740991" {
+		t.Errorf("maxTurns = %q, want 9007199254740991", c.maxTurns)
+	}
+	if c.outputType != "pr" {
+		t.Errorf("outputType = %q, want pr", c.outputType)
+	}
+	if c.interactive {
+		t.Error("interactive = true, want false by default")
+	}
+	if c.task != "do a thing" {
+		t.Errorf("task = %q, want %q", c.task, "do a thing")
+	}
+}
+
+func TestLoadConfigInteractiveExactMatch(t *testing.T) {
+	tests := []struct {
+		value string
+		want  bool
+	}{
+		{"1", true},
+		{"0", false},
+		{"true", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.value, func(t *testing.T) {
+			clearConfigEnv(t)
+			t.Setenv("CLAUDE_TASK", "do a thing")
+			t.Setenv("INTERACTIVE", tt.value)
+			c, err := loadConfig()
+			if err != nil {
+				t.Fatalf("loadConfig() = %v, want nil", err)
+			}
+			if c.interactive != tt.want {
+				t.Errorf("interactive for INTERACTIVE=%q = %v, want %v", tt.value, c.interactive, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadConfigResumeBranchTrimmed(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("CLAUDE_TASK", "do a thing")
+	t.Setenv("RESUME_BRANCH", "  issue-7-fix-abc123\n")
+	c, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig() = %v, want nil", err)
+	}
+	if c.resumeBranch != "issue-7-fix-abc123" {
+		t.Errorf("resumeBranch = %q, want trimmed %q", c.resumeBranch, "issue-7-fix-abc123")
+	}
+}
+
 func TestWithRepoPrompt(t *testing.T) {
 	// Empty everywhere → empty.
 	if got := (config{}).withRepoPrompt(""); got != "" {

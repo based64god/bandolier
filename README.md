@@ -137,6 +137,8 @@ docker push <your-registry>/bandolier-agent-harness:latest
 
 `agent-harness/k8s/manifest.yaml` is a standalone reference Job you can apply directly to test the image in isolation; the running app generates equivalent Jobs itself and does not use that file.
 
+**The self-host image.** A second agent image, `ghcr.io/based64god/bandolier-self-host:latest` (built by `.github/workflows/self-host-image.yml`, layered on `bandolier-agent-harness`), exists for **dogfooding**: it adds the Go and Node toolchains this repo builds with — plus Chromium and Playwright — so an agent can build, test, and run Bandolier itself rather than just drive other projects. Point a repo's agent-image override at it when the agent's task is working on Bandolier. See [`self-host/Dockerfile`](self-host/Dockerfile).
+
 ---
 
 ## Self-hosting on Kubernetes
@@ -239,7 +241,28 @@ curl -H "Authorization: Bearer bnd_…" \
 curl -X POST -H "Authorization: Bearer bnd_…" -H "Content-Type: application/json" \
   -d '{"task":"Fix the flaky test in auth.spec.ts"}' \
   https://<your-host>/api/v1/repos/<owner>/<repo>/tasks
+
+# Read one task
+curl -H "Authorization: Bearer bnd_…" \
+  https://<your-host>/api/v1/repos/<owner>/<repo>/tasks/<id>
+
+# Rename a task
+curl -X PATCH -H "Authorization: Bearer bnd_…" -H "Content-Type: application/json" \
+  -d '{"displayName":"New name"}' \
+  https://<your-host>/api/v1/repos/<owner>/<repo>/tasks/<id>
+
+# Terminate a task
+curl -X DELETE -H "Authorization: Bearer bnd_…" \
+  https://<your-host>/api/v1/repos/<owner>/<repo>/tasks/<id>
 ```
+
+| Method   | Path                                          | Body                    | Purpose               |
+| -------- | --------------------------------------------- | ----------------------- | --------------------- |
+| `GET`    | `/api/v1/repos/{owner}/{repo}/tasks`          | —                       | List tasks for a repo |
+| `POST`   | `/api/v1/repos/{owner}/{repo}/tasks`          | launch fields (below)   | Launch a task         |
+| `GET`    | `/api/v1/repos/{owner}/{repo}/tasks/{id}`     | —                       | Read one task         |
+| `PATCH`  | `/api/v1/repos/{owner}/{repo}/tasks/{id}`     | `{ "displayName": … }`  | Rename a task         |
+| `DELETE` | `/api/v1/repos/{owner}/{repo}/tasks/{id}`     | —                       | Terminate a task      |
 
 The launch endpoint accepts everything the dashboard's deploy dialog can set,
 except interactive sessions (the REST API only starts one-shot runs). The body
@@ -355,6 +378,9 @@ agent-harness/
   cmd/harness/main.go        The Go binary that runs inside each agent pod
   Dockerfile                 Harness image (Go binary + Node + Claude Code CLI + git/gh)
   k8s/manifest.yaml          Standalone reference Job for testing the image
+
+self-host/
+  Dockerfile                 Dogfooding image: harness + Go/Node toolchains + Chromium/Playwright, for agents that build Bandolier itself
 
 Dockerfile                   Web-app production image (Next.js standalone + migrator stages)
 deploy/

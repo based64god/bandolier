@@ -36,6 +36,7 @@ export default defineConfig({
         "src/lib/**/*.ts",
         "src/proxy.ts",
         "src/app/api/agent-runs/route.ts",
+        "src/app/api/webhooks/github/route.ts",
         "src/server/agents/**/*.ts",
         "src/server/api/rest.ts",
         "src/server/k8s/client.ts",

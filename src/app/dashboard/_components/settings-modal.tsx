@@ -802,6 +802,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           the picker alongside Claude — you choose per deploy. Credentials are
           verified before they&apos;re saved and again before each deploy.
         </p>
+        <ClusterDeploySection />
         <AnthropicSection />
         <div className="border-t border-white/10" />
         <OpenAISection />
@@ -810,7 +811,6 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         <div className="border-t border-white/10" />
         <AwsSection />
         <KubeconfigSection />
-        <ClusterDeploySection />
         <ComputeSection />
         <ApiKeysSection />
       </div>

@@ -12,6 +12,7 @@ vi.mock("~/server/agents/digitalocean", async (importOriginal) => {
     ...actual,
     latestDoksVersion: vi.fn(),
     createDoksCluster: vi.fn(),
+    createFullAccessSpacesKey: vi.fn(),
     findDoksClusterByName: vi.fn(),
     getDoksCluster: vi.fn(),
     getDoksKubeconfig: vi.fn(),
@@ -57,6 +58,7 @@ vi.mock("~/server/agents/kubeconfig", () => ({
 import {
   DoApiError,
   createDoksCluster,
+  createFullAccessSpacesKey,
   createScopedSpacesKey,
   deleteDoksCluster,
   deleteSpacesKey,
@@ -141,9 +143,7 @@ function baseRow(overrides: Record<string, unknown> = {}) {
     bucketName: "bandolier-abc123-artifacts",
     spacesAccessKeyId: null,
     spacesSecretAccessKey: null,
-    doToken: "dop_v1_test",
-    spacesAccessId: "SPACES_ADMIN",
-    spacesSecretKey: "spaces-admin-secret",
+    kubeconfig: null,
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,
@@ -159,6 +159,7 @@ async function advance(fake: FakeDb, row: Record<string, unknown>) {
   return advanceClusterDeployment(
     fake.db,
     row as Parameters<typeof advanceClusterDeployment>[1],
+    "dop_v1_test",
   );
 }
 
@@ -169,12 +170,9 @@ beforeEach(() => {
 // ── Creation ──────────────────────────────────────────────────────────────────
 
 describe("createClusterDeployment", () => {
-  it("mints unique name-derived idempotency handles and holds the one-shot creds", async () => {
+  it("mints unique name-derived idempotency handles and stores no credentials", async () => {
     const fake = fakeDb();
     const row = await createClusterDeployment(fake.db, "user-1", {
-      doToken: "dop_v1_x",
-      spacesAccessId: "AK",
-      spacesSecretKey: "SK",
       region: "fra1",
       nodeSize: "s-2vcpu-4gb",
       minNodes: 1,
@@ -184,15 +182,13 @@ describe("createClusterDeployment", () => {
     expect(row.status).toBe("pending");
     expect(row.clusterName).toMatch(/^bandolier-[0-9a-f]{6}$/);
     expect(row.bucketName).toBe(`${row.clusterName}-artifacts`);
-    expect(row.doToken).toBe("dop_v1_x");
+    // The API token must never land on the row (or anywhere else in the DB).
+    expect(JSON.stringify(row)).not.toContain("dop_v1");
   });
 
-  it("drops the Spaces admin keys and bucket when spaces is disabled", async () => {
+  it("skips the bucket when spaces is disabled", async () => {
     const fake = fakeDb();
     const row = await createClusterDeployment(fake.db, "user-1", {
-      doToken: "dop_v1_x",
-      spacesAccessId: "AK",
-      spacesSecretKey: "SK",
       region: "nyc3",
       nodeSize: "s-4vcpu-8gb",
       minNodes: 1,
@@ -200,8 +196,6 @@ describe("createClusterDeployment", () => {
       spacesEnabled: false,
     });
     expect(row.bucketName).toBeNull();
-    expect(row.spacesAccessId).toBeNull();
-    expect(row.spacesSecretKey).toBeNull();
   });
 });
 
@@ -327,18 +321,79 @@ describe("waiting-cluster step", () => {
 // ── creating-bucket / creating-key ────────────────────────────────────────────
 
 describe("creating-bucket step", () => {
-  it("creates the bucket and advances", async () => {
+  beforeEach(() => {
+    (deleteSpacesKey as Mock).mockResolvedValue(undefined);
+  });
+
+  it("mints an ephemeral full-access key, creates the bucket, then deletes the key", async () => {
+    (findSpacesKeyByName as Mock).mockResolvedValue(null);
+    (createFullAccessSpacesKey as Mock).mockResolvedValue({
+      accessKey: "BOOT_AK",
+      secretKey: "boot-secret",
+    });
     s3Send.mockResolvedValue({});
     const fake = fakeDb();
     const row = await advance(
       fake,
       baseRow({ status: "creating-bucket", clusterId: "c-1" }),
     );
+    expect(createFullAccessSpacesKey).toHaveBeenCalledWith(
+      "dop_v1_test",
+      "bandolier-abc123-bootstrap",
+    );
     expect(s3Send).toHaveBeenCalledTimes(1);
+    // The key exists only for the duration of the request…
+    expect(deleteSpacesKey).toHaveBeenCalledWith("dop_v1_test", "BOOT_AK");
+    // …and never touches the row.
+    expect(JSON.stringify(row)).not.toContain("BOOT_AK");
+    expect(JSON.stringify(row)).not.toContain("boot-secret");
     expect(row.status).toBe("creating-key");
   });
 
+  it("sweeps a stale same-named key from a crashed request before minting", async () => {
+    (findSpacesKeyByName as Mock).mockResolvedValue({
+      name: "bandolier-abc123-bootstrap",
+      accessKey: "OLD_BOOT_AK",
+    });
+    (createFullAccessSpacesKey as Mock).mockResolvedValue({
+      accessKey: "NEW_BOOT_AK",
+      secretKey: "new-boot-secret",
+    });
+    s3Send.mockResolvedValue({});
+    const fake = fakeDb();
+    await advance(
+      fake,
+      baseRow({ status: "creating-bucket", clusterId: "c-1" }),
+    );
+    expect(deleteSpacesKey).toHaveBeenCalledWith("dop_v1_test", "OLD_BOOT_AK");
+    expect(deleteSpacesKey).toHaveBeenCalledWith("dop_v1_test", "NEW_BOOT_AK");
+  });
+
+  it("deletes the ephemeral key even when bucket creation fails", async () => {
+    (findSpacesKeyByName as Mock).mockResolvedValue(null);
+    (createFullAccessSpacesKey as Mock).mockResolvedValue({
+      accessKey: "BOOT_AK",
+      secretKey: "boot-secret",
+    });
+    s3Send.mockRejectedValue(
+      Object.assign(new Error("boom"), { name: "Boom" }),
+    );
+    const fake = fakeDb();
+    const row = await advance(
+      fake,
+      baseRow({ status: "creating-bucket", clusterId: "c-1" }),
+    );
+    expect(deleteSpacesKey).toHaveBeenCalledWith("dop_v1_test", "BOOT_AK");
+    expect(row.status).toBe("creating-bucket"); // transient error, retried
+    expect(row.error).toBe("boom");
+  });
+
   it("tolerates a bucket we already own (re-tick)", async () => {
+    (findSpacesKeyByName as Mock).mockResolvedValue(null);
+    (createFullAccessSpacesKey as Mock).mockResolvedValue({
+      accessKey: "BOOT_AK",
+      secretKey: "boot-secret",
+    });
     s3Send.mockRejectedValue(
       Object.assign(new Error("owned"), { name: "BucketAlreadyOwnedByYou" }),
     );
@@ -352,7 +407,7 @@ describe("creating-bucket step", () => {
 });
 
 describe("creating-key step", () => {
-  it("mints the scoped key and stores both halves", async () => {
+  it("mints the scoped key and stores both halves for the success screen", async () => {
     (findSpacesKeyByName as Mock).mockResolvedValue(null);
     (createScopedSpacesKey as Mock).mockResolvedValue({
       accessKey: "SCOPED_AK",
@@ -419,7 +474,7 @@ function primeBootstrapMocks(opts?: { secretReady?: boolean }) {
 }
 
 describe("bootstrapping-kubeconfig step", () => {
-  it("builds and saves the ServiceAccount kubeconfig, then wipes the admin creds", async () => {
+  it("builds the ServiceAccount kubeconfig onto the row (no auto-save)", async () => {
     primeBootstrapMocks();
     const fake = fakeDb();
     const row = await advance(
@@ -428,19 +483,11 @@ describe("bootstrapping-kubeconfig step", () => {
     );
 
     expect(row.status).toBe("done");
-    expect(row.doToken).toBeNull();
-    expect(row.spacesAccessId).toBeNull();
-    expect(row.spacesSecretKey).toBeNull();
-    // The scoped-key secret survives until dismissal — the success screen
-    // shows it for pasting into repo artifact settings.
-
-    expect(fake.kubeconfigUpserts).toHaveLength(1);
-    const saved = fake.kubeconfigUpserts[0] as {
-      userId: string;
-      kubeconfig: string;
-    };
-    expect(saved.userId).toBe("user-1");
-    const parsed = loadYaml(saved.kubeconfig) as {
+    // The kubeconfig and scoped-key secret survive until dismissal — the
+    // success screen offers copy / download / explicit insert; nothing is
+    // written into the user's settings without their confirmation.
+    expect(fake.kubeconfigUpserts).toHaveLength(0);
+    const parsed = loadYaml(row.kubeconfig!) as {
       clusters: { cluster: { server: string } }[];
       users: { user: { token: string } }[];
     };
@@ -511,17 +558,14 @@ describe("terminal deployments", () => {
       clusterId: "c-1",
       spacesAccessKeyId: "SCOPED_AK",
       spacesSecretAccessKey: "scoped-secret",
+      kubeconfig: "apiVersion: v1\nkind: Config\n",
       doToken: null,
-      spacesAccessId: null,
-      spacesSecretKey: null,
     });
     fake.seed(seeded);
-    const row = await dismissClusterDeployment(
-      fake.db,
-      seeded,
-    );
+    const row = await dismissClusterDeployment(fake.db, seeded);
     expect(row.status).toBe("dismissed");
     expect(row.spacesSecretAccessKey).toBeNull();
+    expect(row.kubeconfig).toBeNull();
     expect(row.clusterId).toBe("c-1");
     expect(row.spacesAccessKeyId).toBe("SCOPED_AK");
   });
@@ -529,6 +573,12 @@ describe("terminal deployments", () => {
   it("cancel best-effort deletes key, cluster, and bucket, then wipes creds", async () => {
     (deleteSpacesKey as Mock).mockResolvedValue(undefined);
     (deleteDoksCluster as Mock).mockResolvedValue(undefined);
+    // Bucket deletion mints an ephemeral bootstrap key for just this request.
+    (findSpacesKeyByName as Mock).mockResolvedValue(null);
+    (createFullAccessSpacesKey as Mock).mockResolvedValue({
+      accessKey: "BOOT_AK",
+      secretKey: "boot-secret",
+    });
     s3Send.mockResolvedValue({});
     const fake = fakeDb();
     const seeded = baseRow({
@@ -537,21 +587,25 @@ describe("terminal deployments", () => {
       spacesAccessKeyId: "SCOPED_AK",
     });
     fake.seed(seeded);
-    const row = await cancelClusterDeployment(
-      fake.db,
-      seeded,
-    );
+    const row = await cancelClusterDeployment(fake.db, seeded, "dop_v1_test");
     expect(deleteSpacesKey).toHaveBeenCalledWith("dop_v1_test", "SCOPED_AK");
+    expect(deleteSpacesKey).toHaveBeenCalledWith("dop_v1_test", "BOOT_AK");
     expect(deleteDoksCluster).toHaveBeenCalledWith("dop_v1_test", "c-1");
     expect(s3Send).toHaveBeenCalledTimes(1);
     expect(row.status).toBe("dismissed");
-    expect(row.doToken).toBeNull();
     expect(row.error).toBeNull();
+    // The caller-supplied token never lands on the row.
+    expect(JSON.stringify(row)).not.toContain("dop_v1_test");
   });
 
   it("cancel reports partial cleanup instead of throwing", async () => {
     (deleteSpacesKey as Mock).mockResolvedValue(undefined);
     (deleteDoksCluster as Mock).mockRejectedValue(new Error("api down"));
+    (findSpacesKeyByName as Mock).mockResolvedValue(null);
+    (createFullAccessSpacesKey as Mock).mockResolvedValue({
+      accessKey: "BOOT_AK",
+      secretKey: "boot-secret",
+    });
     s3Send.mockRejectedValue(
       Object.assign(new Error("gone"), { name: "NoSuchBucket" }),
     );
@@ -562,10 +616,7 @@ describe("terminal deployments", () => {
       spacesAccessKeyId: "SCOPED_AK",
     });
     fake.seed(seeded);
-    const row = await cancelClusterDeployment(
-      fake.db,
-      seeded,
-    );
+    const row = await cancelClusterDeployment(fake.db, seeded, "dop_v1_test");
     expect(row.status).toBe("dismissed");
     expect(row.error).toMatch(/Cleanup incomplete/);
     expect(row.error).toMatch(/api down/);

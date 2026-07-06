@@ -15,6 +15,7 @@ import {
 import { validateKubeconfig } from "~/server/agents/kubeconfig";
 import {
   createDoksCluster,
+  createFullAccessSpacesKey,
   createScopedSpacesKey,
   deleteDoksCluster,
   deleteSpacesKey,
@@ -26,7 +27,7 @@ import {
   latestDoksVersion,
 } from "~/server/agents/digitalocean";
 import { type db as Database } from "~/server/db";
-import { clusterDeployment, userKubeconfig } from "~/server/db/schema";
+import { clusterDeployment } from "~/server/db/schema";
 import { getCoreV1Api, getRbacAuthorizationV1Api } from "~/server/k8s/client";
 
 // One-click DigitalOcean deploy: the serverless-safe equivalent of
@@ -35,6 +36,11 @@ import { getCoreV1Api, getRbacAuthorizationV1Api } from "~/server/k8s/client";
 // idempotent step. Each step derives its idempotency from stable names
 // (cluster name, bucket name, key name), so a re-tick after a crash or a
 // concurrent poll adopts what already exists instead of duplicating it.
+//
+// The user's API token is NEVER persisted: the client holds it in memory and
+// sends it with every tick, so it exists server-side only for the duration of
+// a request. The temporary full-access Spaces key needed to create the bucket
+// is likewise minted, used, and deleted within a single request.
 
 // Shape and defaults live in ~/lib/cluster-deploy (shared with the UI).
 
@@ -48,9 +54,6 @@ type DeploymentRow = typeof clusterDeployment.$inferSelect;
 // ── Creation ──────────────────────────────────────────────────────────────────
 
 export interface StartClusterDeploymentInput {
-  doToken: string;
-  spacesAccessId: string;
-  spacesSecretKey: string;
   region: string;
   nodeSize: string;
   minNodes: number;
@@ -80,9 +83,6 @@ export async function createClusterDeployment(
       maxNodes: input.maxNodes,
       spacesEnabled: input.spacesEnabled,
       bucketName: input.spacesEnabled ? `${clusterName}-artifacts` : null,
-      doToken: input.doToken,
-      spacesAccessId: input.spacesEnabled ? input.spacesAccessId : null,
-      spacesSecretKey: input.spacesEnabled ? input.spacesSecretKey : null,
     })
     .returning();
   return row!;
@@ -90,13 +90,15 @@ export async function createClusterDeployment(
 
 // ── Advancing ─────────────────────────────────────────────────────────────────
 
-/** Advance the deployment one step. Safe to call repeatedly and concurrently:
- * every step is idempotent and a no-op tick (still waiting) just returns the
- * row. Transient errors are recorded on the row and retried on the next poll;
- * credential errors and dead clusters fail the deployment. */
+/** Advance the deployment one step, using the caller-supplied API token for
+ * this request only. Safe to call repeatedly and concurrently: every step is
+ * idempotent and a no-op tick (still waiting) just returns the row. Transient
+ * errors are recorded on the row and retried on the next poll; credential
+ * errors and dead clusters fail the deployment. */
 export async function advanceClusterDeployment(
   database: typeof Database,
   row: DeploymentRow,
+  doToken: string,
 ): Promise<DeploymentRow> {
   if (isTerminalStatus(row.status)) return row;
 
@@ -111,15 +113,15 @@ export async function advanceClusterDeployment(
   try {
     switch (row.status as ClusterDeployStatus) {
       case "pending":
-        return await stepEnsureCluster(database, row);
+        return await stepEnsureCluster(database, row, doToken);
       case "waiting-cluster":
-        return await stepWaitCluster(database, row);
+        return await stepWaitCluster(database, row, doToken);
       case "creating-bucket":
-        return await stepCreateBucket(database, row);
+        return await stepCreateBucket(database, row, doToken);
       case "creating-key":
-        return await stepCreateKey(database, row);
+        return await stepCreateKey(database, row, doToken);
       case "bootstrapping-kubeconfig":
-        return await stepBootstrapKubeconfig(database, row);
+        return await stepBootstrapKubeconfig(database, row, doToken);
       default:
         return row;
     }
@@ -134,8 +136,8 @@ export async function advanceClusterDeployment(
 async function stepEnsureCluster(
   database: typeof Database,
   row: DeploymentRow,
+  token: string,
 ): Promise<DeploymentRow> {
-  const token = row.doToken!;
   // Adopt a cluster from an earlier tick that created it but failed to record
   // it (names are unique per DO account), otherwise create one.
   const existing = await findDoksClusterByName(token, row.clusterName);
@@ -160,8 +162,9 @@ async function stepEnsureCluster(
 async function stepWaitCluster(
   database: typeof Database,
   row: DeploymentRow,
+  token: string,
 ): Promise<DeploymentRow> {
-  const cluster = await getDoksCluster(row.doToken!, row.clusterId!);
+  const cluster = await getDoksCluster(token, row.clusterId!);
   if (cluster.state === "running") {
     return update(database, row.id, {
       status: row.spacesEnabled
@@ -180,40 +183,77 @@ async function stepWaitCluster(
   return row; // still provisioning
 }
 
-function spacesS3Client(row: DeploymentRow): S3Client {
+function spacesS3Client(
+  region: string,
+  credentials: { accessKeyId: string; secretAccessKey: string },
+): S3Client {
   return new S3Client({
-    region: row.region,
-    endpoint: `https://${row.region}.digitaloceanspaces.com`,
+    region,
+    endpoint: `https://${region}.digitaloceanspaces.com`,
     forcePathStyle: false,
-    credentials: {
-      accessKeyId: row.spacesAccessId!,
-      secretAccessKey: row.spacesSecretKey!,
-    },
+    credentials,
   });
+}
+
+function bootstrapKeyName(row: DeploymentRow): string {
+  return `${row.clusterName}-bootstrap`;
+}
+
+/** Run `fn` with a temporary full-access Spaces key that exists only for the
+ * duration of this request: minted here, deleted in the finally. The bucket
+ * API authenticates with Spaces keys rather than the API token, so bucket
+ * create/delete needs one — but it is never asked of the user and never
+ * persisted. A stale same-named key from a crashed request is deleted first
+ * (its secret is unrecoverable anyway). */
+async function withBootstrapKey<T>(
+  token: string,
+  row: DeploymentRow,
+  fn: (credentials: {
+    accessKeyId: string;
+    secretAccessKey: string;
+  }) => Promise<T>,
+): Promise<T> {
+  const name = bootstrapKeyName(row);
+  const stale = await findSpacesKeyByName(token, name);
+  if (stale) await deleteSpacesKey(token, stale.accessKey);
+  const key = await createFullAccessSpacesKey(token, name);
+  try {
+    return await fn({
+      accessKeyId: key.accessKey,
+      secretAccessKey: key.secretKey,
+    });
+  } finally {
+    // Best-effort: a failure here leaves a stale key that the next call's
+    // delete-by-name sweep removes.
+    await deleteSpacesKey(token, key.accessKey).catch(() => undefined);
+  }
 }
 
 async function stepCreateBucket(
   database: typeof Database,
   row: DeploymentRow,
+  token: string,
 ): Promise<DeploymentRow> {
-  try {
-    await spacesS3Client(row).send(
-      new CreateBucketCommand({ Bucket: row.bucketName!, ACL: "private" }),
-    );
-  } catch (err) {
-    // Re-tick after a crash: the bucket is already ours.
-    const name = (err as { name?: string }).name;
-    if (name !== "BucketAlreadyOwnedByYou" && name !== "BucketAlreadyExists")
-      throw err;
-  }
+  await withBootstrapKey(token, row, async (credentials) => {
+    try {
+      await spacesS3Client(row.region, credentials).send(
+        new CreateBucketCommand({ Bucket: row.bucketName!, ACL: "private" }),
+      );
+    } catch (err) {
+      // Re-tick after a crash: the bucket is already ours.
+      const name = (err as { name?: string }).name;
+      if (name !== "BucketAlreadyOwnedByYou" && name !== "BucketAlreadyExists")
+        throw err;
+    }
+  });
   return update(database, row.id, { status: "creating-key", error: null });
 }
 
 async function stepCreateKey(
   database: typeof Database,
   row: DeploymentRow,
+  token: string,
 ): Promise<DeploymentRow> {
-  const token = row.doToken!;
   const keyName = `${row.clusterName}-artifacts`;
   // The API only reveals a key's secret at creation. If a previous tick
   // created the key but crashed before persisting the secret, delete and
@@ -245,8 +285,8 @@ const SA_TOKEN_SECRET = "bandolier-deployer-token";
 async function stepBootstrapKubeconfig(
   database: typeof Database,
   row: DeploymentRow,
+  token: string,
 ): Promise<DeploymentRow> {
-  const token = row.doToken!;
   const adminKubeconfig = await getDoksKubeconfig(token, row.clusterId!);
   const cluster = await getDoksCluster(token, row.clusterId!);
 
@@ -327,21 +367,13 @@ async function stepBootstrapKubeconfig(
     });
   }
 
-  await database
-    .insert(userKubeconfig)
-    .values({ userId: row.userId, kubeconfig })
-    .onConflictDoUpdate({
-      target: userKubeconfig.userId,
-      set: { kubeconfig, updatedAt: new Date() },
-    });
-
-  // Done — the one-shot admin credentials have served their purpose.
+  // Done. The kubeconfig is deliberately NOT saved to the user's settings
+  // here: the success screen offers copy / download / save-to-settings, with
+  // an explicit overwrite confirmation when a kubeconfig already exists.
   return update(database, row.id, {
     status: "done",
+    kubeconfig,
     error: null,
-    doToken: null,
-    spacesAccessId: null,
-    spacesSecretKey: null,
   });
 }
 
@@ -378,65 +410,67 @@ export function buildServiceAccountKubeconfig(opts: {
 
 // ── Cancel / dismiss ──────────────────────────────────────────────────────────
 
-/** Best-effort teardown of whatever was created, then wipe credentials and
- * dismiss. Only callable while the admin credentials are still on the row. */
+/** Best-effort teardown of whatever was created, using the caller-supplied
+ * API token for this request only, then wipe the provisioned secrets and
+ * dismiss. */
 export async function cancelClusterDeployment(
   database: typeof Database,
   row: DeploymentRow,
+  doToken: string,
 ): Promise<DeploymentRow> {
   const errors: string[] = [];
-  if (row.doToken) {
-    if (row.spacesAccessKeyId) {
-      await deleteSpacesKey(row.doToken, row.spacesAccessKeyId).catch(
-        (err: unknown) =>
-          errors.push(err instanceof Error ? err.message : "key delete failed"),
-      );
-    }
-    if (row.clusterId) {
-      await deleteDoksCluster(row.doToken, row.clusterId).catch(
-        (err: unknown) =>
-          errors.push(
-            err instanceof Error ? err.message : "cluster delete failed",
-          ),
-      );
+  const record = (fallback: string) => (err: unknown) => {
+    errors.push(err instanceof Error ? err.message : fallback);
+  };
+  if (row.spacesAccessKeyId) {
+    await deleteSpacesKey(doToken, row.spacesAccessKeyId).catch(
+      record("key delete failed"),
+    );
+  }
+  const bucketName = row.bucketName;
+  if (bucketName) {
+    // Deleting the bucket needs a Spaces key; mint an ephemeral one for just
+    // this request (deleted again by withBootstrapKey).
+    try {
+      await withBootstrapKey(doToken, row, async (credentials) => {
+        await spacesS3Client(row.region, credentials)
+          .send(new DeleteBucketCommand({ Bucket: bucketName }))
+          .catch((err: unknown) => {
+            // NoSuchBucket just means we never got that far.
+            if ((err as { name?: string }).name !== "NoSuchBucket")
+              record("bucket delete failed")(err);
+          });
+      });
+    } catch (err) {
+      record("bucket cleanup failed")(err);
     }
   }
-  if (row.spacesAccessId && row.spacesSecretKey && row.bucketName) {
-    await spacesS3Client(row)
-      .send(new DeleteBucketCommand({ Bucket: row.bucketName }))
-      .catch((err: unknown) => {
-        // NoSuchBucket just means we never got that far.
-        if ((err as { name?: string }).name !== "NoSuchBucket")
-          errors.push(
-            err instanceof Error ? err.message : "bucket delete failed",
-          );
-      });
+  if (row.clusterId) {
+    await deleteDoksCluster(doToken, row.clusterId).catch(
+      record("cluster delete failed"),
+    );
   }
   return update(database, row.id, {
     status: "dismissed",
     error: errors.length
       ? `Cleanup incomplete — check the DigitalOcean control panel: ${errors.join("; ")}`
       : null,
-    doToken: null,
-    spacesAccessId: null,
-    spacesSecretKey: null,
     spacesSecretAccessKey: null,
+    kubeconfig: null,
   });
 }
 
-/** Acknowledge a terminal deployment: wipe every remaining secret (including
- * the scoped key secret shown on the success screen). Resource ids stay for
- * the terraform adoption bundle. */
+/** Acknowledge a terminal deployment: wipe every remaining secret (the scoped
+ * key secret and the generated kubeconfig shown on the success screen).
+ * Resource ids stay for the terraform adoption bundle. */
 export async function dismissClusterDeployment(
   database: typeof Database,
   row: DeploymentRow,
 ): Promise<DeploymentRow> {
   return update(database, row.id, {
     status: "dismissed",
-    doToken: null,
-    spacesAccessId: null,
-    spacesSecretKey: null,
     spacesSecretAccessKey: null,
+    kubeconfig: null,
   });
 }
 
@@ -460,7 +494,7 @@ function fail(
   row: DeploymentRow,
   message: string,
 ): Promise<DeploymentRow> {
-  // Keep the admin credentials: the failure screen offers cleanup, which
-  // needs them. They are wiped when the user cancels or dismisses.
+  // The failure screen offers cleanup; the client re-supplies the API token
+  // for it (nothing credential-shaped lives on the row).
   return update(database, row.id, { status: "failed", error: message });
 }

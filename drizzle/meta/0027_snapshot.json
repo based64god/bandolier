@@ -1,6 +1,6 @@
 {
-  "id": "fe809bb2-c456-4156-ba0e-cb306e8e0e32",
-  "prevId": "6a07dada-9733-4f96-9999-e7deb8101c70",
+  "id": "2462f767-e620-4f60-890e-bf89e78f46ac",
+  "prevId": "fe809bb2-c456-4156-ba0e-cb306e8e0e32",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -412,6 +412,12 @@
         },
         "spaces_secret_access_key": {
           "name": "spaces_secret_access_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "kubeconfig": {
+          "name": "kubeconfig",
           "type": "text",
           "primaryKey": false,
           "notNull": false

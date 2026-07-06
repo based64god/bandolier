@@ -90,20 +90,26 @@ check("submit is disabled with no credentials", await submit.isDisabled());
 
 await page.locator("#do-token").fill("dop_v1_e2e");
 check(
-  "submit stays disabled until the Spaces admin keys are filled",
-  await submit.isDisabled(),
+  "submit enables with just the API token (no Spaces admin keys asked)",
+  await submit.isEnabled(),
 );
-await page.locator("#spaces-access-id").fill("DO_ADMIN");
-await page.locator("#spaces-secret-key").fill("admin-secret");
-check("submit enables once credentials are complete", await submit.isEnabled());
+check(
+  "the form never asks for Spaces admin keys",
+  (await page.locator("#spaces-access-id").count()) === 0,
+);
 
-// Unchecking Spaces drops the key requirement.
-await page.locator("#spaces-access-id").fill("");
-check("clearing a Spaces key disables submit again", await submit.isDisabled());
-await page.getByRole("checkbox").uncheck();
-check("disabling Spaces lifts the key requirement", await submit.isEnabled());
-await page.getByRole("checkbox").check();
-await page.locator("#spaces-access-id").fill("DO_ADMIN");
+// ── Node-size dropdown is usable (regression: invisible native options) ──────
+await page
+  .getByRole("button", { name: /s-4vcpu-8gb — 4 vCPU/ })
+  .click({ timeout: 5000 });
+const sizeOption = page.getByText("s-8vcpu-16gb — 8 vCPU / 16 GB (~$96/mo)");
+await sizeOption.waitFor({ state: "visible", timeout: 5000 });
+check("node-size dropdown opens with visible options", true);
+await sizeOption.click();
+check(
+  "picking a node size updates the trigger",
+  await page.getByRole("button", { name: /s-8vcpu-16gb/ }).isVisible(),
+);
 
 // ── Start → progress ─────────────────────────────────────────────────────────
 await submit.click();

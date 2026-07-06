@@ -10,6 +10,7 @@ import {
   isTerminalStatus,
 } from "~/lib/cluster-deploy";
 import { api, type RouterOutputs } from "~/trpc/react";
+import { SearchableSelect } from "./searchable-select";
 
 type Deployment = NonNullable<RouterOutputs["clusterDeploy"]["status"]>;
 
@@ -54,10 +55,12 @@ export function ClusterDeploySection() {
     return () => clearInterval(interval);
   }, [activeId, tickMutate]);
 
+  // Presented like the GitHub App install card in repo config: a boxed
+  // callout with a prominent CTA, sitting at the top of the settings modal.
   return (
-    <div className="space-y-3 border-t border-white/10 pt-6">
-      <h3 className="text-sm font-semibold text-sky-300">
-        One-click cluster deploy
+    <div className="space-y-3 rounded-lg border border-white/10 bg-white/[0.03] p-4">
+      <h3 className="text-xs font-semibold tracking-wider text-white/50 uppercase">
+        Deploy an agent cluster
       </h3>
 
       {!deployment && <DeployForm />}
@@ -81,8 +84,6 @@ function DeployForm() {
 
   const [doToken, setDoToken] = useState("");
   const [spacesEnabled, setSpacesEnabled] = useState(true);
-  const [spacesAccessId, setSpacesAccessId] = useState("");
-  const [spacesSecretKey, setSpacesSecretKey] = useState("");
   const [region, setRegion] = useState<string>(CLUSTER_DEPLOY_DEFAULTS.region);
   const [nodeSize, setNodeSize] = useState<string>(
     CLUSTER_DEPLOY_DEFAULTS.nodeSize,
@@ -97,25 +98,24 @@ function DeployForm() {
   const start = api.clusterDeploy.start.useMutation({
     onSuccess: (d) => {
       setDoToken("");
-      setSpacesAccessId("");
-      setSpacesSecretKey("");
       utils.clusterDeploy.status.setData(undefined, d);
     },
   });
 
   if (!expanded) {
     return (
-      <div className="space-y-2">
-        <p className="text-xs text-white/40">
+      <div className="space-y-3">
+        <p className="text-xs text-white/60">
           No cluster yet? Provision a DigitalOcean Kubernetes cluster for your
-          agents (plus an artifacts bucket) and wire its kubeconfig into your
-          settings automatically — the same shape as the repo&apos;s terraform
-          setup, adoptable with terraform later.
+          agents (plus an artifacts bucket) with one click — all you need is a
+          DigitalOcean API token. Its kubeconfig is wired into your settings
+          automatically, and the resources match the repo&apos;s terraform
+          setup, so you can adopt them with terraform later.
         </p>
         <button
           type="button"
           onClick={() => setExpanded(true)}
-          className="rounded-lg border border-sky-400/40 px-3 py-2 text-sm font-medium text-sky-300 hover:bg-sky-400/10"
+          className="inline-flex items-center gap-1.5 rounded-lg bg-sky-600 px-3 py-2 text-sm font-medium text-black hover:bg-sky-500"
         >
           Deploy a cluster…
         </button>
@@ -124,18 +124,12 @@ function DeployForm() {
   }
 
   const canSubmit =
-    doToken.trim() !== "" &&
-    (!spacesEnabled ||
-      (spacesAccessId.trim() !== "" && spacesSecretKey.trim() !== "")) &&
-    minNodes >= 1 &&
-    maxNodes >= minNodes;
+    doToken.trim() !== "" && minNodes >= 1 && maxNodes >= minNodes;
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
     start.mutate({
       doToken,
-      spacesAccessId,
-      spacesSecretKey,
       region: region as (typeof DO_REGIONS)[number],
       nodeSize,
       minNodes,
@@ -147,9 +141,10 @@ function DeployForm() {
   return (
     <form onSubmit={onSubmit} className="space-y-3">
       <p className="text-xs text-white/40">
-        Your credentials are used once to create the resources and bootstrap a
-        ServiceAccount kubeconfig, then discarded — they are never kept as
-        stored credentials. Costs are billed to your DigitalOcean account (nodes
+        Your API token is used once to create the resources and bootstrap a
+        ServiceAccount kubeconfig, then discarded — it is never kept as a stored
+        credential. A bucket-scoped storage key is created for you and shown
+        once at the end. Costs are billed to your DigitalOcean account (nodes
         from ~$24/mo each, Spaces ~$5/mo).
       </p>
       {kubeconfigStatus?.configured && (
@@ -183,70 +178,32 @@ function DeployForm() {
         Also create a Spaces bucket + scoped key for run artifacts
       </label>
 
-      {spacesEnabled && (
-        <div className="grid grid-cols-2 gap-2">
-          <div>
-            <label className={labelClass} htmlFor="spaces-access-id">
-              Spaces admin access key
-            </label>
-            <input
-              id="spaces-access-id"
-              type="password"
-              value={spacesAccessId}
-              onChange={(e) => setSpacesAccessId(e.target.value)}
-              placeholder="DO…"
-              className={inputClass}
-            />
-          </div>
-          <div>
-            <label className={labelClass} htmlFor="spaces-secret-key">
-              Spaces admin secret key
-            </label>
-            <input
-              id="spaces-secret-key"
-              type="password"
-              value={spacesSecretKey}
-              onChange={(e) => setSpacesSecretKey(e.target.value)}
-              className={inputClass}
-            />
-          </div>
-        </div>
-      )}
-
       <div className="grid grid-cols-2 gap-2">
         <div>
-          <label className={labelClass} htmlFor="deploy-region">
-            Region
-          </label>
-          <select
-            id="deploy-region"
+          <span className={labelClass}>Region</span>
+          <SearchableSelect
+            options={DO_REGIONS.map((r) => ({
+              value: r,
+              label: r,
+              searchText: r,
+            }))}
             value={region}
-            onChange={(e) => setRegion(e.target.value)}
-            className={inputClass}
-          >
-            {DO_REGIONS.map((r) => (
-              <option key={r} value={r}>
-                {r}
-              </option>
-            ))}
-          </select>
+            onChange={(v) => setRegion(v ?? CLUSTER_DEPLOY_DEFAULTS.region)}
+            placeholder="Region"
+          />
         </div>
         <div>
-          <label className={labelClass} htmlFor="deploy-node-size">
-            Node size
-          </label>
-          <select
-            id="deploy-node-size"
+          <span className={labelClass}>Node size</span>
+          <SearchableSelect
+            options={DO_NODE_SIZES.map((s) => ({
+              value: s.slug,
+              label: s.label,
+              searchText: s.slug,
+            }))}
             value={nodeSize}
-            onChange={(e) => setNodeSize(e.target.value)}
-            className={inputClass}
-          >
-            {DO_NODE_SIZES.map((s) => (
-              <option key={s.slug} value={s.slug}>
-                {s.label}
-              </option>
-            ))}
-          </select>
+            onChange={(v) => setNodeSize(v ?? CLUSTER_DEPLOY_DEFAULTS.nodeSize)}
+            placeholder="Node size"
+          />
         </div>
         <div>
           <label className={labelClass} htmlFor="deploy-min-nodes">

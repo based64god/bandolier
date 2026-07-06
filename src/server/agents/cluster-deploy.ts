@@ -15,6 +15,7 @@ import {
 import { validateKubeconfig } from "~/server/agents/kubeconfig";
 import {
   createDoksCluster,
+  createFullAccessSpacesKey,
   createScopedSpacesKey,
   deleteDoksCluster,
   deleteSpacesKey,
@@ -49,8 +50,6 @@ type DeploymentRow = typeof clusterDeployment.$inferSelect;
 
 export interface StartClusterDeploymentInput {
   doToken: string;
-  spacesAccessId: string;
-  spacesSecretKey: string;
   region: string;
   nodeSize: string;
   minNodes: number;
@@ -81,8 +80,6 @@ export async function createClusterDeployment(
       spacesEnabled: input.spacesEnabled,
       bucketName: input.spacesEnabled ? `${clusterName}-artifacts` : null,
       doToken: input.doToken,
-      spacesAccessId: input.spacesEnabled ? input.spacesAccessId : null,
-      spacesSecretKey: input.spacesEnabled ? input.spacesSecretKey : null,
     })
     .returning();
   return row!;
@@ -180,15 +177,39 @@ async function stepWaitCluster(
   return row; // still provisioning
 }
 
-function spacesS3Client(row: DeploymentRow): S3Client {
+function spacesS3Client(
+  region: string,
+  credentials: { accessKeyId: string; secretAccessKey: string },
+): S3Client {
   return new S3Client({
-    region: row.region,
-    endpoint: `https://${row.region}.digitaloceanspaces.com`,
+    region,
+    endpoint: `https://${region}.digitaloceanspaces.com`,
     forcePathStyle: false,
-    credentials: {
-      accessKeyId: row.spacesAccessId!,
-      secretAccessKey: row.spacesSecretKey!,
-    },
+    credentials,
+  });
+}
+
+function bootstrapKeyName(row: DeploymentRow): string {
+  return `${row.clusterName}-bootstrap`;
+}
+
+/** Ensure the row holds a usable temporary full-access Spaces key. The bucket
+ * API authenticates with Spaces keys, not the API token, so the app mints one
+ * itself rather than asking the user for admin keys. Secrets are only revealed
+ * at creation, so a half-recorded key from a crashed tick is re-minted. */
+async function ensureBootstrapKey(
+  database: typeof Database,
+  row: DeploymentRow,
+): Promise<DeploymentRow> {
+  if (row.bootstrapAccessKeyId && row.bootstrapSecretKey) return row;
+  const token = row.doToken!;
+  const name = bootstrapKeyName(row);
+  const existing = await findSpacesKeyByName(token, name);
+  if (existing) await deleteSpacesKey(token, existing.accessKey);
+  const key = await createFullAccessSpacesKey(token, name);
+  return update(database, row.id, {
+    bootstrapAccessKeyId: key.accessKey,
+    bootstrapSecretKey: key.secretKey,
   });
 }
 
@@ -196,8 +217,12 @@ async function stepCreateBucket(
   database: typeof Database,
   row: DeploymentRow,
 ): Promise<DeploymentRow> {
+  row = await ensureBootstrapKey(database, row);
   try {
-    await spacesS3Client(row).send(
+    await spacesS3Client(row.region, {
+      accessKeyId: row.bootstrapAccessKeyId!,
+      secretAccessKey: row.bootstrapSecretKey!,
+    }).send(
       new CreateBucketCommand({ Bucket: row.bucketName!, ACL: "private" }),
     );
   } catch (err) {
@@ -224,9 +249,15 @@ async function stepCreateKey(
     name: keyName,
     bucket: row.bucketName!,
   });
+  // The temporary full-access key has served its one purpose (creating the
+  // bucket); from here the scoped key is the only Spaces credential left.
+  if (row.bootstrapAccessKeyId)
+    await deleteSpacesKey(token, row.bootstrapAccessKeyId);
   return update(database, row.id, {
     spacesAccessKeyId: key.accessKey,
     spacesSecretAccessKey: key.secretKey,
+    bootstrapAccessKeyId: null,
+    bootstrapSecretKey: null,
     status: "bootstrapping-kubeconfig",
     error: null,
   });
@@ -335,13 +366,13 @@ async function stepBootstrapKubeconfig(
       set: { kubeconfig, updatedAt: new Date() },
     });
 
-  // Done — the one-shot admin credentials have served their purpose.
+  // Done — the one-shot credentials have served their purpose.
   return update(database, row.id, {
     status: "done",
     error: null,
     doToken: null,
-    spacesAccessId: null,
-    spacesSecretKey: null,
+    bootstrapAccessKeyId: null,
+    bootstrapSecretKey: null,
   });
 }
 
@@ -379,38 +410,48 @@ export function buildServiceAccountKubeconfig(opts: {
 // ── Cancel / dismiss ──────────────────────────────────────────────────────────
 
 /** Best-effort teardown of whatever was created, then wipe credentials and
- * dismiss. Only callable while the admin credentials are still on the row. */
+ * dismiss. Only callable while the API token is still on the row. */
 export async function cancelClusterDeployment(
   database: typeof Database,
   row: DeploymentRow,
 ): Promise<DeploymentRow> {
   const errors: string[] = [];
-  if (row.doToken) {
+  const record = (fallback: string) => (err: unknown) => {
+    errors.push(err instanceof Error ? err.message : fallback);
+  };
+  const token = row.doToken;
+  if (token) {
     if (row.spacesAccessKeyId) {
-      await deleteSpacesKey(row.doToken, row.spacesAccessKeyId).catch(
-        (err: unknown) =>
-          errors.push(err instanceof Error ? err.message : "key delete failed"),
+      await deleteSpacesKey(token, row.spacesAccessKeyId).catch(
+        record("key delete failed"),
       );
+    }
+    const bucketName = row.bucketName;
+    if (bucketName) {
+      // Deleting the bucket needs a Spaces key; reuse (or re-mint) the
+      // temporary bootstrap key, and delete it again afterwards.
+      try {
+        row = await ensureBootstrapKey(database, row);
+        await spacesS3Client(row.region, {
+          accessKeyId: row.bootstrapAccessKeyId!,
+          secretAccessKey: row.bootstrapSecretKey!,
+        })
+          .send(new DeleteBucketCommand({ Bucket: bucketName }))
+          .catch((err: unknown) => {
+            // NoSuchBucket just means we never got that far.
+            if ((err as { name?: string }).name !== "NoSuchBucket")
+              record("bucket delete failed")(err);
+          });
+        await deleteSpacesKey(token, row.bootstrapAccessKeyId!);
+      } catch (err) {
+        record("bucket cleanup failed")(err);
+      }
     }
     if (row.clusterId) {
-      await deleteDoksCluster(row.doToken, row.clusterId).catch(
-        (err: unknown) =>
-          errors.push(
-            err instanceof Error ? err.message : "cluster delete failed",
-          ),
+      await deleteDoksCluster(token, row.clusterId).catch(
+        record("cluster delete failed"),
       );
     }
-  }
-  if (row.spacesAccessId && row.spacesSecretKey && row.bucketName) {
-    await spacesS3Client(row)
-      .send(new DeleteBucketCommand({ Bucket: row.bucketName }))
-      .catch((err: unknown) => {
-        // NoSuchBucket just means we never got that far.
-        if ((err as { name?: string }).name !== "NoSuchBucket")
-          errors.push(
-            err instanceof Error ? err.message : "bucket delete failed",
-          );
-      });
   }
   return update(database, row.id, {
     status: "dismissed",
@@ -418,8 +459,8 @@ export async function cancelClusterDeployment(
       ? `Cleanup incomplete — check the DigitalOcean control panel: ${errors.join("; ")}`
       : null,
     doToken: null,
-    spacesAccessId: null,
-    spacesSecretKey: null,
+    bootstrapAccessKeyId: null,
+    bootstrapSecretKey: null,
     spacesSecretAccessKey: null,
   });
 }
@@ -434,8 +475,8 @@ export async function dismissClusterDeployment(
   return update(database, row.id, {
     status: "dismissed",
     doToken: null,
-    spacesAccessId: null,
-    spacesSecretKey: null,
+    bootstrapAccessKeyId: null,
+    bootstrapSecretKey: null,
     spacesSecretAccessKey: null,
   });
 }

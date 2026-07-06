@@ -1,5 +1,5 @@
 {
-  "id": "b91c31b2-e87e-49db-ae13-5dc4b2baa95c",
+  "id": "fe809bb2-c456-4156-ba0e-cb306e8e0e32",
   "prevId": "6a07dada-9733-4f96-9999-e7deb8101c70",
   "version": "7",
   "dialect": "postgresql",
@@ -422,14 +422,14 @@
           "primaryKey": false,
           "notNull": false
         },
-        "spaces_access_id": {
-          "name": "spaces_access_id",
+        "bootstrap_access_key_id": {
+          "name": "bootstrap_access_key_id",
           "type": "text",
           "primaryKey": false,
           "notNull": false
         },
-        "spaces_secret_key": {
-          "name": "spaces_secret_key",
+        "bootstrap_secret_key": {
+          "name": "bootstrap_secret_key",
           "type": "text",
           "primaryKey": false,
           "notNull": false

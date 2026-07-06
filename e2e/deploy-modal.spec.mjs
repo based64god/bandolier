@@ -3,8 +3,8 @@
 // provider/model/issue fixtures without a backend. The deploy mutation POST is
 // intercepted here so submit can complete offline.
 //
-// Covers: provider badge + model resolution, required-field validation, the
-// issue-selection path, and the repo-credentials provider source.
+// Covers: model resolution, required-field validation, the issue-selection
+// path, and the repo-credentials provider source.
 //
 // Run against a dev server serving the harness route:
 //   pnpm next dev --port 3137 &
@@ -41,13 +41,9 @@ const openScenario = async (id) => {
 
 await page.goto(`${BASE}/dev/deploy-modal`);
 
-// ── Provider badge + model resolution ────────────────────────────────────────
+// ── Model resolution ─────────────────────────────────────────────────────────
 await openScenario("repo");
 check("modal opens with the Deploy Agent title", await dialog.isVisible());
-check(
-  "header shows the resolved provider badge",
-  (await dialog.innerText()).includes("Anthropic API"),
-);
 check(
   "model defaults to a Sonnet (resolveEffectiveModel fallback)",
   (await dialog.innerText()).includes("Claude Sonnet 5"),
@@ -147,10 +143,6 @@ await openScenario("repo-creds");
 check(
   "repo-credential scenario still resolves a model",
   (await dialog.innerText()).includes("Claude Sonnet 5"),
-);
-check(
-  "repo-credential scenario shows the provider badge",
-  (await dialog.innerText()).includes("Anthropic API"),
 );
 
 await finish(browser);

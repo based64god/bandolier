@@ -54,7 +54,14 @@ export function Modal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+      // Keep the panel clear of the physical display edges. Under
+      // viewport-fit=cover (see layout.tsx) this fixed overlay spans edge-to-edge
+      // — past the safe-area insets padded onto <body> — so pad each side by at
+      // least 1rem but never less than that side's inset, otherwise the panel's
+      // rounded border clips under the notch / Dynamic Island / home indicator on
+      // iPhones. Devices reporting zero insets resolve to 1rem, identical to the
+      // old p-4.
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 pt-[max(1rem,env(safe-area-inset-top))] pr-[max(1rem,env(safe-area-inset-right))] pb-[max(1rem,env(safe-area-inset-bottom))] pl-[max(1rem,env(safe-area-inset-left))] backdrop-blur-sm"
       onMouseDown={(e) => {
         backdropMouseDown.current = e.target === e.currentTarget;
       }}

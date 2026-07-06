@@ -138,8 +138,10 @@ export const clusterDeployRouter = createTRPCRouter({
         throw new TRPCError({ code: "BAD_REQUEST", message: probe.error });
       }
 
+      // The token is used for the pre-flight probe above and then dropped —
+      // it is never written to the database. The client keeps it in memory
+      // and sends it with every tick/cancel.
       const row = await createClusterDeployment(ctx.db, ctx.session.user.id, {
-        doToken: input.doToken,
         region: input.region,
         nodeSize: input.nodeSize,
         minNodes: input.minNodes,
@@ -149,13 +151,27 @@ export const clusterDeployRouter = createTRPCRouter({
       return toClientDeployment(row);
     }),
 
-  // One poll = one state-machine step. Safe to call repeatedly; a terminal or
+  // Cheap probe for a re-entered token (e.g. after a page reload mid-deploy),
+  // so a typo can't hard-fail an in-flight deployment on the next tick.
+  checkToken: protectedProcedure
+    .input(z.object({ doToken: stripWhitespace.pipe(z.string().min(1)) }))
+    .mutation(({ input }) => validateDoToken(input.doToken)),
+
+  // One poll = one state-machine step, run with the token supplied by the
+  // client for this request only. Safe to call repeatedly; a terminal or
   // still-waiting deployment just returns unchanged.
   tick: protectedProcedure
-    .input(z.object({ id: z.string().min(1) }))
+    .input(
+      z.object({
+        id: z.string().min(1),
+        doToken: stripWhitespace.pipe(z.string().min(1)),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
       const row = await ownedDeployment(ctx.db, ctx.session.user.id, input.id);
-      return toClientDeployment(await advanceClusterDeployment(ctx.db, row));
+      return toClientDeployment(
+        await advanceClusterDeployment(ctx.db, row, input.doToken),
+      );
     }),
 
   // Save the generated kubeconfig into the user's settings — an explicit act,
@@ -185,7 +201,12 @@ export const clusterDeployRouter = createTRPCRouter({
   // Best-effort teardown of whatever was created so a failed or abandoned
   // deploy doesn't keep billing; wipes the one-shot credentials.
   cancel: protectedProcedure
-    .input(z.object({ id: z.string().min(1) }))
+    .input(
+      z.object({
+        id: z.string().min(1),
+        doToken: stripWhitespace.pipe(z.string().min(1)),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
       const row = await ownedDeployment(ctx.db, ctx.session.user.id, input.id);
       if (row.status === "done") {
@@ -195,7 +216,9 @@ export const clusterDeployRouter = createTRPCRouter({
             "Deployment already completed — manage the cluster from DigitalOcean or terraform.",
         });
       }
-      return toClientDeployment(await cancelClusterDeployment(ctx.db, row));
+      return toClientDeployment(
+        await cancelClusterDeployment(ctx.db, row, input.doToken),
+      );
     }),
 
   // Acknowledge a terminal deployment: hides it from status and wipes every

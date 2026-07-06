@@ -59,11 +59,21 @@ await page.route("**/api/trpc/clusterDeploy.start**", async (route) => {
 
 // Every tick reports the deployment finished — the spec's stand-in for the
 // state machine reaching "done" server-side.
-await page.route("**/api/trpc/clusterDeploy.tick**", (route) =>
-  route.fulfill({
+let tickPayload = null;
+await page.route("**/api/trpc/clusterDeploy.tick**", (route) => {
+  tickPayload = route.request().postDataJSON();
+  return route.fulfill({
     status: 200,
     headers: { "content-type": "application/jsonl" },
     body: trpcBody(doneDeployment()),
+  });
+});
+
+await page.route("**/api/trpc/clusterDeploy.checkToken**", (route) =>
+  route.fulfill({
+    status: 200,
+    headers: { "content-type": "application/jsonl" },
+    body: trpcBody({ valid: true }),
   }),
 );
 
@@ -152,8 +162,12 @@ check(
 const success = page.getByTestId("cluster-deploy-success");
 await success.waitFor({ state: "visible", timeout: 15000 });
 check("the tick poll lands on the success screen", await success.isVisible());
+check(
+  "the tick carries the client-held API token (never persisted server-side)",
+  JSON.stringify(tickPayload ?? {}).includes("dop_v1_e2e"),
+);
 
-// ── Seeded progress screen ───────────────────────────────────────────────────
+// ── Seeded progress screen: no token in memory → TokenGate ───────────────────
 await openScenario("progress");
 await progress.waitFor({ state: "visible", timeout: 8000 });
 const progressText = await progress.innerText();
@@ -162,11 +176,24 @@ check(
   progressText.includes("Waiting for the cluster") &&
     progressText.includes("Bootstrapping agent kubeconfig"),
 );
+const tokenGate = page.getByTestId("token-gate");
 check(
-  "progress offers cancel-and-cleanup",
-  await page
-    .getByRole("button", { name: "Cancel & delete created resources" })
-    .isVisible(),
+  "a deployment found without a token in memory asks for it again",
+  await tokenGate.isVisible(),
+);
+const cancelBtn = page.getByRole("button", {
+  name: "Cancel & delete created resources",
+});
+check(
+  "cancel-and-cleanup is disabled until the token is re-entered",
+  await cancelBtn.isDisabled(),
+);
+await tokenGate.locator("input").fill("dop_v1_reentered");
+await tokenGate.getByRole("button", { name: "Continue" }).click();
+await tokenGate.waitFor({ state: "hidden", timeout: 5000 });
+check(
+  "a validated re-entered token unlocks cancel-and-cleanup",
+  await cancelBtn.isEnabled(),
 );
 
 // ── Success screen: copy / download / insert, no auto-save ──────────────────
@@ -258,6 +285,15 @@ await failure.waitFor({ state: "visible", timeout: 8000 });
 check(
   "failure surfaces the deployment error",
   (await failure.innerText()).includes('Cluster entered state "errored"'),
+);
+check(
+  "cleanup is gated on re-entering the token, dismiss is not",
+  (await page
+    .getByRole("button", { name: "Delete created resources" })
+    .isDisabled()) &&
+    (await page
+      .getByRole("button", { name: "Dismiss, keep resources" })
+      .isEnabled()),
 );
 await Promise.all([
   page.waitForResponse((r) => r.url().includes("clusterDeploy.dismiss"), {

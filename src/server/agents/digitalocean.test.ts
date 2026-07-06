@@ -5,6 +5,7 @@ import {
   createDoksCluster,
   deleteDoksCluster,
   findDoksClusterByName,
+  findSpacesKeyByName,
   getDropletCapacity,
   isDoAuthError,
   isDoPermanentError,
@@ -204,7 +205,7 @@ describe("error handling", () => {
         .fn()
         .mockImplementation((url: string) =>
           Promise.resolve(
-            url.includes("/v2/kubernetes") || url.includes("/v2/spaces")
+            url.includes("/v2/kubernetes")
               ? jsonResponse({ message: "Not Found" }, 404)
               : jsonResponse({ account: {} }),
           ),
@@ -214,9 +215,32 @@ describe("error handling", () => {
     expect(result.valid).toBe(false);
     if (!result.valid) {
       expect(result.error).toContain("Kubernetes clusters");
-      expect(result.error).toContain("Spaces keys");
       expect(result.error).toContain("Full Access");
     }
+  });
+
+  it("tolerates a 404 on the Spaces key list — DO 404s an empty collection", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockImplementation((url: string) =>
+          Promise.resolve(
+            url.includes("/v2/spaces")
+              ? jsonResponse({ message: "Not Found" }, 404)
+              : jsonResponse({ account: {} }),
+          ),
+        ),
+    );
+    await expect(validateDoToken("t")).resolves.toEqual({ valid: true });
+  });
+
+  it("findSpacesKeyByName treats the empty-list 404 as no keys", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(jsonResponse({ message: "Not Found" }, 404)),
+    );
+    await expect(findSpacesKeyByName("t", "any")).resolves.toBeNull();
   });
 
   it("skips the Spaces probe when spaces is disabled", async () => {

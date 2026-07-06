@@ -404,6 +404,10 @@ function DeploySuccess({ deployment }: { deployment: Deployment }) {
         dismiss this.
       </p>
 
+      {deployment.error && (
+        <p className="text-xs text-amber-300/80">{deployment.error}</p>
+      )}
+
       <KubeconfigOutput deployment={deployment} />
 
       {deployment.spacesEnabled && (

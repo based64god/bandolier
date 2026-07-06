@@ -12,6 +12,7 @@ export type WebhookRunConfig = Pick<
   | "defaultWebhookEffort"
   | "systemPrompt"
   | "networkPolicy"
+  | "hasArtifactStore"
 > | null;
 
 // ── GitHub webhook payload types ──────────────────────────────────────────────

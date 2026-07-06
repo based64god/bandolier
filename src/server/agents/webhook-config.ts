@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
 
+import { repoArtifactStore } from "~/server/agents/artifacts";
 import { type AwsCredentials } from "~/server/agents/aws";
 import { type db } from "~/server/db";
 import { repoWebhookConfig } from "~/server/db/schema";
@@ -27,6 +28,13 @@ export interface RepoWebhookConfig {
    * produced its branch (the webhook's `workflow_run` handler). Off by default.
    */
   resumeOnCiFailure: boolean;
+  /**
+   * Whether the repo has a fully-configured artifact store (bucket + both
+   * credential halves — see `repoArtifactStore`). Resuming a run requires it:
+   * without a store no parent transcript was persisted, so a "resumed" run
+   * would start with none of the context it claims to continue.
+   */
+  hasArtifactStore: boolean;
   /** Per-repo network-policy egress toggles. See `RepoNetworkPolicy`. */
   networkPolicy: RepoNetworkPolicy;
 }
@@ -129,6 +137,7 @@ export async function getRepoWebhookConfig(
     defaultWebhookEffort: row.defaultWebhookEffort ?? null,
     systemPrompt: row.systemPrompt ?? null,
     resumeOnCiFailure: row.resumeOnCiFailure,
+    hasArtifactStore: repoArtifactStore(row) !== null,
     networkPolicy: {
       allowPrivateEgress: row.allowPrivateEgress,
       allowAllPortsEgress: row.allowAllPortsEgress,

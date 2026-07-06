@@ -9,6 +9,7 @@ interface AdoptionSource {
   nodeSize: string;
   minNodes: number;
   maxNodes: number;
+  haControlPlane: boolean;
   k8sVersion: string | null;
   clusterId: string;
   spacesEnabled: boolean;
@@ -75,6 +76,9 @@ export function buildAdoptionBundle(source: AdoptionSource): AdoptionBundle {
     `min_nodes  = ${source.minNodes}`,
     `max_nodes  = ${source.maxNodes}`,
     `agent_only = true`,
+    // Always explicit: HA can't be disabled on an existing cluster, so a
+    // tfvars that disagrees with reality would plan a change DO rejects.
+    `ha_control_plane = ${source.haControlPlane}`,
     ...(prefix
       ? [
           ``,

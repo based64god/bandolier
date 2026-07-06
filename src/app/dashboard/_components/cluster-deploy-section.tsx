@@ -144,6 +144,9 @@ function DeployForm({ onStarted }: { onStarted: (token: string) => void }) {
 
   const [doToken, setDoToken] = useState("");
   const [spacesEnabled, setSpacesEnabled] = useState(true);
+  const [haControlPlane, setHaControlPlane] = useState<boolean>(
+    CLUSTER_DEPLOY_DEFAULTS.haControlPlane,
+  );
   const [region, setRegion] = useState<string>(CLUSTER_DEPLOY_DEFAULTS.region);
   const [nodeSize, setNodeSize] = useState<string>(
     CLUSTER_DEPLOY_DEFAULTS.nodeSize,
@@ -197,6 +200,7 @@ function DeployForm({ onStarted }: { onStarted: (token: string) => void }) {
       nodeSize,
       minNodes,
       maxNodes,
+      haControlPlane,
       spacesEnabled,
     });
   };
@@ -232,6 +236,16 @@ function DeployForm({ onStarted }: { onStarted: (token: string) => void }) {
           onChange={(e) => setSpacesEnabled(e.target.checked)}
         />
         Also create a Spaces bucket + scoped key for run artifacts
+      </label>
+
+      <label className="flex items-center gap-2 text-xs text-white/70">
+        <input
+          type="checkbox"
+          checked={haControlPlane}
+          onChange={(e) => setHaControlPlane(e.target.checked)}
+        />
+        Highly-available control plane (~$40/mo extra; can&apos;t be disabled
+        later)
       </label>
 
       <div className="grid grid-cols-2 gap-2">

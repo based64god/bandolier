@@ -123,6 +123,7 @@ export interface CreateDoksClusterOptions {
   nodeSize: string;
   minNodes: number;
   maxNodes: number;
+  haControlPlane: boolean;
 }
 
 /** Create the agent cluster; mirrors cluster.tf (auto/surge upgrade, one
@@ -139,6 +140,7 @@ export async function createDoksCluster(
       version: opts.version,
       auto_upgrade: true,
       surge_upgrade: true,
+      ha: opts.haControlPlane,
       node_pools: [
         {
           name: "default",

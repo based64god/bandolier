@@ -137,6 +137,7 @@ function baseRow(overrides: Record<string, unknown> = {}) {
     nodeSize: "s-4vcpu-8gb",
     minNodes: 1,
     maxNodes: 4,
+    haControlPlane: false,
     spacesEnabled: true,
     clusterId: null,
     k8sVersion: null,
@@ -177,6 +178,7 @@ describe("createClusterDeployment", () => {
       nodeSize: "s-2vcpu-4gb",
       minNodes: 1,
       maxNodes: 2,
+      haControlPlane: false,
       spacesEnabled: true,
     });
     expect(row.status).toBe("pending");
@@ -193,6 +195,7 @@ describe("createClusterDeployment", () => {
       nodeSize: "s-4vcpu-8gb",
       minNodes: 1,
       maxNodes: 4,
+      haControlPlane: false,
       spacesEnabled: false,
     });
     expect(row.bucketName).toBeNull();

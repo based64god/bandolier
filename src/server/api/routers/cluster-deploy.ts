@@ -121,6 +121,9 @@ export const clusterDeployRouter = createTRPCRouter({
             .min(1)
             .max(100)
             .default(CLUSTER_DEPLOY_DEFAULTS.maxNodes),
+          haControlPlane: z
+            .boolean()
+            .default(CLUSTER_DEPLOY_DEFAULTS.haControlPlane),
           spacesEnabled: z.boolean().default(true),
         })
         .refine((input) => input.maxNodes >= input.minNodes, {
@@ -163,6 +166,7 @@ export const clusterDeployRouter = createTRPCRouter({
         nodeSize: input.nodeSize,
         minNodes: input.minNodes,
         maxNodes: input.maxNodes,
+        haControlPlane: input.haControlPlane,
         spacesEnabled: input.spacesEnabled,
       });
       return toClientDeployment(row);

@@ -81,6 +81,7 @@ function repoConfig(
     defaultWebhookEffort: null,
     systemPrompt: null,
     resumeOnCiFailure: false,
+    hasArtifactStore: false,
     networkPolicy: noPolicy,
     ...overrides,
   };

@@ -98,12 +98,17 @@ const dbSelect = vi.fn((_cols: unknown) => {
     then: (
       resolve: (rows: unknown[]) => unknown,
       reject: (e: unknown) => unknown,
-    ) => Promise.resolve().then(() => routeQuery(where)).then(resolve, reject),
+    ) =>
+      Promise.resolve()
+        .then(() => routeQuery(where))
+        .then(resolve, reject),
   };
   return builder;
 });
 
-vi.mock("~/server/db", () => ({ db: { select: (cols: unknown) => dbSelect(cols) } }));
+vi.mock("~/server/db", () => ({
+  db: { select: (cols: unknown) => dbSelect(cols) },
+}));
 
 // ── Other boundaries ──────────────────────────────────────────────────────────
 
@@ -162,9 +167,8 @@ vi.mock("~/lib/issue-prompt", () => ({
 
 vi.mock("~/env", () => ({ env: { BETTER_AUTH_URL: "http://test.local" } }));
 
-const { handleCiFailure, countCiResumesInLineage } = await import(
-  "./ci-failure"
-);
+const { handleCiFailure, countCiResumesInLineage } =
+  await import("./ci-failure");
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -203,6 +207,7 @@ const CONFIG: WebhookRunConfig = {
     allowAllPortsEgress: false,
     policyYaml: null,
   },
+  hasArtifactStore: true,
 };
 
 const OPEN_SAME_REPO_REFS = {
@@ -288,25 +293,35 @@ describe("countCiResumesInLineage", () => {
 
 describe("handleCiFailure conclusion filter", () => {
   it("returns early for a non-failure conclusion without touching the database", async () => {
-    await handleCiFailure(
-      payload({ conclusion: "success" }),
-      CONFIG,
-    );
+    await handleCiFailure(payload({ conclusion: "success" }), CONFIG);
     expect(dbSelect).not.toHaveBeenCalled();
     expect(createAgentJob).not.toHaveBeenCalled();
   });
 
   it("skips when the failing pipeline has no associated pull request", async () => {
-    await handleCiFailure(
-      payload({ pull_requests: [] }),
-      CONFIG,
-    );
+    await handleCiFailure(payload({ pull_requests: [] }), CONFIG);
     expect(dbSelect).not.toHaveBeenCalled();
     expect(createAgentJob).not.toHaveBeenCalled();
   });
 });
 
 // ── handleCiFailure: parent / de-dupe / cap guards ──────────────────────────────
+
+describe("handleCiFailure artifact-store gate", () => {
+  it("skips before any DB read when the repo has no artifact store", async () => {
+    primeHappyPath();
+    await handleCiFailure(payload(), { ...CONFIG, hasArtifactStore: false });
+    expect(dbSelect).not.toHaveBeenCalled();
+    expect(createAgentJob).not.toHaveBeenCalled();
+  });
+
+  it("skips when the repo has no config row at all", async () => {
+    primeHappyPath();
+    await handleCiFailure(payload(), null);
+    expect(dbSelect).not.toHaveBeenCalled();
+    expect(createAgentJob).not.toHaveBeenCalled();
+  });
+});
 
 describe("handleCiFailure resume guards", () => {
   it("skips when no prior Bandolier run produced the PR", async () => {

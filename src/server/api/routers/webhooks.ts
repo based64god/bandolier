@@ -8,7 +8,10 @@ import {
   summarizeGeminiCredentials,
   validateGeminiCredentials,
 } from "~/server/agents/gemini";
-import { validateArtifactStore } from "~/server/agents/artifacts";
+import {
+  repoArtifactStore,
+  validateArtifactStore,
+} from "~/server/agents/artifacts";
 import { getUserGithubToken } from "~/server/agents/github-token";
 import { validateOpenaiKey } from "~/server/agents/openai";
 import { validateKubeconfig } from "~/server/agents/kubeconfig";
@@ -211,6 +214,13 @@ export const webhooksRouter = createTRPCRouter({
           allowPrivateEgress: repoWebhookConfig.allowPrivateEgress,
           allowAllPortsEgress: repoWebhookConfig.allowAllPortsEgress,
           networkPolicyYaml: repoWebhookConfig.networkPolicyYaml,
+          // Artifact-store columns, selected only to compute hasArtifactStore
+          // below — the secrets themselves are never returned.
+          artifactsS3Bucket: repoWebhookConfig.artifactsS3Bucket,
+          artifactsS3Region: repoWebhookConfig.artifactsS3Region,
+          artifactsS3Endpoint: repoWebhookConfig.artifactsS3Endpoint,
+          artifactsAccessKeyId: repoWebhookConfig.artifactsAccessKeyId,
+          artifactsSecretAccessKey: repoWebhookConfig.artifactsSecretAccessKey,
         })
         .from(repoWebhookConfig)
         .where(eq(repoWebhookConfig.repoFullName, input.repoFullName))
@@ -233,6 +243,11 @@ export const webhooksRouter = createTRPCRouter({
         // Whether a failing CI pipeline auto-resumes the run that produced the
         // PR (off unless a row turns it on).
         resumeOnCiFailure: row?.resumeOnCiFailure ?? false,
+        // Whether the repo has a usable artifact store. Resume features (by
+        // comment or by CI failure) require it — resumed runs are seeded with
+        // the parent's persisted transcript — so the UI gates their controls
+        // on this.
+        hasArtifactStore: row ? repoArtifactStore(row) !== null : false,
         // Network-policy egress toggles (both off unless a row turns them on).
         allowPrivateEgress,
         allowAllPortsEgress,
@@ -400,6 +415,31 @@ export const webhooksRouter = createTRPCRouter({
     )
     .mutation(async ({ ctx, input }) => {
       await requireRepoAdmin(ctx, input.repoFullName);
+      // Enabling requires the repo's artifact store: a resumed run is seeded
+      // with its parent's persisted transcript, and transcripts are only
+      // persisted when the store (bucket + keys) is configured. Disabling is
+      // always allowed, so a repo that later removes its store isn't stuck.
+      if (input.enabled) {
+        const [row] = await ctx.db
+          .select({
+            artifactsS3Bucket: repoWebhookConfig.artifactsS3Bucket,
+            artifactsS3Region: repoWebhookConfig.artifactsS3Region,
+            artifactsS3Endpoint: repoWebhookConfig.artifactsS3Endpoint,
+            artifactsAccessKeyId: repoWebhookConfig.artifactsAccessKeyId,
+            artifactsSecretAccessKey:
+              repoWebhookConfig.artifactsSecretAccessKey,
+          })
+          .from(repoWebhookConfig)
+          .where(eq(repoWebhookConfig.repoFullName, input.repoFullName))
+          .limit(1);
+        if (!row || repoArtifactStore(row) === null) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message:
+              "Auto-resume needs the repo's artifact store (S3 bucket + keys) — resumed runs are seeded with the parent run's stored transcript. Configure artifact storage first.",
+          });
+        }
+      }
       await upsertRepoConfig(ctx.db, input.repoFullName, ctx.session.user.id, {
         resumeOnCiFailure: input.enabled,
       });

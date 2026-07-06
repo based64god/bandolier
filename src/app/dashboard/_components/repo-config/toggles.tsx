@@ -17,6 +17,12 @@ export function RepoResumeSection({ repoFullName }: { repoFullName: string }) {
   });
 
   const enabled = config?.resumeOnCiFailure ?? false;
+  // Resumes are seeded with the parent run's persisted transcript, so the
+  // feature needs the repo's artifact store; the server rejects enabling
+  // without one. Only block turning it ON — a repo whose store was removed
+  // after enabling must still be able to switch it off.
+  const hasArtifactStore = config?.hasArtifactStore ?? false;
+  const blockedOnArtifacts = !hasArtifactStore && !enabled;
 
   return (
     <div className="space-y-3 border-t border-white/10 pt-5">
@@ -42,11 +48,18 @@ export function RepoResumeSection({ repoFullName }: { repoFullName: string }) {
             label="Auto-resume on failing CI"
             description="Runs as the task's owner, on their model and cluster credentials."
             enabled={enabled}
-            disabled={setResume.isPending}
+            disabled={setResume.isPending || blockedOnArtifacts}
             onChange={(v) => setResume.mutate({ repoFullName, enabled: v })}
             accent="purple"
             switchAriaLabel="Resume tasks on CI failure"
           />
+          {blockedOnArtifacts && (
+            <p className="text-xs text-white/40">
+              Requires artifact storage: resumed runs are seeded with the parent
+              run&apos;s stored transcript. Configure the repo&apos;s artifact
+              store (S3 bucket + keys) below first.
+            </p>
+          )}
           {setResume.error && (
             <p className="text-xs text-red-400">{setResume.error.message}</p>
           )}

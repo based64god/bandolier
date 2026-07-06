@@ -139,7 +139,9 @@ export const clusterDeployRouter = createTRPCRouter({
         });
       }
 
-      const probe = await validateDoToken(input.doToken);
+      const probe = await validateDoToken(input.doToken, {
+        spaces: input.spacesEnabled,
+      });
       if (!probe.valid) {
         throw new TRPCError({ code: "BAD_REQUEST", message: probe.error });
       }
@@ -172,11 +174,17 @@ export const clusterDeployRouter = createTRPCRouter({
       return toClientDeployment(row);
     }),
 
-  // Cheap probe for a re-entered token (e.g. after a page reload mid-deploy),
-  // so a typo can't hard-fail an in-flight deployment on the next tick.
+  // Probe for a re-entered token (e.g. after a page reload mid-deploy), so a
+  // typo or an under-scoped token can't hard-fail an in-flight deployment on
+  // the next tick. Scope checks mirror what the user's deployment needs.
   checkToken: protectedProcedure
     .input(z.object({ doToken: stripWhitespace.pipe(z.string().min(1)) }))
-    .mutation(({ input }) => validateDoToken(input.doToken)),
+    .mutation(async ({ ctx, input }) => {
+      const latest = await latestDeployment(ctx.db, ctx.session.user.id);
+      return validateDoToken(input.doToken, {
+        spaces: latest?.spacesEnabled ?? true,
+      });
+    }),
 
   // One poll = one state-machine step, run with the token supplied by the
   // client for this request only. Safe to call repeatedly; a terminal or

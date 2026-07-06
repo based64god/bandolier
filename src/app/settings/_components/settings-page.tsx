@@ -126,8 +126,12 @@ export function SettingsPage() {
         {/* Group tabs — a horizontal row below md:, a sidebar from md: up.
             The sidebar sticks below the sticky header while the panel
             scrolls; self-start keeps it its natural height (a flex child
-            stretched to the column's full height has no room to stick). */}
-        <nav className="flex gap-1 overflow-x-auto md:sticky md:top-20 md:w-52 md:shrink-0 md:flex-col md:gap-4 md:self-start">
+            stretched to the column's full height has no room to stick).
+            The sticky offset must equal the nav's natural resting position —
+            the 59px header (py-3 + the 34px back-link + border-b) plus this
+            wrapper's md:py-8 — or the sidebar visibly slides that difference
+            before pinning. */}
+        <nav className="flex gap-1 overflow-x-auto md:sticky md:top-[91px] md:w-52 md:shrink-0 md:flex-col md:gap-4 md:self-start">
           {NAV.map((group) => (
             <div key={group.id} className="md:space-y-1">
               <a

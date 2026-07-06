@@ -25,7 +25,6 @@ import {
 import { OverviewPanel } from "./overview-panel";
 import { recordRecentRepo } from "./recent-repos";
 import { RepoConfigModal } from "./repo-config";
-import { SettingsModal } from "./settings-modal";
 import { TaskTable, TaskTableSkeleton } from "./task-table";
 
 export function AgentDashboard({
@@ -38,7 +37,6 @@ export function AgentDashboard({
   const router = useRouter();
   const [logPod, setLogPod] = useState<string | null>(null);
   const [showDeploy, setShowDeploy] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
   const [showRepoConfig, setShowRepoConfig] = useState(false);
 
   // The selected repo lives in the URL (repoSlug) so it survives refreshes.
@@ -242,7 +240,7 @@ export function AgentDashboard({
         onRepoChange={handleRepoChange}
         onToggleNotify={() => void toggleNotify()}
         onDeploy={() => setShowDeploy(true)}
-        onShowSettings={() => setShowSettings(true)}
+        onShowSettings={() => router.push("/settings")}
         onShowRepoConfig={() => setShowRepoConfig(true)}
         onSignOut={handleSignOut}
       />
@@ -272,7 +270,7 @@ export function AgentDashboard({
               </p>
             </div>
             <button
-              onClick={() => setShowSettings(true)}
+              onClick={() => router.push("/settings#kubeconfig")}
               className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-black hover:bg-sky-500"
             >
               Configure kubeconfig
@@ -415,7 +413,6 @@ export function AgentDashboard({
           defaultBranch={selectedRepo.defaultBranch}
         />
       )}
-      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
       {showRepoConfig && selectedRepo?.isAdmin && (
         <RepoConfigModal
           repoFullName={selectedRepo.fullName}

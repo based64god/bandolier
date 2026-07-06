@@ -413,13 +413,7 @@ func renderFrameToTranscript(raw []byte) {
 		for _, c := range tu.Content {
 			b.WriteString(c.Content.Text)
 		}
-		if t := strings.TrimSpace(b.String()); t != "" {
-			lines := strings.Split(t, "\n")
-			log.Printf("[harness]   ← %s", lines[0])
-			for _, l := range lines[1:] {
-				log.Printf("[harness]     %s", l)
-			}
-		}
+		logToolResult(b.String())
 	default:
 		var u struct {
 			SessionUpdate string `json:"sessionUpdate"`

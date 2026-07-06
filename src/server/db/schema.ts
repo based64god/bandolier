@@ -458,6 +458,10 @@ export const clusterDeployment = pgTable(
     // success screen and nulled on dismissal.
     spacesAccessKeyId: text("spaces_access_key_id"),
     spacesSecretAccessKey: text("spaces_secret_access_key"),
+    // The generated ServiceAccount kubeconfig. NOT auto-saved: the success
+    // screen offers copy / download / save-to-settings (with an overwrite
+    // confirmation), and dismissal wipes it like the key secret.
+    kubeconfig: text("kubeconfig"),
     // One-shot credentials (see above): the user's API token, and the
     // app-minted temporary full-access key used only to create the bucket.
     doToken: text("do_token"),

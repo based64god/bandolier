@@ -31,9 +31,17 @@ const deployment = (overrides = {}) => ({
   spacesEndpoint: "https://nyc3.digitaloceanspaces.com",
   spacesAccessKeyId: "DO_SCOPED_KEY",
   spacesSecretAccessKey: null,
+  kubeconfig: null,
   createdAt: new Date().toISOString(),
   ...overrides,
 });
+
+const doneDeployment = () =>
+  deployment({
+    status: "done",
+    spacesSecretAccessKey: "scoped-secret",
+    kubeconfig: "apiVersion: v1\nkind: Config\n",
+  });
 
 // jsonl-framed single-procedure success body (what httpBatchStreamLink expects).
 const trpcBody = (data) =>
@@ -55,11 +63,29 @@ await page.route("**/api/trpc/clusterDeploy.tick**", (route) =>
   route.fulfill({
     status: 200,
     headers: { "content-type": "application/jsonl" },
-    body: trpcBody(
-      deployment({ status: "done", spacesSecretAccessKey: "scoped-secret" }),
-    ),
+    body: trpcBody(doneDeployment()),
   }),
 );
+
+let kubeconfigSaves = 0;
+await page.route("**/api/trpc/clusterDeploy.saveKubeconfig**", (route) => {
+  kubeconfigSaves++;
+  return route.fulfill({
+    status: 200,
+    headers: { "content-type": "application/jsonl" },
+    body: trpcBody({ success: true }),
+  });
+});
+
+let artifactInserts = 0;
+await page.route("**/api/trpc/webhooks.setArtifacts**", (route) => {
+  artifactInserts++;
+  return route.fulfill({
+    status: 200,
+    headers: { "content-type": "application/jsonl" },
+    body: trpcBody({ success: true }),
+  });
+});
 
 let dismissed = false;
 await page.route("**/api/trpc/clusterDeploy.dismiss**", (route) => {
@@ -127,16 +153,6 @@ const success = page.getByTestId("cluster-deploy-success");
 await success.waitFor({ state: "visible", timeout: 15000 });
 check("the tick poll lands on the success screen", await success.isVisible());
 
-// ── Overwrite warning ────────────────────────────────────────────────────────
-await openScenario("form-overwrite");
-await page
-  .getByRole("button", { name: "Deploy a cluster…" })
-  .click({ timeout: 8000 });
-await page
-  .getByText("You already have a kubeconfig configured", { exact: false })
-  .waitFor({ state: "visible", timeout: 5000 });
-check("existing kubeconfig shows the overwrite warning", true);
-
 // ── Seeded progress screen ───────────────────────────────────────────────────
 await openScenario("progress");
 await progress.waitFor({ state: "visible", timeout: 8000 });
@@ -153,18 +169,28 @@ check(
     .isVisible(),
 );
 
-// ── Success screen contents ──────────────────────────────────────────────────
+// ── Success screen: copy / download / insert, no auto-save ──────────────────
 await openScenario("done");
 await success.waitFor({ state: "visible", timeout: 8000 });
 const successText = await success.innerText();
 check(
-  "success confirms the saved kubeconfig",
-  successText.includes("kubeconfig has been saved"),
-);
-check(
   "success shows the artifact-storage outputs incl. the one-time secret",
   successText.includes("https://nyc3.digitaloceanspaces.com") &&
     successText.includes("scoped-secret-key"),
+);
+check(
+  "kubeconfig offers copy, download, and save-to-settings",
+  (await page.getByRole("button", { name: "Copy kubeconfig" }).isVisible()) &&
+    (await page
+      .getByRole("button", { name: "⬇ kubeconfig.yaml" })
+      .isVisible()) &&
+    (await page.getByRole("button", { name: "Save to settings" }).isVisible()),
+);
+check(
+  "spaces credentials offer a download",
+  await page
+    .getByRole("button", { name: "⬇ spaces-credentials.txt" })
+    .isVisible(),
 );
 check(
   "success offers the terraform adoption bundle",
@@ -173,6 +199,57 @@ check(
       .getByRole("button", { name: "⬇ terraform.tfvars" })
       .isVisible()),
 );
+
+// No existing kubeconfig → saving needs no confirmation.
+await page.getByRole("button", { name: "Save to settings" }).click();
+await page
+  .getByRole("button", { name: "Saved ✓" })
+  .waitFor({ state: "visible", timeout: 5000 });
+check("save-to-settings fires without confirmation", kubeconfigSaves === 1);
+
+// No existing repo artifact storage → insert needs no confirmation.
+await page.getByRole("button", { name: "Choose a repo…" }).click();
+await page.getByText("acme/widgets").click();
+await page.getByRole("button", { name: "Insert", exact: true }).click();
+await page
+  .getByRole("button", { name: "Inserted ✓" })
+  .waitFor({ state: "visible", timeout: 5000 });
+check("insert-into-repo fires without confirmation", artifactInserts === 1);
+
+// ── Existing credentials require confirmation ────────────────────────────────
+await openScenario("done-existing");
+await success.waitFor({ state: "visible", timeout: 8000 });
+
+await page.getByRole("button", { name: "Save to settings" }).click();
+const kubeConfirm = page.getByTestId("kubeconfig-overwrite-confirm");
+await kubeConfirm.waitFor({ state: "visible", timeout: 5000 });
+check(
+  "an existing kubeconfig prompts a warning instead of saving",
+  kubeconfigSaves === 1,
+);
+await kubeConfirm.getByRole("button", { name: "Replace existing" }).click();
+await page
+  .getByRole("button", { name: "Saved ✓" })
+  .waitFor({ state: "visible", timeout: 5000 });
+check("confirming the warning performs the save", kubeconfigSaves === 2);
+
+await page.getByRole("button", { name: "Choose a repo…" }).click();
+await page.getByText("acme/widgets").click();
+await page.getByRole("button", { name: "Insert", exact: true }).click();
+const artifactsConfirm = page.getByTestId("artifacts-overwrite-confirm");
+await artifactsConfirm.waitFor({ state: "visible", timeout: 5000 });
+check(
+  "an existing repo artifact store prompts a warning (names the old bucket)",
+  (await artifactsConfirm.innerText()).includes("old-artifacts-bucket") &&
+    artifactInserts === 1,
+);
+await artifactsConfirm
+  .getByRole("button", { name: "Replace existing" })
+  .click();
+await page
+  .getByRole("button", { name: "Inserted ✓" })
+  .waitFor({ state: "visible", timeout: 5000 });
+check("confirming the warning performs the insert", artifactInserts === 2);
 
 // ── Failure screen ───────────────────────────────────────────────────────────
 await openScenario("failed");

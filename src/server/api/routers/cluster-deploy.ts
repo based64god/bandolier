@@ -16,7 +16,7 @@ import {
 import { validateDoToken } from "~/server/agents/digitalocean";
 import { stripWhitespace } from "~/server/api/credentials";
 import { type db } from "~/server/db";
-import { clusterDeployment } from "~/server/db/schema";
+import { clusterDeployment, userKubeconfig } from "~/server/db/schema";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
 import { buildAdoptionBundle } from "~/server/agents/terraform-adoption";
 
@@ -49,6 +49,9 @@ function toClientDeployment(row: DeploymentRow) {
     spacesAccessKeyId: row.spacesAccessKeyId,
     spacesSecretAccessKey:
       row.status === "done" ? row.spacesSecretAccessKey : null,
+    // The generated ServiceAccount kubeconfig, offered on the success screen
+    // for copy / download / explicit save; wiped on dismissal.
+    kubeconfig: row.status === "done" ? row.kubeconfig : null,
     createdAt: row.createdAt,
   };
 }
@@ -153,6 +156,30 @@ export const clusterDeployRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       const row = await ownedDeployment(ctx.db, ctx.session.user.id, input.id);
       return toClientDeployment(await advanceClusterDeployment(ctx.db, row));
+    }),
+
+  // Save the generated kubeconfig into the user's settings — an explicit act,
+  // never automatic. The client warns and asks for confirmation first when a
+  // kubeconfig is already configured; this endpoint just performs the upsert.
+  saveKubeconfig: protectedProcedure
+    .input(z.object({ id: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      const row = await ownedDeployment(ctx.db, ctx.session.user.id, input.id);
+      const kubeconfig = row.status === "done" ? row.kubeconfig : null;
+      if (!kubeconfig) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "No kubeconfig to save on this deployment.",
+        });
+      }
+      await ctx.db
+        .insert(userKubeconfig)
+        .values({ userId: ctx.session.user.id, kubeconfig })
+        .onConflictDoUpdate({
+          target: userKubeconfig.userId,
+          set: { kubeconfig, updatedAt: new Date() },
+        });
+      return { success: true };
     }),
 
   // Best-effort teardown of whatever was created so a failed or abandoned

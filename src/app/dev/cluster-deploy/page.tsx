@@ -16,7 +16,7 @@ import { api, type RouterOutputs } from "~/trpc/react";
  * with fixtures before mounting; the mutations the section makes on its own
  * (start / tick / cancel / dismiss) are left for a spec to intercept.
  */
-type Scenario = "form" | "form-overwrite" | "progress" | "done" | "failed";
+type Scenario = "form" | "progress" | "done" | "done-existing" | "failed";
 
 type Deployment = NonNullable<RouterOutputs["clusterDeploy"]["status"]>;
 
@@ -35,24 +35,64 @@ const BASE_DEPLOYMENT: Deployment = {
   spacesEndpoint: "https://nyc3.digitaloceanspaces.com",
   spacesAccessKeyId: "DO_SCOPED_KEY",
   spacesSecretAccessKey: null,
+  kubeconfig: null,
   createdAt: new Date(),
+};
+
+const DONE_DEPLOYMENT: Deployment = {
+  ...BASE_DEPLOYMENT,
+  status: "done",
+  spacesSecretAccessKey: "scoped-secret-key",
+  kubeconfig:
+    "apiVersion: v1\nkind: Config\nclusters:\n  - name: bandolier-abc123\n",
 };
 
 const DEPLOYMENTS: Record<Scenario, Deployment | null> = {
   form: null,
-  "form-overwrite": null,
   progress: BASE_DEPLOYMENT,
-  done: {
-    ...BASE_DEPLOYMENT,
-    status: "done",
-    spacesSecretAccessKey: "scoped-secret-key",
-  },
+  done: DONE_DEPLOYMENT,
+  "done-existing": DONE_DEPLOYMENT,
   failed: {
     ...BASE_DEPLOYMENT,
     status: "failed",
     error: 'Cluster entered state "errored" while provisioning.',
   },
 };
+
+const REPO = "acme/widgets";
+
+const REPOS: RouterOutputs["repos"]["list"] = [
+  {
+    fullName: REPO,
+    description: null,
+    private: false,
+    cloneUrl: "https://github.com/acme/widgets.git",
+    defaultBranch: "main",
+    namespace: "acme-widgets",
+    isAdmin: true,
+  },
+];
+
+const NO_CREDENTIAL = { configured: false as const };
+const REPO_CREDENTIALS = (
+  artifactsConfigured: boolean,
+): RouterOutputs["webhooks"]["getCredentials"] => ({
+  hasKubeconfig: false,
+  anthropic: NO_CREDENTIAL,
+  openai: NO_CREDENTIAL,
+  gemini: NO_CREDENTIAL,
+  aws: NO_CREDENTIAL,
+  preferRepoCredentials: false,
+  artifacts: artifactsConfigured
+    ? {
+        configured: true as const,
+        bucket: "old-artifacts-bucket",
+        region: "us-east-1",
+        endpoint: null,
+        accessKeyIdMasked: "AKIA…123",
+      }
+    : { configured: false as const },
+});
 
 const BUNDLE: RouterOutputs["clusterDeploy"]["adoptionBundle"] = {
   clusterName: "bandolier-abc123",
@@ -71,8 +111,13 @@ export default function ClusterDeployHarness() {
     utils.clusterDeploy.adoptionBundle.setData(undefined, BUNDLE);
     utils.account.kubeconfigStatus.setData(undefined, {
       managedByRepo: false,
-      configured: id === "form-overwrite",
+      configured: id === "done-existing",
     });
+    utils.repos.list.setData(undefined, REPOS);
+    utils.webhooks.getCredentials.setData(
+      { repoFullName: REPO },
+      REPO_CREDENTIALS(id === "done-existing"),
+    );
     setScenario(id);
   };
 
@@ -83,9 +128,9 @@ export default function ClusterDeployHarness() {
 
   const scenarios: Scenario[] = [
     "form",
-    "form-overwrite",
     "progress",
     "done",
+    "done-existing",
     "failed",
   ];
 

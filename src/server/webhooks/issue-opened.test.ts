@@ -11,8 +11,7 @@ import type { IssuePayload, WebhookRunConfig } from "~/server/webhooks/types";
 // driven purely by return values, with dispatch vs. hold observed at the mocked
 // createAgentJob / storePendingRun boundary.
 
-const resolveWebhookRun =
-  vi.fn<() => Promise<ResolvedWebhookRun | null>>();
+const resolveWebhookRun = vi.fn<() => Promise<ResolvedWebhookRun | null>>();
 vi.mock("~/server/webhooks/resolve-run", () => ({
   resolveWebhookRun: () => resolveWebhookRun(),
 }));
@@ -57,9 +56,8 @@ vi.mock("~/server/webhooks/bot-ack", () => ({
 
 vi.mock("~/server/db", () => ({ db: {} }));
 
-const { handleIssueOpened, handleIssueEdited } = await import(
-  "~/server/webhooks/issue-opened"
-);
+const { handleIssueOpened, handleIssueEdited } =
+  await import("~/server/webhooks/issue-opened");
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -95,6 +93,9 @@ function config(prefix: string | null): WebhookRunConfig {
       allowAllPortsEgress: false,
       policyYaml: null,
     },
+    // Opened issues spawn fresh runs, which don't need a persisted transcript
+    // — false here pins that no artifact-store gate applies to them.
+    hasArtifactStore: false,
   };
 }
 

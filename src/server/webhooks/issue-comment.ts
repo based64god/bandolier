@@ -31,7 +31,8 @@ function prNumberFromUrl(url: string | null): number | null {
  * (fetched by the harness via BANDOLIER_CONTEXT_URL) and, when the parent's PR
  * is still open, working directly on its branch so follow-up commits land on
  * the same PR. Comments with no prior run are ignored — resuming is the only
- * thing a comment triggers.
+ * thing a comment triggers — and repos without an artifact store are skipped
+ * entirely, since no parent transcript was persisted to resume from.
  */
 export async function handleIssueComment(
   payload: IssueCommentPayload,
@@ -59,6 +60,18 @@ export async function handleIssueComment(
       ...logCtx,
       prefix,
     });
+    return;
+  }
+
+  // Artifact-store gate: resuming seeds the new run with the parent's
+  // persisted transcript, and transcripts are only persisted when the repo has
+  // configured its artifact store (bucket + keys). Without one the "resumed"
+  // run would carry none of the parent's context, so don't spawn it at all.
+  if (!config?.hasArtifactStore) {
+    console.log(
+      "[bandolier:webhook] comment skipped — no artifact store configured",
+      logCtx,
+    );
     return;
   }
 

@@ -129,6 +129,9 @@ describe("getRepoWebhookConfig", () => {
         allowPrivateEgress: true,
         allowAllPortsEgress: false,
         networkPolicyYaml: "kind: NetworkPolicy",
+        artifactsS3Bucket: "bkt",
+        artifactsAccessKeyId: "AKIAART",
+        artifactsSecretAccessKey: "art-secret",
       },
     ]);
     expect(await getRepoWebhookConfig(database, "o/r")).toEqual({
@@ -138,6 +141,7 @@ describe("getRepoWebhookConfig", () => {
       defaultWebhookEffort: "high",
       systemPrompt: "be terse",
       resumeOnCiFailure: true,
+      hasArtifactStore: true,
       networkPolicy: {
         allowPrivateEgress: true,
         allowAllPortsEgress: false,
@@ -167,6 +171,7 @@ describe("getRepoWebhookConfig", () => {
       defaultWebhookEffort: null,
       systemPrompt: null,
       resumeOnCiFailure: false,
+      hasArtifactStore: false,
       networkPolicy: {
         allowPrivateEgress: false,
         allowAllPortsEgress: false,

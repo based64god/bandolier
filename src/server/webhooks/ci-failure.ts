@@ -84,6 +84,18 @@ export async function handleCiFailure(
   // not "CI failed"). The caller already filters action === "completed".
   if (wr.conclusion !== "failure") return;
 
+  // Artifact-store gate: like a comment resume, a CI resume seeds the new run
+  // with the parent's persisted transcript, which only exists when the repo
+  // has an artifact store. Enabling `resumeOnCiFailure` requires one, but a
+  // store removed after enabling would otherwise resume with no context.
+  if (!config?.hasArtifactStore) {
+    console.log(
+      "[bandolier:webhook] ci failure skipped — no artifact store configured",
+      { repo: repository.full_name, workflow: wr.name },
+    );
+    return;
+  }
+
   const headSha = wr.head_sha;
   const prs = wr.pull_requests ?? [];
   if (prs.length === 0) {

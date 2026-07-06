@@ -31,11 +31,7 @@ vi.mock("~/server/webhooks/resolve-run", () => ({
 
 const getPullRequestRefs =
   vi.fn<
-    (
-      token: string,
-      repo: string,
-      pr: number,
-    ) => Promise<PullRequestRefs | null>
+    (token: string, repo: string, pr: number) => Promise<PullRequestRefs | null>
   >();
 vi.mock("~/server/agents/github-issues", () => ({
   getPullRequestRefs: (token: string, repo: string, pr: number) =>
@@ -50,9 +46,7 @@ vi.mock("~/server/agents/github-app", () => ({
 }));
 
 const postBotAck =
-  vi.fn<
-    (repo: string, num: number, body: string) => Promise<string | null>
-  >();
+  vi.fn<(repo: string, num: number, body: string) => Promise<string | null>>();
 vi.mock("~/server/webhooks/bot-ack", () => ({
   postBotAck: (repo: string, num: number, body: string) =>
     postBotAck(repo, num, body),
@@ -75,9 +69,7 @@ vi.mock("~/server/db", () => ({
 const mockEnv = { BETTER_AUTH_URL: "http://test.local" };
 vi.mock("~/env", () => ({ env: mockEnv }));
 
-const { handleIssueComment } = await import(
-  "~/server/webhooks/issue-comment"
-);
+const { handleIssueComment } = await import("~/server/webhooks/issue-comment");
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -128,6 +120,9 @@ const CONFIG: WebhookRunConfig = {
     allowAllPortsEgress: false,
     policyYaml: null,
   },
+  // Resumes require a persisted parent transcript, so the happy-path fixture
+  // has an artifact store; the gate tests flip this off.
+  hasArtifactStore: true,
 };
 
 const RESOLVED = {
@@ -225,6 +220,28 @@ describe("trigger-prefix gate", () => {
     await handleIssueComment(issuePayload({ body: "no prefix here" }), CONFIG);
 
     expect(createAgentJob).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ── Artifact-store gate ──────────────────────────────────────────────────────
+
+describe("artifact-store gate", () => {
+  it("skips before any DB read when the repo has no artifact store", async () => {
+    await handleIssueComment(issuePayload(), {
+      ...CONFIG,
+      hasArtifactStore: false,
+    });
+
+    expect(dbSelect).not.toHaveBeenCalled();
+    expect(resolveWebhookRun).not.toHaveBeenCalled();
+    expect(createAgentJob).not.toHaveBeenCalled();
+  });
+
+  it("skips when the repo has no config row at all", async () => {
+    await handleIssueComment(issuePayload(), null);
+
+    expect(dbSelect).not.toHaveBeenCalled();
+    expect(createAgentJob).not.toHaveBeenCalled();
   });
 });
 
@@ -364,9 +381,7 @@ describe("issue / PR spec fields", () => {
 
     const spec = jobSpec();
     expect(spec.issueNumber).toBe("7");
-    expect(spec.issueUrl).toBe(
-      "https://github.com/acme/widgets/issues/7",
-    );
+    expect(spec.issueUrl).toBe("https://github.com/acme/widgets/issues/7");
   });
 
   it("leaves issueNumber and issueUrl undefined for a PR comment", async () => {

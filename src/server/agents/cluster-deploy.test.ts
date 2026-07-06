@@ -311,6 +311,20 @@ describe("waiting-cluster step", () => {
     expect(row.status).toBe("bootstrapping-kubeconfig");
   });
 
+  it("explains a 404 as a token-scope problem instead of a bare Not Found", async () => {
+    (getDoksCluster as Mock).mockRejectedValue(
+      new DoApiError(404, "Not Found"),
+    );
+    const fake = fakeDb();
+    const row = await advance(
+      fake,
+      baseRow({ status: "waiting-cluster", clusterId: "c-1" }),
+    );
+    expect(row.status).toBe("failed");
+    expect(row.error).toMatch(/token likely/);
+    expect(row.error).toMatch(/Full Access/);
+  });
+
   it("fails when the cluster errors out", async () => {
     (getDoksCluster as Mock).mockResolvedValue({ state: "errored" });
     const fake = fakeDb();

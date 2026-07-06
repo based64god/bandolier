@@ -195,4 +195,37 @@ describe("error handling", () => {
     );
     await expect(validateDoToken("t")).resolves.toEqual({ valid: true });
   });
+
+  it("names the read scopes a custom-scoped token is missing", async () => {
+    // DO answers 404 (not 403) for resources a scoped token can't read.
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockImplementation((url: string) =>
+          Promise.resolve(
+            url.includes("/v2/kubernetes") || url.includes("/v2/spaces")
+              ? jsonResponse({ message: "Not Found" }, 404)
+              : jsonResponse({ account: {} }),
+          ),
+        ),
+    );
+    const result = await validateDoToken("scoped");
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.error).toContain("Kubernetes clusters");
+      expect(result.error).toContain("Spaces keys");
+      expect(result.error).toContain("Full Access");
+    }
+  });
+
+  it("skips the Spaces probe when spaces is disabled", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ account: {} }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(validateDoToken("t", { spaces: false })).resolves.toEqual({
+      valid: true,
+    });
+    const urls = fetchMock.mock.calls.map((c) => c[0] as string);
+    expect(urls.some((u) => u.includes("/v2/spaces/keys"))).toBe(false);
+  });
 });

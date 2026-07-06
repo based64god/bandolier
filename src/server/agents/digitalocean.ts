@@ -320,17 +320,63 @@ export async function getDropletCapacity(
 /** Cheap token probe for pre-flight validation (GET /v2/account). */
 export async function validateDoToken(
   token: string,
+  opts?: { spaces?: boolean },
 ): Promise<{ valid: true } | { valid: false; error: string }> {
-  try {
-    await doFetch(token, "/v2/account");
-    return { valid: true };
-  } catch (err) {
-    if (isDoAuthError(err))
-      return { valid: false, error: "DigitalOcean API token is invalid." };
+  // Probe every read surface the deploy flow depends on, not just the token's
+  // validity: DigitalOcean's custom-scoped tokens answer 404 (not 403) for
+  // resources they can't read, so a token missing kubernetes/spaces read
+  // scopes would create a cluster and then be unable to see it — a failure
+  // mode far better caught here, at submit time.
+  const probes: { label: string; path: string }[] = [
+    { label: "account", path: "/v2/account" },
+    {
+      label: "Kubernetes clusters",
+      path: "/v2/kubernetes/clusters?per_page=1",
+    },
+    { label: "droplets", path: "/v2/droplets?per_page=1" },
+    ...(opts?.spaces === false
+      ? []
+      : [{ label: "Spaces keys", path: "/v2/spaces/keys?per_page=1" }]),
+  ];
+  const results = await Promise.all(
+    probes.map(async (probe) => {
+      try {
+        await doFetch(token, probe.path);
+        return null;
+      } catch (err) {
+        return { probe, err };
+      }
+    }),
+  );
+  const failures = results.filter(Boolean) as {
+    probe: { label: string };
+    err: unknown;
+  }[];
+  if (!failures.length) return { valid: true };
+
+  if (failures.some(({ err }) => isDoAuthError(err)))
+    return { valid: false, error: "DigitalOcean API token is invalid." };
+  const missing = failures
+    .filter(({ err }) => isDoPermanentError(err))
+    .map(({ probe }) => probe.label);
+  if (missing.length) {
+    // A Spaces 404 has two causes: a token without the scope, or a team that
+    // has never activated Spaces (DO enables it with the first bucket).
+    const spacesHint = missing.includes("Spaces keys")
+      ? " If the token already has full access, Spaces may not be activated on this team yet — create a bucket once in the DigitalOcean control panel, or deploy without the artifacts bucket."
+      : "";
     return {
       valid: false,
       error:
-        err instanceof Error ? err.message : "Could not reach DigitalOcean.",
+        `This token can't read: ${missing.join(", ")}. ` +
+        "Custom-scoped tokens hide resources they can't access — create the token with Full Access." +
+        spacesHint,
     };
   }
+  const first = failures[0]!.err;
+  return {
+    valid: false,
+    error:
+      first instanceof Error ? first.message : "Could not reach DigitalOcean.",
+  };
 }

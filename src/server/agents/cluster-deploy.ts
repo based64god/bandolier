@@ -14,6 +14,7 @@ import {
 } from "~/lib/cluster-deploy";
 import { validateKubeconfig } from "~/server/agents/kubeconfig";
 import {
+  DoApiError,
   createDoksCluster,
   createFullAccessSpacesKey,
   createScopedSpacesKey,
@@ -128,7 +129,15 @@ export async function advanceClusterDeployment(
         return row;
     }
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Deployment failed.";
+    let message = err instanceof Error ? err.message : "Deployment failed.";
+    // DO's scoped tokens answer 404 for resources they can't read, so a bare
+    // "Not Found" mid-deploy almost always means the token, not the resource.
+    if (err instanceof DoApiError && err.status === 404) {
+      message =
+        `DigitalOcean answered "Not Found" (${message}) — the token likely ` +
+        "can't read this resource. Custom-scoped tokens hide resources they " +
+        "can't access; clean up with a Full Access token and redeploy.";
+    }
     // Bad token or a 4xx the API will reject identically every time (e.g.
     // "droplet limit exceeded"): retrying is noise, fail so the user can fix
     // the input and redeploy.

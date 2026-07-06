@@ -216,7 +216,8 @@ function DeployForm({ onStarted }: { onStarted: (token: string) => void }) {
       </p>
       <div>
         <label className={labelClass} htmlFor="do-token">
-          DigitalOcean API token (write scope)
+          DigitalOcean API token (Full Access — custom-scoped tokens hide
+          resources they can&apos;t read)
         </label>
         <input
           id="do-token"

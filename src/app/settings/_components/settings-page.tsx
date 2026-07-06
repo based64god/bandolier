@@ -123,8 +123,11 @@ export function SettingsPage() {
       </header>
 
       <div className="mx-auto flex max-w-5xl flex-col gap-6 px-4 py-6 sm:px-6 md:flex-row md:gap-10 md:py-8">
-        {/* Group tabs — a horizontal row below md:, a sidebar from md: up. */}
-        <nav className="flex gap-1 overflow-x-auto md:w-52 md:shrink-0 md:flex-col md:gap-4">
+        {/* Group tabs — a horizontal row below md:, a sidebar from md: up.
+            The sidebar sticks below the sticky header while the panel
+            scrolls; self-start keeps it its natural height (a flex child
+            stretched to the column's full height has no room to stick). */}
+        <nav className="flex gap-1 overflow-x-auto md:sticky md:top-20 md:w-52 md:shrink-0 md:flex-col md:gap-4 md:self-start">
           {NAV.map((group) => (
             <div key={group.id} className="md:space-y-1">
               <a

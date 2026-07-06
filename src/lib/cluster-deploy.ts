@@ -51,17 +51,19 @@ export function isTerminalStatus(status: string): boolean {
   return status === "done" || status === "failed" || status === "dismissed";
 }
 
-/** Progress display: the in-flight statuses in order, with user-facing labels. */
+/** Progress display: the in-flight statuses in order, with user-facing labels.
+ * The kubeconfig comes before the (optional) artifacts storage so a Spaces
+ * hiccup can never cost the user an already-built cluster. */
 export const CLUSTER_DEPLOY_STEPS: {
   status: ClusterDeployStatus;
   label: string;
 }[] = [
   { status: "pending", label: "Creating Kubernetes cluster" },
   { status: "waiting-cluster", label: "Waiting for the cluster (~5–10 min)" },
-  { status: "creating-bucket", label: "Creating artifacts bucket" },
-  { status: "creating-key", label: "Minting bucket-scoped access key" },
   {
     status: "bootstrapping-kubeconfig",
     label: "Bootstrapping agent kubeconfig",
   },
+  { status: "creating-bucket", label: "Creating artifacts bucket" },
+  { status: "creating-key", label: "Minting bucket-scoped access key" },
 ];

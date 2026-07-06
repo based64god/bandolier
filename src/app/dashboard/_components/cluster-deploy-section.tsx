@@ -65,7 +65,7 @@ export function ClusterDeploySection() {
     deployment !== null;
 
   // Presented like the GitHub App install card in repo config: a boxed
-  // callout with a prominent CTA, sitting at the top of the settings modal.
+  // callout with a prominent CTA on the settings page's infrastructure panel.
   return (
     <div className="space-y-3 rounded-lg border border-white/10 bg-white/[0.03] p-4">
       <h3 className="text-xs font-semibold tracking-wider text-white/50 uppercase">

@@ -85,11 +85,123 @@ function RepoSelector({
   );
 }
 
+// Shared look for the entries in both dropdown menus (hamburger and avatar).
+const menuItemClass =
+  "block w-full rounded-lg px-2 py-2 text-left text-sm text-white/70 hover:bg-white/10 hover:text-white";
+
+// Avatar-anchored dropdown holding the header's secondary account actions
+// (notification toggle, settings, sign out). Rendered from `xl:` up; below
+// that the same actions live in the hamburger menu instead. A purple dot on
+// the avatar keeps the notification state readable at a glance now that the
+// bell no longer sits in the bar.
+function UserMenu({
+  user,
+  notify,
+  onToggleNotify,
+  onShowSettings,
+  onSignOut,
+}: {
+  user: { name: string; image?: string | null };
+  notify: boolean;
+  onToggleNotify: () => void;
+  onShowSettings: () => void;
+  onSignOut: () => void | Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+
+  const closeAnd = (action: () => void | Promise<void>) => () => {
+    setOpen(false);
+    void action();
+  };
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        aria-label="Account menu"
+        aria-expanded={open}
+        aria-haspopup="menu"
+        className="flex items-center gap-2 rounded-lg p-1.5 hover:bg-white/10"
+      >
+        <span className="relative">
+          {user.image ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={user.image}
+              alt={user.name}
+              className="h-7 w-7 rounded-full"
+            />
+          ) : (
+            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white/10 text-sm text-white/70">
+              {user.name.charAt(0).toUpperCase()}
+            </span>
+          )}
+          {notify && (
+            <span
+              title="Completion alerts on"
+              className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-purple-400"
+            />
+          )}
+        </span>
+        <span className="text-sm text-white/60">{user.name}</span>
+        <svg
+          viewBox="0 0 16 16"
+          fill="currentColor"
+          className="h-3.5 w-3.5 text-white/40"
+        >
+          <path
+            fillRule="evenodd"
+            d="M4.22 6.22a.75.75 0 0 1 1.06 0L8 8.94l2.72-2.72a.75.75 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 7.28a.75.75 0 0 1 0-1.06Z"
+            clipRule="evenodd"
+          />
+        </svg>
+      </button>
+      {open && (
+        <>
+          {/* Click-away backdrop. */}
+          <button
+            aria-hidden="true"
+            tabIndex={-1}
+            onClick={() => setOpen(false)}
+            className="fixed inset-0 z-10 cursor-default"
+          />
+          <div
+            role="menu"
+            className="absolute right-0 z-20 mt-2 w-56 origin-top-right rounded-xl border border-white/10 bg-[var(--surface-panel)] p-2 shadow-xl"
+          >
+            <button
+              role="menuitem"
+              onClick={closeAnd(onToggleNotify)}
+              className={menuItemClass}
+            >
+              {notify ? "Disable notifications" : "Enable notifications"}
+            </button>
+            <button
+              role="menuitem"
+              onClick={closeAnd(onShowSettings)}
+              className={menuItemClass}
+            >
+              Settings
+            </button>
+            <button
+              role="menuitem"
+              onClick={closeAnd(onSignOut)}
+              className={menuItemClass}
+            >
+              Sign out
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 /**
  * The dashboard's top bar: branding, repo selector, and the deploy button plus
  * the secondary controls (notifications, settings, repo config, account, sign
  * out). Those secondary actions are declared once as handlers and rendered in
- * two layouts — inline icon buttons from `xl:` up, collapsed into a hamburger
+ * two layouts — an avatar dropdown from `xl:` up, collapsed into a hamburger
  * menu below that — so a single source of truth drives both.
  */
 export function DashboardHeader({
@@ -232,7 +344,7 @@ export function DashboardHeader({
                       setMenuOpen(false);
                       onShowRepoConfig();
                     }}
-                    className="mt-1 block w-full rounded-lg px-2 py-2 text-left text-sm text-white/70 hover:bg-white/10 hover:text-white"
+                    className={`mt-1 ${menuItemClass}`}
                   >
                     Repo config
                   </button>
@@ -243,7 +355,7 @@ export function DashboardHeader({
                     setMenuOpen(false);
                     onToggleNotify();
                   }}
-                  className="block w-full rounded-lg px-2 py-2 text-left text-sm text-white/70 hover:bg-white/10 hover:text-white"
+                  className={menuItemClass}
                 >
                   {notify ? "Disable notifications" : "Enable notifications"}
                 </button>
@@ -253,7 +365,7 @@ export function DashboardHeader({
                     setMenuOpen(false);
                     onShowSettings();
                   }}
-                  className="block w-full rounded-lg px-2 py-2 text-left text-sm text-white/70 hover:bg-white/10 hover:text-white"
+                  className={menuItemClass}
                 >
                   Settings
                 </button>
@@ -263,7 +375,7 @@ export function DashboardHeader({
                     setMenuOpen(false);
                     void onSignOut();
                   }}
-                  className="block w-full rounded-lg px-2 py-2 text-left text-sm text-white/70 hover:bg-white/10 hover:text-white"
+                  className={menuItemClass}
                 >
                   Sign out
                 </button>
@@ -314,84 +426,18 @@ export function DashboardHeader({
             </span>
           )}
 
-          {/* Secondary controls — inline from xl: up, collapsed into the
-              hamburger menu below that. Holding them in the menu through the
-              mobile-L → laptop range keeps the bar uncluttered and leaves the
-              repo selector its full flexible width. */}
-          <div className="hidden items-center gap-2 xl:flex xl:gap-3">
-            <button
-              onClick={onToggleNotify}
-              aria-label={
-                notify
-                  ? "Disable completion notifications"
-                  : "Enable completion notifications"
-              }
-              title={
-                notify
-                  ? "Completion alerts on (chime + notification)"
-                  : "Completion alerts off"
-              }
-              className={`rounded-lg p-1.5 hover:bg-white/10 ${
-                notify ? "text-purple-300" : "text-white/40 hover:text-white"
-              }`}
-            >
-              {notify ? (
-                <svg
-                  viewBox="0 0 20 20"
-                  fill="currentColor"
-                  className="h-5 w-5"
-                >
-                  <path d="M10 2a5 5 0 0 0-5 5v2.6c0 .54-.21 1.06-.6 1.45L3 12.5V14h14v-1.5l-1.4-1.45a2.05 2.05 0 0 1-.6-1.45V7a5 5 0 0 0-5-5Zm0 16a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 10 18Z" />
-                </svg>
-              ) : (
-                <svg
-                  viewBox="0 0 20 20"
-                  fill="currentColor"
-                  className="h-5 w-5"
-                >
-                  <path d="M10 2a5 5 0 0 0-5 5v2.6c0 .54-.21 1.06-.6 1.45L3 12.5V14h14v-1.5l-1.4-1.45a2.05 2.05 0 0 1-.6-1.45V7a5 5 0 0 0-5-5Zm0 16a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 10 18Z" />
-                  <path
-                    d="M3 3l14 14"
-                    stroke="currentColor"
-                    strokeWidth="1.6"
-                    strokeLinecap="round"
-                  />
-                </svg>
-              )}
-            </button>
-            <button
-              onClick={onShowSettings}
-              aria-label="Settings"
-              title="Settings"
-              className="rounded-lg p-1.5 text-white/50 hover:bg-white/10 hover:text-white"
-            >
-              <svg viewBox="0 0 20 20" fill="currentColor" className="h-5 w-5">
-                <path
-                  fillRule="evenodd"
-                  d="M8.34 1.94a1.5 1.5 0 0 1 3.32 0l.12.66a1.5 1.5 0 0 0 2.06 1.19l.63-.25a1.5 1.5 0 0 1 1.92 2.05l-.32.6a1.5 1.5 0 0 0 .79 2.16l.64.23a1.5 1.5 0 0 1 0 2.84l-.64.23a1.5 1.5 0 0 0-.79 2.16l.32.6a1.5 1.5 0 0 1-1.92 2.05l-.63-.25a1.5 1.5 0 0 0-2.06 1.19l-.12.66a1.5 1.5 0 0 1-3.32 0l-.12-.66a1.5 1.5 0 0 0-2.06-1.19l-.63.25a1.5 1.5 0 0 1-1.92-2.05l.32-.6a1.5 1.5 0 0 0-.79-2.16l-.64-.23a1.5 1.5 0 0 1 0-2.84l.64-.23a1.5 1.5 0 0 0 .79-2.16l-.32-.6a1.5 1.5 0 0 1 1.92-2.05l.63.25a1.5 1.5 0 0 0 2.06-1.19l.12-.66ZM10 13a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"
-                  clipRule="evenodd"
-                />
-              </svg>
-            </button>
-            <div className="flex items-center gap-2 sm:border-l sm:border-white/10 sm:pl-3">
-              {user.image && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={user.image}
-                  alt={user.name}
-                  className="h-7 w-7 rounded-full"
-                />
-              )}
-              <span className="hidden text-sm text-white/60 sm:inline">
-                {user.name}
-              </span>
-              <button
-                onClick={() => void onSignOut()}
-                className="rounded bg-white/10 px-2 py-1 text-xs text-white/60 hover:bg-white/20 hover:text-white"
-              >
-                Sign out
-              </button>
-            </div>
+          {/* Secondary controls — the avatar dropdown from xl: up, collapsed
+              into the hamburger menu below that. Holding them in a menu
+              through the mobile-L → laptop range keeps the bar uncluttered
+              and leaves the repo selector its full flexible width. */}
+          <div className="hidden xl:block">
+            <UserMenu
+              user={user}
+              notify={notify}
+              onToggleNotify={onToggleNotify}
+              onShowSettings={onShowSettings}
+              onSignOut={onSignOut}
+            />
           </div>
 
           {/* Deploy lives here up to 2xl:, where it moves to the centred

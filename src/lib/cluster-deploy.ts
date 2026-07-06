@@ -1,5 +1,5 @@
 // Client-safe constants for one-click DigitalOcean cluster deploys, shared by
-// the server state machine, the tRPC router, and the settings-modal wizard.
+// the server state machine, the tRPC router, and the settings-page wizard.
 // Values mirror deploy/terraform/digitalocean/variables.tf so a UI deploy and
 // a terraform deploy produce the same shape.
 

@@ -133,6 +133,11 @@ check(
   "the form never asks for Spaces admin keys",
   (await page.locator("#spaces-access-id").count()) === 0,
 );
+const haCheckbox = page.getByRole("checkbox", { name: /Highly-available/ });
+check(
+  "the HA control plane option is offered and unchecked by default",
+  (await haCheckbox.isVisible()) && !(await haCheckbox.isChecked()),
+);
 
 // ── Node-size dropdown is usable (regression: invisible native options) ──────
 await page
@@ -155,6 +160,10 @@ check("submitting shows the progress screen", await progress.isVisible());
 check(
   "start was called with the deploy shape (not just creds)",
   JSON.stringify(startPayload ?? {}).includes("nyc3"),
+);
+check(
+  "HA control plane defaults to off",
+  JSON.stringify(startPayload ?? {}).includes('"haControlPlane":false'),
 );
 
 // ── Tick poll advances progress → success ────────────────────────────────────

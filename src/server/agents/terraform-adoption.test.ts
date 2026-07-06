@@ -8,6 +8,7 @@ const source = {
   nodeSize: "s-4vcpu-8gb",
   minNodes: 1,
   maxNodes: 4,
+  haControlPlane: false,
   k8sVersion: "1.32.2-do.0",
   clusterId: "c-1111",
   spacesEnabled: true,
@@ -33,6 +34,9 @@ describe("buildAdoptionBundle", () => {
     expect(tfvars).toContain("min_nodes  = 1");
     expect(tfvars).toContain("max_nodes  = 4");
     expect(tfvars).toContain("agent_only = true");
+    // Always explicit — HA can't be turned off later, so the tfvars must
+    // match the deployed cluster exactly.
+    expect(tfvars).toContain("ha_control_plane = false");
     expect(tfvars).toContain('kubernetes_version_prefix = "1.32."');
     expect(tfvars).toContain(
       'spaces_bucket_name = "bandolier-abc123-artifacts"',
@@ -48,6 +52,11 @@ describe("buildAdoptionBundle", () => {
     expect(importsTf).not.toContain("digitalocean_spaces_bucket");
     expect(tfvars).toContain("spaces_enabled = false");
     expect(tfvars).not.toContain("spaces_bucket_name");
+  });
+
+  it("pins ha_control_plane true when the cluster was deployed HA", () => {
+    const { tfvars } = buildAdoptionBundle({ ...source, haControlPlane: true });
+    expect(tfvars).toContain("ha_control_plane = true");
   });
 
   it("drops the version pin when the deployed version is unknown", () => {

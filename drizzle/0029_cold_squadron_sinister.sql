@@ -1,0 +1,1 @@
+ALTER TABLE "cluster_deployment" ADD COLUMN "ha_control_plane" boolean DEFAULT false NOT NULL;

@@ -13,7 +13,10 @@ import {
   createClusterDeployment,
   dismissClusterDeployment,
 } from "~/server/agents/cluster-deploy";
-import { validateDoToken } from "~/server/agents/digitalocean";
+import {
+  getDropletCapacity,
+  validateDoToken,
+} from "~/server/agents/digitalocean";
 import { stripWhitespace } from "~/server/api/credentials";
 import { type db } from "~/server/db";
 import { clusterDeployment, userKubeconfig } from "~/server/db/schema";
@@ -136,6 +139,20 @@ export const clusterDeployRouter = createTRPCRouter({
       const probe = await validateDoToken(input.doToken);
       if (!probe.valid) {
         throw new TRPCError({ code: "BAD_REQUEST", message: probe.error });
+      }
+
+      // Worker nodes are droplets; an autoscale max above the account's
+      // remaining droplet capacity is guaranteed to be rejected by DO. Catch
+      // it at submit time with the actual numbers instead of mid-deploy.
+      const capacity = await getDropletCapacity(input.doToken);
+      if (input.maxNodes > capacity.available) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message:
+            `Max nodes (${input.maxNodes}) exceeds your DigitalOcean account's remaining droplet capacity ` +
+            `(${capacity.available} of ${capacity.limit}${capacity.inUse ? `, ${capacity.inUse} in use` : ""}). ` +
+            "Lower max nodes or request a droplet limit increase from DigitalOcean.",
+        });
       }
 
       // The token is used for the pre-flight probe above and then dropped —

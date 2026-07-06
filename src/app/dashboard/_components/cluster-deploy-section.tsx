@@ -31,6 +31,11 @@ export function ClusterDeploySection() {
   const utils = api.useUtils();
   const { data: deployment } = api.clusterDeploy.status.useQuery();
 
+  // The user's API token lives ONLY here, in memory — it is never persisted
+  // server-side, so every tick/cancel carries it along. A page reload loses
+  // it; TokenGate asks for it again before the deployment can keep advancing.
+  const [doToken, setDoToken] = useState("");
+
   const tick = api.clusterDeploy.tick.useMutation({
     onSuccess: (d) => {
       utils.clusterDeploy.status.setData(undefined, d);
@@ -44,15 +49,20 @@ export function ClusterDeploySection() {
   const activeId =
     deployment && !isTerminalStatus(deployment.status) ? deployment.id : null;
   useEffect(() => {
-    if (!activeId) return;
+    if (!activeId || !doToken) return;
     // Ticks are idempotent server-side, so an overlap with a slow step is
     // harmless — no in-flight guard needed.
     const interval = setInterval(
-      () => tickMutate({ id: activeId }),
+      () => tickMutate({ id: activeId, doToken }),
       POLL_INTERVAL_MS,
     );
     return () => clearInterval(interval);
-  }, [activeId, tickMutate]);
+  }, [activeId, doToken, tickMutate]);
+
+  const needsToken =
+    !doToken &&
+    (activeId !== null || deployment?.status === "failed") &&
+    deployment !== null;
 
   // Presented like the GitHub App install card in repo config: a boxed
   // callout with a prominent CTA, sitting at the top of the settings modal.
@@ -62,21 +72,73 @@ export function ClusterDeploySection() {
         Deploy an agent cluster
       </h3>
 
-      {!deployment && <DeployForm />}
+      {!deployment && <DeployForm onStarted={setDoToken} />}
+      {needsToken && <TokenGate onToken={setDoToken} />}
       {deployment && !isTerminalStatus(deployment.status) && (
-        <DeployProgress deployment={deployment} />
+        <DeployProgress deployment={deployment} doToken={doToken} />
       )}
       {deployment?.status === "done" && (
         <DeploySuccess deployment={deployment} />
       )}
       {deployment?.status === "failed" && (
-        <DeployFailure deployment={deployment} />
+        <DeployFailure deployment={deployment} doToken={doToken} />
       )}
     </div>
   );
 }
 
-function DeployForm() {
+/** Re-collects the API token after a reload: the token is never stored, so an
+ * in-flight (or failed) deployment can't advance or clean up without the user
+ * re-supplying it. Validated with a cheap probe so a typo can't hard-fail the
+ * deployment on the next tick. */
+function TokenGate({ onToken }: { onToken: (token: string) => void }) {
+  const [value, setValue] = useState("");
+  const check = api.clusterDeploy.checkToken.useMutation({
+    onSuccess: (result) => {
+      if (result.valid) onToken(value);
+    },
+  });
+
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        check.mutate({ doToken: value });
+      }}
+      className="space-y-2"
+      data-testid="token-gate"
+    >
+      <p className="text-xs text-amber-300/80">
+        Your API token isn&apos;t stored — re-enter it to keep this deployment
+        moving (or to clean it up).
+      </p>
+      <div className="flex gap-2">
+        <input
+          type="password"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder="dop_v1_…"
+          className={inputClass}
+        />
+        <button
+          type="submit"
+          disabled={check.isPending || value.trim() === ""}
+          className="shrink-0 rounded-lg bg-sky-600 px-3 py-2 text-xs font-medium text-black hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {check.isPending ? "Checking…" : "Continue"}
+        </button>
+      </div>
+      {check.data?.valid === false && (
+        <p className="text-xs text-rose-300/90">{check.data.error}</p>
+      )}
+      {check.error && (
+        <p className="text-xs text-rose-300/90">{check.error.message}</p>
+      )}
+    </form>
+  );
+}
+
+function DeployForm({ onStarted }: { onStarted: (token: string) => void }) {
   const utils = api.useUtils();
   const [expanded, setExpanded] = useState(false);
 
@@ -95,6 +157,9 @@ function DeployForm() {
 
   const start = api.clusterDeploy.start.useMutation({
     onSuccess: (d) => {
+      // Hand the token to the section (memory only) so the ticks can carry
+      // it; it is never persisted anywhere.
+      onStarted(doToken);
       setDoToken("");
       utils.clusterDeploy.status.setData(undefined, d);
     },
@@ -106,9 +171,9 @@ function DeployForm() {
         <p className="text-xs text-white/60">
           No cluster yet? Provision a DigitalOcean Kubernetes cluster for your
           agents (plus an artifacts bucket) with one click — all you need is a
-          DigitalOcean API token. Its kubeconfig is wired into your settings
-          automatically, and the resources match the repo&apos;s terraform
-          setup, so you can adopt them with terraform later.
+          DigitalOcean API token. You get its kubeconfig and storage keys to
+          save where you choose, and the resources match the repo&apos;s
+          terraform setup, so you can adopt them with terraform later.
         </p>
         <button
           type="button"
@@ -250,7 +315,13 @@ function DeployForm() {
   );
 }
 
-function DeployProgress({ deployment }: { deployment: Deployment }) {
+function DeployProgress({
+  deployment,
+  doToken,
+}: {
+  deployment: Deployment;
+  doToken: string;
+}) {
   const utils = api.useUtils();
   const cancel = api.clusterDeploy.cancel.useMutation({
     onSuccess: () => utils.clusterDeploy.status.invalidate(),
@@ -291,8 +362,8 @@ function DeployProgress({ deployment }: { deployment: Deployment }) {
 
       <button
         type="button"
-        onClick={() => cancel.mutate({ id: deployment.id })}
-        disabled={cancel.isPending}
+        onClick={() => cancel.mutate({ id: deployment.id, doToken })}
+        disabled={cancel.isPending || !doToken}
         className="rounded-lg border border-rose-400/40 px-3 py-2 text-xs font-medium text-rose-300 hover:bg-rose-400/10 disabled:opacity-50"
       >
         {cancel.isPending
@@ -593,7 +664,13 @@ function ArtifactStorageOutput({ deployment }: { deployment: Deployment }) {
   );
 }
 
-function DeployFailure({ deployment }: { deployment: Deployment }) {
+function DeployFailure({
+  deployment,
+  doToken,
+}: {
+  deployment: Deployment;
+  doToken: string;
+}) {
   const utils = api.useUtils();
   const invalidate = () => utils.clusterDeploy.status.invalidate();
   const cancel = api.clusterDeploy.cancel.useMutation({
@@ -611,8 +688,8 @@ function DeployFailure({ deployment }: { deployment: Deployment }) {
       <div className="flex gap-2">
         <button
           type="button"
-          onClick={() => cancel.mutate({ id: deployment.id })}
-          disabled={cancel.isPending}
+          onClick={() => cancel.mutate({ id: deployment.id, doToken })}
+          disabled={cancel.isPending || !doToken}
           className="rounded-lg border border-rose-400/40 px-3 py-2 text-xs font-medium text-rose-300 hover:bg-rose-400/10 disabled:opacity-50"
         >
           {cancel.isPending ? "Cleaning up…" : "Delete created resources"}

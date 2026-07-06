@@ -419,16 +419,16 @@ export const userKubeconfig = pgTable("user_kubeconfig", {
 // Spaces bucket → mint bucket-scoped key → bootstrap a long-lived
 // ServiceAccount kubeconfig → save it as the user's kubeconfig).
 //
-// The user's API token is held ONLY while the deployment is active — it is
-// nulled the moment the deployment reaches a terminal state (done, or a
-// failure the user dismisses). Bucket creation goes through a temporary
-// full-access Spaces key the app mints from that token (the Spaces bucket API
-// authenticates with Spaces keys, not the API token) and deletes as soon as
-// the scoped key exists. The bucket-scoped key secret is kept until the user
-// dismisses the success screen, since it must be pasted into per-repo
-// artifact-storage settings. Resource ids (cluster id, bucket name) are kept
-// indefinitely: they are secret-free and feed the terraform adoption bundle
-// (import blocks + tfvars) for day-2.
+// The user's API token is NEVER persisted: it lives in the browser's memory
+// and rides along on every tick/cancel request; the server uses it for the
+// duration of the request only. Likewise the temporary full-access Spaces key
+// used to create the bucket (the bucket API authenticates with Spaces keys,
+// not the API token) is minted, used, and deleted within a single request.
+// The only credentials on this row are the ones provisioned FOR the user —
+// the bucket-scoped key secret and the generated kubeconfig — kept until the
+// success screen is dismissed so they can be copied/inserted. Resource ids
+// (cluster id, bucket name) are kept indefinitely: they are secret-free and
+// feed the terraform adoption bundle (import blocks + tfvars) for day-2.
 export const clusterDeployment = pgTable(
   "cluster_deployment",
   {
@@ -462,11 +462,6 @@ export const clusterDeployment = pgTable(
     // screen offers copy / download / save-to-settings (with an overwrite
     // confirmation), and dismissal wipes it like the key secret.
     kubeconfig: text("kubeconfig"),
-    // One-shot credentials (see above): the user's API token, and the
-    // app-minted temporary full-access key used only to create the bucket.
-    doToken: text("do_token"),
-    bootstrapAccessKeyId: text("bootstrap_access_key_id"),
-    bootstrapSecretKey: text("bootstrap_secret_key"),
     createdAt: timestamp("created_at")
       .$defaultFn(() => /* @__PURE__ */ new Date())
       .notNull(),

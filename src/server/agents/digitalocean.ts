@@ -55,6 +55,19 @@ export function isDoAuthError(err: unknown): boolean {
   );
 }
 
+/** True when retrying can't help: auth failures and 4xx request/validation
+ * errors (e.g. 422 "droplet limit exceeded"). Excludes 408/429, which are
+ * timing problems the next poll may well not hit. */
+export function isDoPermanentError(err: unknown): boolean {
+  return (
+    err instanceof DoApiError &&
+    err.status >= 400 &&
+    err.status < 500 &&
+    err.status !== 408 &&
+    err.status !== 429
+  );
+}
+
 // ── Kubernetes (DOKS) ─────────────────────────────────────────────────────────
 
 export interface DoksCluster {
@@ -278,6 +291,28 @@ export async function deleteSpacesKey(
     if (err instanceof DoApiError && err.status === 404) return;
     throw err;
   }
+}
+
+/** How many more droplets the account can create: its droplet limit minus the
+ * droplets already running. DOKS worker nodes are droplets, so an autoscale
+ * max above this is guaranteed to be rejected with a validation error —
+ * checked pre-flight so the user hears it at submit time, not mid-deploy. */
+export async function getDropletCapacity(
+  token: string,
+): Promise<{ limit: number; inUse: number; available: number }> {
+  const [accountRes, dropletsRes] = await Promise.all([
+    doFetch(token, "/v2/account"),
+    doFetch(token, "/v2/droplets?per_page=1"),
+  ]);
+  const account = (await accountRes.json()) as {
+    account: { droplet_limit: number };
+  };
+  const droplets = (await dropletsRes.json()) as {
+    meta?: { total?: number };
+  };
+  const limit = account.account.droplet_limit;
+  const inUse = droplets.meta?.total ?? 0;
+  return { limit, inUse, available: Math.max(0, limit - inUse) };
 }
 
 /** Cheap token probe for pre-flight validation (GET /v2/account). */

@@ -5,7 +5,9 @@ import {
   createDoksCluster,
   deleteDoksCluster,
   findDoksClusterByName,
+  getDropletCapacity,
   isDoAuthError,
+  isDoPermanentError,
   latestDoksVersion,
   validateDoToken,
 } from "~/server/agents/digitalocean";
@@ -91,6 +93,46 @@ describe("createDoksCluster", () => {
   });
 });
 
+describe("getDropletCapacity", () => {
+  it("derives remaining capacity from the account limit and droplets in use", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockImplementation((url: string) =>
+          Promise.resolve(
+            url.includes("/v2/account")
+              ? jsonResponse({ account: { droplet_limit: 3 } })
+              : jsonResponse({ meta: { total: 1 } }),
+          ),
+        ),
+    );
+    await expect(getDropletCapacity("t")).resolves.toEqual({
+      limit: 3,
+      inUse: 1,
+      available: 2,
+    });
+  });
+
+  it("never reports negative capacity", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockImplementation((url: string) =>
+          Promise.resolve(
+            url.includes("/v2/account")
+              ? jsonResponse({ account: { droplet_limit: 3 } })
+              : jsonResponse({ meta: { total: 5 } }),
+          ),
+        ),
+    );
+    await expect(getDropletCapacity("t")).resolves.toMatchObject({
+      available: 0,
+    });
+  });
+});
+
 describe("error handling", () => {
   it("maps API failures to DoApiError with the response message", async () => {
     vi.stubGlobal(
@@ -108,6 +150,17 @@ describe("error handling", () => {
     expect((err as DoApiError).status).toBe(401);
     expect(isDoAuthError(err)).toBe(true);
     expect(isDoAuthError(new DoApiError(500, "boom"))).toBe(false);
+  });
+
+  it("classifies permanent vs transient failures", () => {
+    // 4xx request/validation errors repeat identically — fail the deployment.
+    expect(isDoPermanentError(new DoApiError(422, "droplet limit"))).toBe(true);
+    expect(isDoPermanentError(new DoApiError(401, "bad token"))).toBe(true);
+    // Timing problems and server errors are worth the next poll's retry.
+    expect(isDoPermanentError(new DoApiError(429, "rate limited"))).toBe(false);
+    expect(isDoPermanentError(new DoApiError(408, "timeout"))).toBe(false);
+    expect(isDoPermanentError(new DoApiError(500, "server error"))).toBe(false);
+    expect(isDoPermanentError(new Error("network"))).toBe(false);
   });
 
   it("treats 404 on delete as already gone", async () => {

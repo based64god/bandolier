@@ -5,7 +5,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 import type { TokenUsage } from "~/lib/tokens";
 import { api } from "~/trpc/react";
 import { Modal } from "./modal";
-import { parseSegments } from "./log-segments";
+import { groupHarnessBlocks, parseSegments } from "./log-segments";
 import { TokenReadout } from "./token-readout";
 
 // Lines fetched initially (enough to fill the modal) and per scroll-up page.
@@ -43,6 +43,10 @@ export function UserSegment({ lines }: { lines: string[] }) {
 }
 
 export function HarnessSegment({ lines }: { lines: string[] }) {
+  const blocks = groupHarnessBlocks(lines);
+  // Count only the visible diagnostic lines: a tool call's folded output hides
+  // behind its own nested expander, so it shouldn't inflate the summary.
+  const count = blocks.reduce((n, b) => (b.kind === "line" ? n + 1 : n), 0);
   return (
     <details className="group my-1">
       <summary className="flex cursor-pointer list-none items-center gap-1.5 text-white/30 hover:text-white/50 [&::-webkit-details-marker]:hidden">
@@ -54,19 +58,48 @@ export function HarnessSegment({ lines }: { lines: string[] }) {
           <path d="M4 2l5 4-5 4V2z" />
         </svg>
         <span className="font-mono text-xs">
-          {lines.length} tool {lines.length === 1 ? "call" : "calls"}
+          {count} tool {count === 1 ? "call" : "calls"}
         </span>
       </summary>
       <div className="mt-0.5 ml-4 border-l border-white/10 pl-3">
-        {lines.map((line, i) => (
-          <div
-            key={i}
-            className="font-mono text-xs leading-5 break-all text-white/25"
-          >
-            {line}
-          </div>
-        ))}
+        {blocks.map((block, i) =>
+          block.kind === "output" ? (
+            <ToolOutput key={i} lines={block.lines} />
+          ) : (
+            <div
+              key={i}
+              className="font-mono text-xs leading-5 break-all text-white/25"
+            >
+              {block.text}
+            </div>
+          ),
+        )}
       </div>
+    </details>
+  );
+}
+
+// A tool call's captured stdout/stderr, folded behind its own expander within
+// the harness segment so a long result doesn't bury the surrounding calls — the
+// log modal's echo of the interactive transcript's per-call output fold.
+function ToolOutput({ lines }: { lines: string[] }) {
+  return (
+    <details className="group/out my-0.5">
+      <summary className="flex cursor-pointer list-none items-center gap-1.5 text-white/25 hover:text-white/45 [&::-webkit-details-marker]:hidden">
+        <svg
+          viewBox="0 0 12 12"
+          fill="currentColor"
+          className="h-2.5 w-2.5 shrink-0 transition-transform group-open/out:rotate-90"
+        >
+          <path d="M4 2l5 4-5 4V2z" />
+        </svg>
+        <span className="font-mono text-[11px] tracking-wide uppercase">
+          output
+        </span>
+      </summary>
+      <pre className="mt-0.5 max-h-64 overflow-auto border-l border-white/10 pl-3 font-mono text-[11px] leading-5 break-words whitespace-pre-wrap text-white/30">
+        {lines.join("\n")}
+      </pre>
     </details>
   );
 }

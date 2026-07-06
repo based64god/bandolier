@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { parseSegments } from "~/app/dashboard/_components/log-segments";
+import {
+  groupHarnessBlocks,
+  harnessOutputText,
+  parseSegments,
+} from "~/app/dashboard/_components/log-segments";
 
 describe("parseSegments", () => {
   it("classifies harness, user, and claude lines", () => {
@@ -55,5 +59,58 @@ describe("parseSegments", () => {
     // real content precedes the tag rather than just a harness timestamp.
     const line = 'The harness logs "[user] hi" for each message.';
     expect(parseSegments(line)).toEqual([{ kind: "claude", lines: [line] }]);
+  });
+});
+
+describe("harnessOutputText", () => {
+  it("returns the tool output text for a ←-tagged harness line", () => {
+    expect(harnessOutputText("12:00:01 [harness]   ← On branch main")).toBe(
+      "On branch main",
+    );
+  });
+
+  it("strips the marker and its single space but keeps the tool's indentation", () => {
+    // The harness writes "[harness]   ← " then the raw output line; only that one
+    // trailing space is the marker's — any further indentation is the tool's.
+    expect(harnessOutputText("[harness]   ←   two-space indent")).toBe(
+      "  two-space indent",
+    );
+  });
+
+  it("returns null for tool-call and plain lines", () => {
+    expect(harnessOutputText("[harness] → Bash: git status")).toBeNull();
+    expect(harnessOutputText("12:00:01 [harness] cloning repo")).toBeNull();
+    expect(harnessOutputText("a plain claude line")).toBeNull();
+  });
+});
+
+describe("groupHarnessBlocks", () => {
+  it("folds a run of tool-output lines into one output block", () => {
+    const lines = [
+      "12:00:01 [harness] → Bash: git status",
+      "12:00:01 [harness]   ← On branch main",
+      "12:00:01 [harness]   ← nothing to commit",
+      "12:00:02 [harness] claude finished (turns=1)",
+    ];
+    expect(groupHarnessBlocks(lines)).toEqual([
+      { kind: "line", text: "12:00:01 [harness] → Bash: git status" },
+      { kind: "output", lines: ["On branch main", "nothing to commit"] },
+      { kind: "line", text: "12:00:02 [harness] claude finished (turns=1)" },
+    ]);
+  });
+
+  it("keeps separate calls' outputs as separate blocks", () => {
+    const lines = [
+      "[harness] → Read a.ts",
+      "[harness]   ← alpha",
+      "[harness] → Read b.ts",
+      "[harness]   ← beta",
+    ];
+    expect(
+      groupHarnessBlocks(lines).filter((b) => b.kind === "output"),
+    ).toEqual([
+      { kind: "output", lines: ["alpha"] },
+      { kind: "output", lines: ["beta"] },
+    ]);
   });
 });

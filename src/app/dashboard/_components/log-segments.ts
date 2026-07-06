@@ -43,3 +43,49 @@ export function parseSegments(raw: string): Segment[] {
   }
   return segments;
 }
+
+// Within a harness segment, the harness marks each line of a tool call's
+// captured output (stdout/stderr) with this arrow immediately after the
+// [harness] tag — the output counterpart to the → that prefixes a tool call.
+// Kept in sync with the harness (logToolResult in providers_claude.go), which
+// writes the bytes this parser reads back.
+export const OUTPUT_MARKER = "←";
+
+const HARNESS_TAG = "[harness]";
+
+// The tool-output content of a harness line, or null when the line isn't one. A
+// line qualifies when — after its [harness] tag and the harness's own
+// indentation — it begins with OUTPUT_MARKER. The marker and the single space
+// the harness writes after it are stripped, so the tool's own indentation is
+// preserved.
+export function harnessOutputText(line: string): string | null {
+  const tag = line.indexOf(HARNESS_TAG);
+  if (tag < 0) return null;
+  const after = line.slice(tag + HARNESS_TAG.length).replace(/^\s+/, "");
+  if (!after.startsWith(OUTPUT_MARKER)) return null;
+  return after.slice(OUTPUT_MARKER.length).replace(/^ /, "");
+}
+
+// A harness segment renders as a run of blocks: plain diagnostic lines pass
+// through, while consecutive tool-output lines collapse into a single `output`
+// block the modal hides behind a nested expander — so a call's result doesn't
+// flood the already-collapsed harness fold. Mirrors how the interactive
+// transcript expands a tool call's result on its own row.
+export type HarnessBlock =
+  | { kind: "line"; text: string }
+  | { kind: "output"; lines: string[] };
+
+export function groupHarnessBlocks(lines: string[]): HarnessBlock[] {
+  const blocks: HarnessBlock[] = [];
+  for (const line of lines) {
+    const out = harnessOutputText(line);
+    if (out === null) {
+      blocks.push({ kind: "line", text: line });
+      continue;
+    }
+    const last = blocks[blocks.length - 1];
+    if (last?.kind === "output") last.lines.push(out);
+    else blocks.push({ kind: "output", lines: [out] });
+  }
+  return blocks;
+}

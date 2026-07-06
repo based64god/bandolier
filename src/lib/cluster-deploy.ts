@@ -22,6 +22,9 @@ export const CLUSTER_DEPLOY_DEFAULTS = {
   // The terraform default is 4, but fresh DO accounts ship with a droplet
   // limit of 3 — a default the account can actually satisfy beats parity.
   maxNodes: 3,
+  // HA control plane costs ~$40/mo extra and is one-way (DO can't disable it
+  // on an existing cluster), so it's opt-in.
+  haControlPlane: false,
 } as const;
 
 /** Droplet sizes offered in the wizard (agent runs are Jobs on these nodes —

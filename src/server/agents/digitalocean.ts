@@ -272,12 +272,20 @@ export async function createFullAccessSpacesKey(
 }
 
 /** Find a key by name. The API never returns secrets for existing keys, so a
- * re-entrant create step deletes any same-named key and mints a fresh one. */
+ * re-entrant create step deletes any same-named key and mints a fresh one.
+ * DO answers 404 for an EMPTY key list (observed in the wild), so 404 means
+ * "no keys", not an error. */
 export async function findSpacesKeyByName(
   token: string,
   name: string,
 ): Promise<{ name: string; accessKey: string } | null> {
-  const res = await doFetch(token, "/v2/spaces/keys?per_page=200");
+  let res: Response;
+  try {
+    res = await doFetch(token, "/v2/spaces/keys?per_page=200");
+  } catch (err) {
+    if (err instanceof DoApiError && err.status === 404) return null;
+    throw err;
+  }
   const body = (await res.json()) as { keys?: RawSpacesKey[] | null };
   const match = (body.keys ?? []).find((k) => k.name === name);
   return match ? { name: match.name, accessKey: match.access_key } : null;
@@ -348,32 +356,36 @@ export async function validateDoToken(
       }
     }),
   );
-  const failures = results.filter(Boolean) as {
-    probe: { label: string };
-    err: unknown;
-  }[];
-  if (!failures.length) return { valid: true };
+  // DO 404s the Spaces key list when it is merely EMPTY (observed in the
+  // wild), so a 404 there is not evidence of a problem. If key creation
+  // truly is unavailable, the deploy degrades to kubeconfig-only later
+  // rather than being blocked here.
+  const meaningful = (
+    results.filter(Boolean) as { probe: { label: string }; err: unknown }[]
+  ).filter(
+    ({ probe, err }) =>
+      !(
+        probe.label === "Spaces keys" &&
+        err instanceof DoApiError &&
+        err.status === 404
+      ),
+  );
+  if (!meaningful.length) return { valid: true };
 
-  if (failures.some(({ err }) => isDoAuthError(err)))
+  if (meaningful.some(({ err }) => isDoAuthError(err)))
     return { valid: false, error: "DigitalOcean API token is invalid." };
-  const missing = failures
+  const missing = meaningful
     .filter(({ err }) => isDoPermanentError(err))
     .map(({ probe }) => probe.label);
   if (missing.length) {
-    // A Spaces 404 has two causes: a token without the scope, or a team that
-    // has never activated Spaces (DO enables it with the first bucket).
-    const spacesHint = missing.includes("Spaces keys")
-      ? " If the token already has full access, Spaces may not be activated on this team yet — create a bucket once in the DigitalOcean control panel, or deploy without the artifacts bucket."
-      : "";
     return {
       valid: false,
       error:
         `This token can't read: ${missing.join(", ")}. ` +
-        "Custom-scoped tokens hide resources they can't access — create the token with Full Access." +
-        spacesHint,
+        "Custom-scoped tokens hide resources they can't access — create the token with Full Access.",
     };
   }
-  const first = failures[0]!.err;
+  const first = meaningful[0]!.err;
   return {
     valid: false,
     error:

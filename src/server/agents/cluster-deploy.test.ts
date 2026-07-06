@@ -287,26 +287,12 @@ describe("waiting-cluster step", () => {
     expect(row.status).toBe("waiting-cluster");
   });
 
-  it("moves to bucket creation once running", async () => {
+  it("moves to kubeconfig bootstrap once running (storage comes after)", async () => {
     (getDoksCluster as Mock).mockResolvedValue({ state: "running" });
     const fake = fakeDb();
     const row = await advance(
       fake,
       baseRow({ status: "waiting-cluster", clusterId: "c-1" }),
-    );
-    expect(row.status).toBe("creating-bucket");
-  });
-
-  it("skips straight to kubeconfig bootstrap when spaces is disabled", async () => {
-    (getDoksCluster as Mock).mockResolvedValue({ state: "running" });
-    const fake = fakeDb();
-    const row = await advance(
-      fake,
-      baseRow({
-        status: "waiting-cluster",
-        clusterId: "c-1",
-        spacesEnabled: false,
-      }),
     );
     expect(row.status).toBe("bootstrapping-kubeconfig");
   });
@@ -436,6 +422,22 @@ describe("creating-bucket step", () => {
     );
     expect(row.status).toBe("creating-key");
   });
+
+  it("degrades to a kubeconfig-only success when key minting 404s", async () => {
+    (findSpacesKeyByName as Mock).mockResolvedValue(null);
+    (createFullAccessSpacesKey as Mock).mockRejectedValue(
+      new DoApiError(404, "Not Found"),
+    );
+    const fake = fakeDb();
+    const row = await advance(
+      fake,
+      baseRow({ status: "creating-bucket", clusterId: "c-1" }),
+    );
+    expect(row.status).toBe("done");
+    expect(row.spacesEnabled).toBe(false);
+    expect(row.bucketName).toBeNull();
+    expect(row.error).toMatch(/Artifacts bucket skipped/);
+  });
 });
 
 describe("creating-key step", () => {
@@ -456,7 +458,23 @@ describe("creating-key step", () => {
     });
     expect(row.spacesAccessKeyId).toBe("SCOPED_AK");
     expect(row.spacesSecretAccessKey).toBe("scoped-secret");
-    expect(row.status).toBe("bootstrapping-kubeconfig");
+    expect(row.status).toBe("done");
+  });
+
+  it("degrades to a kubeconfig-only success when the Spaces key API is unavailable", async () => {
+    (findSpacesKeyByName as Mock).mockResolvedValue(null);
+    (createScopedSpacesKey as Mock).mockRejectedValue(
+      new DoApiError(404, "Not Found"),
+    );
+    const fake = fakeDb();
+    const row = await advance(
+      fake,
+      baseRow({ status: "creating-key", clusterId: "c-1" }),
+    );
+    expect(row.status).toBe("done");
+    expect(row.error).toMatch(/configure repo artifact storage manually/);
+    // The bucket exists; keep it for the manually-created key to point at.
+    expect(row.bucketName).toBe("bandolier-abc123-artifacts");
   });
 
   it("re-mints (delete + create) when a same-named key exists, since its secret is unrecoverable", async () => {
@@ -506,7 +524,7 @@ function primeBootstrapMocks(opts?: { secretReady?: boolean }) {
 }
 
 describe("bootstrapping-kubeconfig step", () => {
-  it("builds the ServiceAccount kubeconfig onto the row (no auto-save)", async () => {
+  it("builds the ServiceAccount kubeconfig onto the row (no auto-save), then moves on to storage", async () => {
     primeBootstrapMocks();
     const fake = fakeDb();
     const row = await advance(
@@ -514,7 +532,7 @@ describe("bootstrapping-kubeconfig step", () => {
       baseRow({ status: "bootstrapping-kubeconfig", clusterId: "c-1" }),
     );
 
-    expect(row.status).toBe("done");
+    expect(row.status).toBe("creating-bucket");
     // The kubeconfig and scoped-key secret survive until dismissal — the
     // success screen offers copy / download / explicit insert; nothing is
     // written into the user's settings without their confirmation.
@@ -551,7 +569,23 @@ describe("bootstrapping-kubeconfig step", () => {
       fake,
       baseRow({ status: "bootstrapping-kubeconfig", clusterId: "c-1" }),
     );
+    expect(row.status).toBe("creating-bucket");
+  });
+
+  it("is the last step when spaces is disabled", async () => {
+    primeBootstrapMocks();
+    const fake = fakeDb();
+    const row = await advance(
+      fake,
+      baseRow({
+        status: "bootstrapping-kubeconfig",
+        clusterId: "c-1",
+        spacesEnabled: false,
+        bucketName: null,
+      }),
+    );
     expect(row.status).toBe("done");
+    expect(row.kubeconfig).toBeTruthy();
   });
 
   it("retries (with the error surfaced) when the generated kubeconfig fails validation", async () => {

@@ -181,10 +181,10 @@ async function stepWaitCluster(
 ): Promise<DeploymentRow> {
   const cluster = await getDoksCluster(token, row.clusterId!);
   if (cluster.state === "running") {
+    // Kubeconfig first, storage after: the cluster + kubeconfig are the
+    // deployment's real value and must not be hostage to a Spaces hiccup.
     return update(database, row.id, {
-      status: row.spacesEnabled
-        ? "creating-bucket"
-        : "bootstrapping-kubeconfig",
+      status: "bootstrapping-kubeconfig",
       error: null,
     });
   }
@@ -244,23 +244,56 @@ async function withBootstrapKey<T>(
   }
 }
 
+/** Storage is best-effort: the cluster and kubeconfig are already secured by
+ * the time these steps run, so a Spaces-key API that answers 404 (unavailable
+ * for this account/team) downgrades the deployment to a kubeconfig-only
+ * success with a visible note instead of failing it. */
+function degradeSpaces(
+  database: typeof Database,
+  row: DeploymentRow,
+  note: string,
+  keep?: Partial<typeof clusterDeployment.$inferInsert>,
+): Promise<DeploymentRow> {
+  return update(database, row.id, {
+    status: "done",
+    spacesEnabled: false,
+    bucketName: null,
+    ...keep,
+    error: note,
+  });
+}
+
 async function stepCreateBucket(
   database: typeof Database,
   row: DeploymentRow,
   token: string,
 ): Promise<DeploymentRow> {
-  await withBootstrapKey(token, row, async (credentials) => {
-    try {
-      await spacesS3Client(row.region, credentials).send(
-        new CreateBucketCommand({ Bucket: row.bucketName!, ACL: "private" }),
+  try {
+    await withBootstrapKey(token, row, async (credentials) => {
+      try {
+        await spacesS3Client(row.region, credentials).send(
+          new CreateBucketCommand({ Bucket: row.bucketName!, ACL: "private" }),
+        );
+      } catch (err) {
+        // Re-tick after a crash: the bucket is already ours.
+        const name = (err as { name?: string }).name;
+        if (
+          name !== "BucketAlreadyOwnedByYou" &&
+          name !== "BucketAlreadyExists"
+        )
+          throw err;
+      }
+    });
+  } catch (err) {
+    if (err instanceof DoApiError && err.status === 404) {
+      return degradeSpaces(
+        database,
+        row,
+        "Artifacts bucket skipped: DigitalOcean's Spaces key API is unavailable for this account. Your cluster and kubeconfig are ready; create a Spaces key in the control panel and configure repo artifact storage manually.",
       );
-    } catch (err) {
-      // Re-tick after a crash: the bucket is already ours.
-      const name = (err as { name?: string }).name;
-      if (name !== "BucketAlreadyOwnedByYou" && name !== "BucketAlreadyExists")
-        throw err;
     }
-  });
+    throw err;
+  }
   return update(database, row.id, { status: "creating-key", error: null });
 }
 
@@ -273,18 +306,32 @@ async function stepCreateKey(
   // The API only reveals a key's secret at creation. If a previous tick
   // created the key but crashed before persisting the secret, delete and
   // re-mint — the name is ours (it embeds the generated cluster name).
-  const existing = await findSpacesKeyByName(token, keyName);
-  if (existing) await deleteSpacesKey(token, existing.accessKey);
-  const key = await createScopedSpacesKey(token, {
-    name: keyName,
-    bucket: row.bucketName!,
-  });
-  return update(database, row.id, {
-    spacesAccessKeyId: key.accessKey,
-    spacesSecretAccessKey: key.secretKey,
-    status: "bootstrapping-kubeconfig",
-    error: null,
-  });
+  try {
+    const existing = await findSpacesKeyByName(token, keyName);
+    if (existing) await deleteSpacesKey(token, existing.accessKey);
+    const key = await createScopedSpacesKey(token, {
+      name: keyName,
+      bucket: row.bucketName!,
+    });
+    return update(database, row.id, {
+      spacesAccessKeyId: key.accessKey,
+      spacesSecretAccessKey: key.secretKey,
+      status: "done",
+      error: null,
+    });
+  } catch (err) {
+    if (err instanceof DoApiError && err.status === 404) {
+      // The bucket exists but the scoped key can't be minted; keep the bucket
+      // so the manual key the user creates can point at it.
+      return degradeSpaces(
+        database,
+        row,
+        `Bucket ${row.bucketName} was created, but minting its scoped access key failed: DigitalOcean's Spaces key API is unavailable for this account. Create a key in the control panel and configure repo artifact storage manually.`,
+        { spacesEnabled: true, bucketName: row.bucketName },
+      );
+    }
+    throw err;
+  }
 }
 
 // ── ServiceAccount kubeconfig bootstrap ───────────────────────────────────────
@@ -382,11 +429,12 @@ async function stepBootstrapKubeconfig(
     });
   }
 
-  // Done. The kubeconfig is deliberately NOT saved to the user's settings
-  // here: the success screen offers copy / download / save-to-settings, with
-  // an explicit overwrite confirmation when a kubeconfig already exists.
+  // The kubeconfig is deliberately NOT saved to the user's settings here:
+  // the success screen offers copy / download / save-to-settings, with an
+  // explicit overwrite confirmation when a kubeconfig already exists. With
+  // spaces enabled the (best-effort) storage steps run next.
   return update(database, row.id, {
-    status: "done",
+    status: row.spacesEnabled ? "creating-bucket" : "done",
     kubeconfig,
     error: null,
   });

@@ -233,6 +233,29 @@ export async function createScopedSpacesKey(
   };
 }
 
+/** A temporary full-access key (bucket "" = all buckets, including creation).
+ * The Spaces bucket API authenticates with Spaces keys rather than the API
+ * token, so bucket creation needs one; the app mints this key itself, uses it
+ * once, and deletes it as soon as the bucket-scoped key exists. */
+export async function createFullAccessSpacesKey(
+  token: string,
+  name: string,
+): Promise<SpacesKey> {
+  const res = await doFetch(token, "/v2/spaces/keys", {
+    method: "POST",
+    body: JSON.stringify({
+      name,
+      grants: [{ bucket: "", permission: "fullaccess" }],
+    }),
+  });
+  const body = (await res.json()) as { key: RawSpacesKey };
+  return {
+    name: body.key.name,
+    accessKey: body.key.access_key,
+    secretKey: body.key.secret_key ?? "",
+  };
+}
+
 /** Find a key by name. The API never returns secrets for existing keys, so a
  * re-entrant create step deletes any same-named key and mints a fresh one. */
 export async function findSpacesKeyByName(

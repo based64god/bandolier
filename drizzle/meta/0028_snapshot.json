@@ -1,6 +1,6 @@
 {
-  "id": "fe809bb2-c456-4156-ba0e-cb306e8e0e32",
-  "prevId": "6a07dada-9733-4f96-9999-e7deb8101c70",
+  "id": "90130120-277c-465f-b22e-c4b3b84e02d9",
+  "prevId": "2462f767-e620-4f60-890e-bf89e78f46ac",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -416,20 +416,8 @@
           "primaryKey": false,
           "notNull": false
         },
-        "do_token": {
-          "name": "do_token",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "bootstrap_access_key_id": {
-          "name": "bootstrap_access_key_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "bootstrap_secret_key": {
-          "name": "bootstrap_secret_key",
+        "kubeconfig": {
+          "name": "kubeconfig",
           "type": "text",
           "primaryKey": false,
           "notNull": false

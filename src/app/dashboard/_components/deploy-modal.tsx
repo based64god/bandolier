@@ -13,27 +13,9 @@ import { EffortPicker } from "./effort-picker";
 import { usePreferredEffort } from "./preferred-effort";
 import { usePreferredModel } from "./preferred-model";
 import { Modal } from "./modal";
-import { PROVIDER_ACCENT, ProviderTag } from "./provider-tag";
+import { ProviderTag } from "./provider-tag";
 import { modelKey, resolveEffectiveModel } from "./resolve-effective-model";
 import { SearchableSelect } from "./searchable-select";
-
-// The provider badge shown in the modal header. Reuses the shared
-// PROVIDER_ACCENT convention (color + badge style) so provider colors live in
-// one place; only the "none" state — specific to this modal — is defined here.
-const NO_PROVIDER_LABEL = {
-  label: "No provider configured",
-  style: "border-red-500/40 bg-red-500/10 text-red-400",
-};
-
-const PROVIDER_LABELS: Record<string, { label: string; style: string }> = {
-  ...Object.fromEntries(
-    Object.entries(PROVIDER_ACCENT).map(([provider, accent]) => [
-      provider,
-      { label: accent.fullLabel, style: accent.badge },
-    ]),
-  ),
-  none: NO_PROVIDER_LABEL,
-};
 
 // The deploy form's fields as a single value. "" means "use the default" for
 // the derived/optional fields (model, effort, maxTurns, cpu, memory,
@@ -259,40 +241,11 @@ export function DeployModal({
     });
   }
 
-  // Badge reflects the selected model's provider so it's clear what this deploy
-  // will run on; falls back to the account's primary provider before a model
-  // loads. Subscription-backed selections say so instead of "… API".
-  const badgeProvider =
-    selectedModel?.provider ?? providerInfo?.provider ?? "none";
-  const badgeMeta = PROVIDER_LABELS[badgeProvider] ?? NO_PROVIDER_LABEL;
-  const providerMeta =
-    selectedModel?.auth === "subscription"
-      ? {
-          ...badgeMeta,
-          label:
-            badgeProvider === "openai"
-              ? "ChatGPT subscription"
-              : "Claude subscription",
-        }
-      : badgeMeta;
-
   return (
     <Modal
       onClose={onClose}
       title="Deploy Agent"
       headerClassName="flex shrink-0 items-center justify-between border-b border-white/10 px-4 py-2.5"
-      titleAccessory={
-        providerInfo && (
-          <span
-            className={`min-w-0 truncate rounded-full border px-2 py-0.5 text-xs whitespace-nowrap ${providerMeta.style}`}
-          >
-            {providerMeta.label}
-            {badgeProvider === "bedrock" && providerInfo.region
-              ? ` · ${providerInfo.region}`
-              : ""}
-          </span>
-        )
-      }
     >
       <form
         onSubmit={handleSubmit}

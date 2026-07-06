@@ -19,7 +19,7 @@ isolation (`config.agentNetworkPolicy=true`, the default) works without extra
 setup.
 
 **Rough monthly cost with defaults** (nyc3, 2026 pricing): one `s-4vcpu-8gb`
-node ~$48 (autoscales 1–4), `db-s-1vcpu-1gb` Postgres ~$15, Spaces ~$5. Adding
+node ~$48 (autoscales 1–3), `db-s-1vcpu-1gb` Postgres ~$15, Spaces ~$5. Adding
 `dns_zone` provisions a load balancer (~$12). Scale `node_size`/`min_nodes` to
 your expected agent concurrency — each agent run is a Job on this cluster.
 

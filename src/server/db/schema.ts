@@ -419,13 +419,16 @@ export const userKubeconfig = pgTable("user_kubeconfig", {
 // Spaces bucket → mint bucket-scoped key → bootstrap a long-lived
 // ServiceAccount kubeconfig → save it as the user's kubeconfig).
 //
-// The user's admin credentials (API token + Spaces admin key pair) are held
-// ONLY while the deployment is active — they are nulled the moment it reaches
-// a terminal state (done, or a failure the user dismisses). The bucket-scoped
-// key secret is kept until the user dismisses the success screen, since it must
-// be pasted into per-repo artifact-storage settings. Resource ids (cluster id,
-// bucket name) are kept indefinitely: they are secret-free and feed the
-// terraform adoption bundle (import blocks + tfvars) for day-2.
+// The user's API token is held ONLY while the deployment is active — it is
+// nulled the moment the deployment reaches a terminal state (done, or a
+// failure the user dismisses). Bucket creation goes through a temporary
+// full-access Spaces key the app mints from that token (the Spaces bucket API
+// authenticates with Spaces keys, not the API token) and deletes as soon as
+// the scoped key exists. The bucket-scoped key secret is kept until the user
+// dismisses the success screen, since it must be pasted into per-repo
+// artifact-storage settings. Resource ids (cluster id, bucket name) are kept
+// indefinitely: they are secret-free and feed the terraform adoption bundle
+// (import blocks + tfvars) for day-2.
 export const clusterDeployment = pgTable(
   "cluster_deployment",
   {
@@ -455,10 +458,11 @@ export const clusterDeployment = pgTable(
     // success screen and nulled on dismissal.
     spacesAccessKeyId: text("spaces_access_key_id"),
     spacesSecretAccessKey: text("spaces_secret_access_key"),
-    // One-shot admin credentials (see above). Named after the terraform vars.
+    // One-shot credentials (see above): the user's API token, and the
+    // app-minted temporary full-access key used only to create the bucket.
     doToken: text("do_token"),
-    spacesAccessId: text("spaces_access_id"),
-    spacesSecretKey: text("spaces_secret_key"),
+    bootstrapAccessKeyId: text("bootstrap_access_key_id"),
+    bootstrapSecretKey: text("bootstrap_secret_key"),
     createdAt: timestamp("created_at")
       .$defaultFn(() => /* @__PURE__ */ new Date())
       .notNull(),

@@ -15,8 +15,8 @@ CREATE TABLE "cluster_deployment" (
 	"spaces_access_key_id" text,
 	"spaces_secret_access_key" text,
 	"do_token" text,
-	"spaces_access_id" text,
-	"spaces_secret_key" text,
+	"bootstrap_access_key_id" text,
+	"bootstrap_secret_key" text,
 	"created_at" timestamp NOT NULL,
 	"updated_at" timestamp NOT NULL
 );

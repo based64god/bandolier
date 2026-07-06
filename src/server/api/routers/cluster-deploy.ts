@@ -98,8 +98,6 @@ export const clusterDeployRouter = createTRPCRouter({
           // terminal line wraps smuggle interior whitespace past format-only
           // checks).
           doToken: stripWhitespace.pipe(z.string().min(1)),
-          spacesAccessId: stripWhitespace,
-          spacesSecretKey: stripWhitespace,
           region: z.enum(DO_REGIONS).default(CLUSTER_DEPLOY_DEFAULTS.region),
           nodeSize: z
             .string()
@@ -121,16 +119,7 @@ export const clusterDeployRouter = createTRPCRouter({
         })
         .refine((input) => input.maxNodes >= input.minNodes, {
           message: "maxNodes must be >= minNodes.",
-        })
-        .refine(
-          (input) =>
-            !input.spacesEnabled ||
-            (input.spacesAccessId !== "" && input.spacesSecretKey !== ""),
-          {
-            message:
-              "Spaces admin keys are required to create the artifacts bucket.",
-          },
-        ),
+        }),
     )
     .mutation(async ({ ctx, input }) => {
       const existing = await latestDeployment(ctx.db, ctx.session.user.id);
@@ -148,8 +137,6 @@ export const clusterDeployRouter = createTRPCRouter({
 
       const row = await createClusterDeployment(ctx.db, ctx.session.user.id, {
         doToken: input.doToken,
-        spacesAccessId: input.spacesAccessId,
-        spacesSecretKey: input.spacesSecretKey,
         region: input.region,
         nodeSize: input.nodeSize,
         minNodes: input.minNodes,

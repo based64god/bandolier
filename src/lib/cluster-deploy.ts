@@ -19,7 +19,9 @@ export const CLUSTER_DEPLOY_DEFAULTS = {
   region: "nyc3",
   nodeSize: "s-4vcpu-8gb",
   minNodes: 1,
-  maxNodes: 4,
+  // The terraform default is 4, but fresh DO accounts ship with a droplet
+  // limit of 3 — a default the account can actually satisfy beats parity.
+  maxNodes: 3,
 } as const;
 
 /** Droplet sizes offered in the wizard (agent runs are Jobs on these nodes —

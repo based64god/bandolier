@@ -23,7 +23,7 @@ import {
   findSpacesKeyByName,
   getDoksCluster,
   getDoksKubeconfig,
-  isDoAuthError,
+  isDoPermanentError,
   latestDoksVersion,
 } from "~/server/agents/digitalocean";
 import { type db as Database } from "~/server/db";
@@ -127,7 +127,10 @@ export async function advanceClusterDeployment(
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : "Deployment failed.";
-    if (isDoAuthError(err)) return fail(database, row, message);
+    // Bad token or a 4xx the API will reject identically every time (e.g.
+    // "droplet limit exceeded"): retrying is noise, fail so the user can fix
+    // the input and redeploy.
+    if (isDoPermanentError(err)) return fail(database, row, message);
     // Transient: surface the error but keep the step; the next poll retries.
     return update(database, row.id, { error: message });
   }

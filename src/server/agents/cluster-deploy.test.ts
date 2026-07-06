@@ -245,6 +245,21 @@ describe("pending step", () => {
     expect(row.error).toBe("Unable to authenticate you");
   });
 
+  it("fails hard on a 422 validation error (e.g. droplet limit) instead of retrying forever", async () => {
+    (findDoksClusterByName as Mock).mockResolvedValue(null);
+    (latestDoksVersion as Mock).mockResolvedValue("1.32.1-do.0");
+    (createDoksCluster as Mock).mockRejectedValue(
+      new DoApiError(
+        422,
+        "validation error: autoscale desired max nodes exceed limits",
+      ),
+    );
+    const fake = fakeDb();
+    const row = await advance(fake, baseRow());
+    expect(row.status).toBe("failed");
+    expect(row.error).toMatch(/max nodes exceed limits/);
+  });
+
   it("records transient errors without leaving the step", async () => {
     (findDoksClusterByName as Mock).mockRejectedValue(
       new DoApiError(500, "server error"),

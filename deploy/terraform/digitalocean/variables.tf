@@ -56,9 +56,9 @@ variable "min_nodes" {
 }
 
 variable "max_nodes" {
-  description = "Autoscaler upper bound for the default node pool."
+  description = "Autoscaler upper bound for the default node pool. The default fits a fresh DigitalOcean account's droplet limit of 3; raise it together with your account limit."
   type        = number
-  default     = 4
+  default     = 3
 }
 
 variable "ha_control_plane" {

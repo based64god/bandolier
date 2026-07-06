@@ -284,7 +284,7 @@ export function DeployModal({
       titleAccessory={
         providerInfo && (
           <span
-            className={`rounded-full border px-2 py-0.5 text-xs ${providerMeta.style}`}
+            className={`min-w-0 truncate rounded-full border px-2 py-0.5 text-xs whitespace-nowrap ${providerMeta.style}`}
           >
             {providerMeta.label}
             {badgeProvider === "bedrock" && providerInfo.region
@@ -296,7 +296,7 @@ export function DeployModal({
     >
       <form
         onSubmit={handleSubmit}
-        className="space-y-3 overflow-y-auto px-4 py-3"
+        className="space-y-2 overflow-y-auto px-3 py-2 sm:space-y-3 sm:px-4 sm:py-3"
       >
         {/* No-provider warning */}
         {providerInfo?.provider === "none" && (
@@ -500,7 +500,7 @@ export function DeployModal({
               Preferred
             </label>
           </div>
-          <p className="text-xs text-white/40">
+          <p className="hidden text-xs text-white/40 sm:block">
             Preferred model is the dashboard default; webhooks aren&rsquo;t
             affected.
           </p>
@@ -521,8 +521,8 @@ export function DeployModal({
         )}
 
         {/* Repo + Branch */}
-        <div className="grid grid-cols-3 gap-3">
-          <div className="col-span-2 space-y-1">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="space-y-1 sm:col-span-2">
             <label className="block text-xs font-medium text-white/60">
               Repository URL
             </label>
@@ -605,7 +605,7 @@ export function DeployModal({
             />
           </div>
         </div>
-        <p className="-mt-1 text-xs text-white/40">
+        <p className="-mt-1 hidden text-xs text-white/40 sm:block">
           Placeholders show the defaults. Quantities like{" "}
           <code className="text-white/50">4</code> and{" "}
           <code className="text-white/50">8Gi</code>.

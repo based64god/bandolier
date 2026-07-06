@@ -68,6 +68,7 @@ describe("createDoksCluster", () => {
       nodeSize: "s-4vcpu-8gb",
       minNodes: 1,
       maxNodes: 4,
+      haControlPlane: false,
     });
     expect(cluster.id).toBe("c-1");
 
@@ -79,6 +80,7 @@ describe("createDoksCluster", () => {
     const body = JSON.parse(init.body as string) as Record<string, unknown>;
     expect(body.auto_upgrade).toBe(true);
     expect(body.surge_upgrade).toBe(true);
+    expect(body.ha).toBe(false);
     expect(body.node_pools).toEqual([
       {
         name: "default",

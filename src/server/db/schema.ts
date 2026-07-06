@@ -448,6 +448,7 @@ export const clusterDeployment = pgTable(
     nodeSize: text("node_size").notNull(),
     minNodes: integer("min_nodes").notNull(),
     maxNodes: integer("max_nodes").notNull(),
+    haControlPlane: boolean("ha_control_plane").notNull().default(false),
     spacesEnabled: boolean("spaces_enabled").notNull(),
     // Provisioned resource identifiers (adoption-bundle inputs).
     clusterId: text("cluster_id"),

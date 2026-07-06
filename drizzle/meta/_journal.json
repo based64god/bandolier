@@ -204,6 +204,13 @@
       "when": 1783301940121,
       "tag": "0028_curved_dragon_lord",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1783305948790,
+      "tag": "0029_cold_squadron_sinister",
+      "breakpoints": true
     }
   ]
 }

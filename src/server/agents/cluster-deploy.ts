@@ -58,6 +58,7 @@ export interface StartClusterDeploymentInput {
   nodeSize: string;
   minNodes: number;
   maxNodes: number;
+  haControlPlane: boolean;
   spacesEnabled: boolean;
 }
 
@@ -81,6 +82,7 @@ export async function createClusterDeployment(
       nodeSize: input.nodeSize,
       minNodes: input.minNodes,
       maxNodes: input.maxNodes,
+      haControlPlane: input.haControlPlane,
       spacesEnabled: input.spacesEnabled,
       bucketName: input.spacesEnabled ? `${clusterName}-artifacts` : null,
     })
@@ -153,6 +155,7 @@ async function stepEnsureCluster(
       nodeSize: row.nodeSize,
       minNodes: row.minNodes,
       maxNodes: row.maxNodes,
+      haControlPlane: row.haControlPlane,
     }));
   return update(database, row.id, {
     clusterId: cluster.id,

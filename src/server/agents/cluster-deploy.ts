@@ -27,7 +27,7 @@ import {
   latestDoksVersion,
 } from "~/server/agents/digitalocean";
 import { type db as Database } from "~/server/db";
-import { clusterDeployment, userKubeconfig } from "~/server/db/schema";
+import { clusterDeployment } from "~/server/db/schema";
 import { getCoreV1Api, getRbacAuthorizationV1Api } from "~/server/k8s/client";
 
 // One-click DigitalOcean deploy: the serverless-safe equivalent of
@@ -358,17 +358,13 @@ async function stepBootstrapKubeconfig(
     });
   }
 
-  await database
-    .insert(userKubeconfig)
-    .values({ userId: row.userId, kubeconfig })
-    .onConflictDoUpdate({
-      target: userKubeconfig.userId,
-      set: { kubeconfig, updatedAt: new Date() },
-    });
-
-  // Done — the one-shot credentials have served their purpose.
+  // Done — the one-shot credentials have served their purpose. The kubeconfig
+  // is deliberately NOT saved to the user's settings here: the success screen
+  // offers copy / download / save-to-settings, with an explicit overwrite
+  // confirmation when a kubeconfig already exists.
   return update(database, row.id, {
     status: "done",
+    kubeconfig,
     error: null,
     doToken: null,
     bootstrapAccessKeyId: null,
@@ -462,12 +458,13 @@ export async function cancelClusterDeployment(
     bootstrapAccessKeyId: null,
     bootstrapSecretKey: null,
     spacesSecretAccessKey: null,
+    kubeconfig: null,
   });
 }
 
-/** Acknowledge a terminal deployment: wipe every remaining secret (including
- * the scoped key secret shown on the success screen). Resource ids stay for
- * the terraform adoption bundle. */
+/** Acknowledge a terminal deployment: wipe every remaining secret (the scoped
+ * key secret and the generated kubeconfig shown on the success screen).
+ * Resource ids stay for the terraform adoption bundle. */
 export async function dismissClusterDeployment(
   database: typeof Database,
   row: DeploymentRow,
@@ -478,6 +475,7 @@ export async function dismissClusterDeployment(
     bootstrapAccessKeyId: null,
     bootstrapSecretKey: null,
     spacesSecretAccessKey: null,
+    kubeconfig: null,
   });
 }
 

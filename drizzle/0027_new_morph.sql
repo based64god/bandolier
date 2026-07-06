@@ -1,0 +1,1 @@
+ALTER TABLE "cluster_deployment" ADD COLUMN "kubeconfig" text;

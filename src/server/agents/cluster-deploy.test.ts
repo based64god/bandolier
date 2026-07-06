@@ -143,6 +143,7 @@ function baseRow(overrides: Record<string, unknown> = {}) {
     bucketName: "bandolier-abc123-artifacts",
     spacesAccessKeyId: null,
     spacesSecretAccessKey: null,
+    kubeconfig: null,
     doToken: "dop_v1_test",
     bootstrapAccessKeyId: null,
     bootstrapSecretKey: null,
@@ -473,7 +474,7 @@ function primeBootstrapMocks(opts?: { secretReady?: boolean }) {
 }
 
 describe("bootstrapping-kubeconfig step", () => {
-  it("builds and saves the ServiceAccount kubeconfig, then wipes the admin creds", async () => {
+  it("builds the ServiceAccount kubeconfig onto the row (no auto-save) and wipes the creds", async () => {
     primeBootstrapMocks();
     const fake = fakeDb();
     const row = await advance(
@@ -485,16 +486,11 @@ describe("bootstrapping-kubeconfig step", () => {
     expect(row.doToken).toBeNull();
     expect(row.bootstrapAccessKeyId).toBeNull();
     expect(row.bootstrapSecretKey).toBeNull();
-    // The scoped-key secret survives until dismissal — the success screen
-    // shows it for pasting into repo artifact settings.
-
-    expect(fake.kubeconfigUpserts).toHaveLength(1);
-    const saved = fake.kubeconfigUpserts[0] as {
-      userId: string;
-      kubeconfig: string;
-    };
-    expect(saved.userId).toBe("user-1");
-    const parsed = loadYaml(saved.kubeconfig) as {
+    // The kubeconfig and scoped-key secret survive until dismissal — the
+    // success screen offers copy / download / explicit insert; nothing is
+    // written into the user's settings without their confirmation.
+    expect(fake.kubeconfigUpserts).toHaveLength(0);
+    const parsed = loadYaml(row.kubeconfig!) as {
       clusters: { cluster: { server: string } }[];
       users: { user: { token: string } }[];
     };
@@ -565,12 +561,14 @@ describe("terminal deployments", () => {
       clusterId: "c-1",
       spacesAccessKeyId: "SCOPED_AK",
       spacesSecretAccessKey: "scoped-secret",
+      kubeconfig: "apiVersion: v1\nkind: Config\n",
       doToken: null,
     });
     fake.seed(seeded);
     const row = await dismissClusterDeployment(fake.db, seeded);
     expect(row.status).toBe("dismissed");
     expect(row.spacesSecretAccessKey).toBeNull();
+    expect(row.kubeconfig).toBeNull();
     expect(row.clusterId).toBe("c-1");
     expect(row.spacesAccessKeyId).toBe("SCOPED_AK");
   });

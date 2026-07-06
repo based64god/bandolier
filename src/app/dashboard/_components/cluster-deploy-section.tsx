@@ -35,7 +35,6 @@ export function ClusterDeploySection() {
     onSuccess: (d) => {
       utils.clusterDeploy.status.setData(undefined, d);
       if (d.status === "done") {
-        void utils.account.kubeconfigStatus.invalidate();
         void utils.clusterDeploy.adoptionBundle.invalidate();
       }
     },
@@ -79,7 +78,6 @@ export function ClusterDeploySection() {
 
 function DeployForm() {
   const utils = api.useUtils();
-  const { data: kubeconfigStatus } = api.account.kubeconfigStatus.useQuery();
   const [expanded, setExpanded] = useState(false);
 
   const [doToken, setDoToken] = useState("");
@@ -147,13 +145,6 @@ function DeployForm() {
         once at the end. Costs are billed to your DigitalOcean account (nodes
         from ~$24/mo each, Spaces ~$5/mo).
       </p>
-      {kubeconfigStatus?.configured && (
-        <p className="text-xs text-amber-300/80">
-          You already have a kubeconfig configured — it will be replaced when
-          the deployment completes.
-        </p>
-      )}
-
       <div>
         <label className={labelClass} htmlFor="do-token">
           DigitalOcean API token (write scope)
@@ -320,27 +311,17 @@ function DeploySuccess({ deployment }: { deployment: Deployment }) {
   });
 
   return (
-    <div className="space-y-3" data-testid="cluster-deploy-success">
+    <div className="space-y-4" data-testid="cluster-deploy-success">
       <p className="text-xs text-emerald-300/90">
         Cluster <span className="font-mono">{deployment.clusterName}</span> is
-        running and its kubeconfig has been saved to your settings ✓
+        running ✓ Save its credentials below — they are shown only until you
+        dismiss this.
       </p>
 
+      <KubeconfigOutput deployment={deployment} />
+
       {deployment.spacesEnabled && (
-        <div className="space-y-1">
-          <p className="text-xs text-white/50">
-            Run-artifact storage — paste into a repo&apos;s{" "}
-            <em>Run artifact storage</em> settings. The secret key is shown only
-            until you dismiss this.
-          </p>
-          <OutputRow label="Endpoint" value={deployment.spacesEndpoint} />
-          <OutputRow label="Bucket" value={deployment.bucketName} />
-          <OutputRow label="Access key" value={deployment.spacesAccessKeyId} />
-          <OutputRow
-            label="Secret key"
-            value={deployment.spacesSecretAccessKey}
-          />
-        </div>
+        <ArtifactStorageOutput deployment={deployment} />
       )}
 
       {bundle && (
@@ -367,8 +348,247 @@ function DeploySuccess({ deployment }: { deployment: Deployment }) {
         disabled={dismiss.isPending}
         className="rounded-lg border border-white/20 px-3 py-2 text-xs font-medium text-white/70 hover:bg-white/5 disabled:opacity-50"
       >
-        Done — dismiss (forgets the secret key)
+        Done — dismiss (forgets the kubeconfig and secret key)
       </button>
+    </div>
+  );
+}
+
+/** The generated ServiceAccount kubeconfig: copy, download, or save into the
+ * user's Kubernetes settings — with a confirmation when a kubeconfig is
+ * already configured there. */
+function KubeconfigOutput({ deployment }: { deployment: Deployment }) {
+  const utils = api.useUtils();
+  const { data: kubeconfigStatus } = api.account.kubeconfigStatus.useQuery();
+  const [confirming, setConfirming] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  const save = api.clusterDeploy.saveKubeconfig.useMutation({
+    onSuccess: () => {
+      setSaved(true);
+      setConfirming(false);
+      void utils.account.kubeconfigStatus.invalidate();
+    },
+  });
+
+  if (!deployment.kubeconfig) return null;
+  const kubeconfig = deployment.kubeconfig;
+
+  return (
+    <div className="space-y-2" data-testid="kubeconfig-output">
+      <p className="text-xs text-white/50">
+        Agent kubeconfig — save it to your settings so your agents run on this
+        cluster, or take a copy elsewhere.
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => {
+            if (saved) return;
+            if (kubeconfigStatus?.configured && !confirming) {
+              setConfirming(true);
+              return;
+            }
+            save.mutate({ id: deployment.id });
+          }}
+          disabled={save.isPending || saved}
+          className="rounded-lg bg-sky-600 px-3 py-2 text-xs font-medium text-black hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {saved ? "Saved ✓" : save.isPending ? "Saving…" : "Save to settings"}
+        </button>
+        <CopyButton value={kubeconfig} label="Copy kubeconfig" />
+        <DownloadButton filename="kubeconfig.yaml" content={kubeconfig} />
+      </div>
+
+      {confirming && !saved && (
+        <div
+          className="space-y-2 rounded-lg border border-amber-400/30 bg-amber-400/5 p-3"
+          data-testid="kubeconfig-overwrite-confirm"
+        >
+          <p className="text-xs text-amber-300/90">
+            You already have a kubeconfig configured — saving will replace it
+            and your agents will move to the new cluster.
+          </p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => save.mutate({ id: deployment.id })}
+              disabled={save.isPending}
+              className="rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-medium text-black hover:bg-amber-400 disabled:opacity-50"
+            >
+              Replace existing
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirming(false)}
+              className="rounded-lg px-3 py-1.5 text-xs text-white/50 hover:text-white/80"
+            >
+              Keep existing
+            </button>
+          </div>
+        </div>
+      )}
+      {save.error && (
+        <p className="text-xs text-rose-300/90">{save.error.message}</p>
+      )}
+    </div>
+  );
+}
+
+/** The bucket-scoped Spaces key: copy the individual values, download them as
+ * a file, or insert them straight into a repo's run-artifact storage — with a
+ * confirmation when that repo already has storage configured. */
+function ArtifactStorageOutput({ deployment }: { deployment: Deployment }) {
+  const [repoFullName, setRepoFullName] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [insertedInto, setInsertedInto] = useState<string | null>(null);
+
+  const { data: repos, isLoading: reposLoading } = api.repos.list.useQuery();
+  // Admin-gated: errors for repos the user can't configure, which the insert
+  // button surfaces as its disabled state + the error message below.
+  const existing = api.webhooks.getCredentials.useQuery(
+    { repoFullName: repoFullName! },
+    { enabled: !!repoFullName, retry: false },
+  );
+
+  const insert = api.webhooks.setArtifacts.useMutation({
+    onSuccess: () => {
+      setInsertedInto(repoFullName);
+      setConfirming(false);
+    },
+  });
+
+  const credentialsFile = [
+    "# Bandolier run-artifact storage (DigitalOcean Spaces)",
+    `endpoint=${deployment.spacesEndpoint ?? ""}`,
+    `region=${deployment.region}`,
+    `bucket=${deployment.bucketName ?? ""}`,
+    `access_key_id=${deployment.spacesAccessKeyId ?? ""}`,
+    `secret_access_key=${deployment.spacesSecretAccessKey ?? ""}`,
+    "",
+  ].join("\n");
+
+  const doInsert = () => {
+    if (!repoFullName) return;
+    insert.mutate({
+      repoFullName,
+      bucket: deployment.bucketName ?? "",
+      region: deployment.region,
+      endpoint: deployment.spacesEndpoint ?? "",
+      accessKeyId: deployment.spacesAccessKeyId ?? "",
+      secretAccessKey: deployment.spacesSecretAccessKey ?? "",
+    });
+  };
+
+  const alreadyConfigured = existing.data?.artifacts.configured ?? false;
+
+  return (
+    <div className="space-y-2" data-testid="artifact-storage-output">
+      <p className="text-xs text-white/50">
+        Run-artifact storage — insert it into a repo&apos;s{" "}
+        <em>Run artifact storage</em> settings, or take a copy. The secret key
+        is shown only until you dismiss this.
+      </p>
+      <OutputRow label="Endpoint" value={deployment.spacesEndpoint} />
+      <OutputRow label="Bucket" value={deployment.bucketName} />
+      <OutputRow label="Access key" value={deployment.spacesAccessKeyId} />
+      <OutputRow label="Secret key" value={deployment.spacesSecretAccessKey} />
+      <div className="flex flex-wrap items-center gap-2">
+        <DownloadButton
+          filename="spaces-credentials.txt"
+          content={credentialsFile}
+        />
+      </div>
+
+      <div className="space-y-2">
+        <div className="flex items-end gap-2">
+          <div className="min-w-0 flex-1">
+            <span className={labelClass}>Insert into a repo</span>
+            <SearchableSelect
+              options={(repos ?? []).map((r) => ({
+                value: r.fullName,
+                label: r.fullName,
+                searchText: r.fullName.toLowerCase(),
+              }))}
+              value={repoFullName}
+              onChange={(v) => {
+                setRepoFullName(v);
+                setConfirming(false);
+              }}
+              placeholder="Choose a repo…"
+              loading={reposLoading}
+              searchPlaceholder="Search repos…"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              if (alreadyConfigured && !confirming) {
+                setConfirming(true);
+                return;
+              }
+              doInsert();
+            }}
+            disabled={
+              !repoFullName ||
+              existing.isLoading ||
+              !!existing.error ||
+              insert.isPending ||
+              insertedInto === repoFullName
+            }
+            className="shrink-0 rounded-lg bg-sky-600 px-3 py-2 text-xs font-medium text-black hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {insertedInto === repoFullName
+              ? "Inserted ✓"
+              : insert.isPending
+                ? "Inserting…"
+                : "Insert"}
+          </button>
+        </div>
+
+        {confirming && insertedInto !== repoFullName && (
+          <div
+            className="space-y-2 rounded-lg border border-amber-400/30 bg-amber-400/5 p-3"
+            data-testid="artifacts-overwrite-confirm"
+          >
+            <p className="text-xs text-amber-300/90">
+              <span className="font-mono">{repoFullName}</span> already has
+              artifact storage configured
+              {existing.data?.artifacts.configured
+                ? ` (bucket ${existing.data.artifacts.bucket})`
+                : ""}{" "}
+              — inserting will replace it. Existing artifacts stay in the old
+              bucket.
+            </p>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={doInsert}
+                disabled={insert.isPending}
+                className="rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-medium text-black hover:bg-amber-400 disabled:opacity-50"
+              >
+                Replace existing
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirming(false)}
+                className="rounded-lg px-3 py-1.5 text-xs text-white/50 hover:text-white/80"
+              >
+                Keep existing
+              </button>
+            </div>
+          </div>
+        )}
+
+        {existing.error && (
+          <p className="text-xs text-rose-300/90">
+            Can&apos;t configure this repo: {existing.error.message}
+          </p>
+        )}
+        {insert.error && (
+          <p className="text-xs text-rose-300/90">{insert.error.message}</p>
+        )}
+      </div>
     </div>
   );
 }
@@ -418,6 +638,24 @@ function Spinner() {
       aria-label="working"
       className="inline-block h-3 w-3 animate-spin rounded-full border border-sky-300/60 border-t-transparent"
     />
+  );
+}
+
+function CopyButton({ value, label }: { value: string; label: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        void navigator.clipboard.writeText(value).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        });
+      }}
+      className="rounded-lg border border-white/20 px-3 py-2 text-xs font-medium text-white/70 hover:bg-white/5"
+    >
+      {copied ? "Copied ✓" : label}
+    </button>
   );
 }
 

@@ -124,7 +124,9 @@ func (claudeLogSink) onThinking(text string) {
 
 func (claudeLogSink) onToolUse(_, name string, input json.RawMessage) { logToolUse(name, input) }
 
-func (claudeLogSink) onToolResult(string, bool, json.RawMessage) {}
+func (claudeLogSink) onToolResult(_ string, _ bool, content json.RawMessage) {
+	logToolResult(toolResultText(content))
+}
 
 func (claudeLogSink) onResult(ev claudeEvent) {
 	if ev.IsError {
@@ -217,6 +219,23 @@ func logToolUse(name string, input json.RawMessage) {
 	log.Printf("[harness] → %s", lines[0])
 	for _, l := range lines[1:] {
 		log.Printf("[harness]     %s", l)
+	}
+}
+
+// logToolResult logs a tool call's captured output (stdout/stderr) into the
+// transcript — the output counterpart to logToolUse's → lines. Every line is
+// marked with the ← tag (not just the first) so the log renderer can fold the
+// whole block behind a nested expander without having to guess where it ends;
+// the frontend parser (harnessOutputText in log-segments.ts) reads the bytes
+// this writes. The text is already truncated by the caller; empty output emits
+// nothing so a resultless call stays a plain one-line entry.
+func logToolResult(text string) {
+	text = strings.TrimRight(text, "\n")
+	if strings.TrimSpace(text) == "" {
+		return
+	}
+	for _, l := range strings.Split(text, "\n") {
+		log.Printf("[harness]   ← %s", l)
 	}
 }
 

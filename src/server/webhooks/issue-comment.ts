@@ -14,6 +14,7 @@ import {
   makeIssueBranch,
 } from "~/lib/issue-prompt";
 
+import { shouldTriggerOnEvent } from "~/server/agents/webhook-config";
 import { postBotAck } from "./bot-ack";
 import { resolveWebhookRun } from "./resolve-run";
 import { type IssueCommentPayload, type WebhookRunConfig } from "./types";
@@ -39,7 +40,6 @@ export async function handleIssueComment(
   config: WebhookRunConfig,
 ): Promise<void> {
   const { issue, comment, repository } = payload;
-  const prefix = config?.prefix ?? null;
   const agentImage = config?.agentImage ?? null;
   const isPullRequest = !!issue.pull_request;
   const kind = isPullRequest ? ("pull request" as const) : ("issue" as const);
@@ -53,12 +53,14 @@ export async function handleIssueComment(
 
   const commentBody = comment.body ?? "";
 
-  // Prefix gate: if a trigger phrase is configured, the comment must contain
-  // it; otherwise act on every comment (that has a run to resume).
-  if (prefix && !commentBody.includes(prefix)) {
-    console.log("[bandolier:webhook] comment skipped — prefix not present", {
+  // Trigger gate: by default webhook events never spawn agents. The repo opts
+  // in with a trigger phrase the comment must contain, or with
+  // trigger-on-all-events, which fires on every comment (that has a run to
+  // resume) and ignores the phrase.
+  if (!shouldTriggerOnEvent(config, commentBody)) {
+    console.log("[bandolier:webhook] comment skipped — not triggered", {
       ...logCtx,
-      prefix,
+      prefix: config?.prefix ?? null,
     });
     return;
   }

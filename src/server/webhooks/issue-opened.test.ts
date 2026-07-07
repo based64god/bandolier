@@ -81,9 +81,13 @@ function payload(overrides: Partial<IssuePayload> = {}): IssuePayload {
   };
 }
 
-function config(prefix: string | null): WebhookRunConfig {
+function config(
+  prefix: string | null,
+  triggerOnAllEvents = false,
+): WebhookRunConfig {
   return {
     prefix,
+    triggerOnAllEvents,
     agentImage: null,
     defaultWebhookModel: null,
     defaultWebhookEffort: null,
@@ -213,6 +217,23 @@ describe("handleIssueEdited", () => {
     expect(resolveWebhookRun).not.toHaveBeenCalled();
   });
 
+  it("always skips under trigger-on-all-events — `opened` already fired on everything", async () => {
+    await handleIssueEdited(
+      payload({
+        issue: {
+          number: 7,
+          title: "A title",
+          body: "please /bando fix this",
+          html_url: "https://github.com/o/r/issues/7",
+          labels: [],
+        },
+        changes: { body: { from: "please fix this" } },
+      }),
+      config(PREFIX, true),
+    );
+    expect(resolveWebhookRun).not.toHaveBeenCalled();
+  });
+
   it("uses current field values as pre-edit text when `changes` is absent", async () => {
     // No `changes` at all: an unchanged title/body still holds the prefix, so it
     // must have been present before this edit — skip, don't re-run.
@@ -242,7 +263,7 @@ describe("handleIssueOpened repo-credentials gate", () => {
     getRepoBotToken.mockResolvedValue(null);
     storePendingRun.mockResolvedValue("pending-1");
 
-    await handleIssueOpened(payload({ action: "opened" }), config(null));
+    await handleIssueOpened(payload({ action: "opened" }), config(null, true));
 
     // No token to check permission with → permission is treated as "none" →
     // under-privileged → run is stored pending, never dispatched.
@@ -262,9 +283,53 @@ describe("handleIssueOpened repo-credentials gate", () => {
     createAgentJob.mockResolvedValue("job-xyz");
     postBotAck.mockResolvedValue("app-installation");
 
-    await handleIssueOpened(payload({ action: "opened" }), config(null));
+    await handleIssueOpened(payload({ action: "opened" }), config(null, true));
 
     expect(createAgentJob).toHaveBeenCalledTimes(1);
     expect(storePendingRun).not.toHaveBeenCalled();
+  });
+});
+
+// ── handleIssueOpened trigger gate ─────────────────────────────────────────────
+
+describe("handleIssueOpened trigger gate", () => {
+  it("never triggers by default — no prefix, toggle off", async () => {
+    await handleIssueOpened(payload({ action: "opened" }), config(null));
+    expect(resolveWebhookRun).not.toHaveBeenCalled();
+  });
+
+  it("never triggers when the repo has no config row", async () => {
+    await handleIssueOpened(payload({ action: "opened" }), null);
+    expect(resolveWebhookRun).not.toHaveBeenCalled();
+  });
+
+  it("triggers when the issue text contains the prefix", async () => {
+    await handleIssueOpened(
+      payload({
+        action: "opened",
+        issue: {
+          number: 7,
+          title: "/bando do it",
+          body: "A body",
+          html_url: "https://github.com/o/r/issues/7",
+          labels: [],
+        },
+      }),
+      config("/bando"),
+    );
+    expect(resolveWebhookRun).toHaveBeenCalledTimes(1);
+  });
+
+  it("skips when the prefix is configured but absent from the issue", async () => {
+    await handleIssueOpened(payload({ action: "opened" }), config("/bando"));
+    expect(resolveWebhookRun).not.toHaveBeenCalled();
+  });
+
+  it("trigger-on-all-events fires without the prefix present", async () => {
+    await handleIssueOpened(
+      payload({ action: "opened" }),
+      config("/bando", true),
+    );
+    expect(resolveWebhookRun).toHaveBeenCalledTimes(1);
   });
 });

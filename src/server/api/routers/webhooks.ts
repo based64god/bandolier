@@ -205,6 +205,7 @@ export const webhooksRouter = createTRPCRouter({
         .select({
           updatedAt: repoWebhookConfig.updatedAt,
           prefix: repoWebhookConfig.prefix,
+          triggerOnAllEvents: repoWebhookConfig.triggerOnAllEvents,
           agentImage: repoWebhookConfig.agentImage,
           defaultWebhookModel: repoWebhookConfig.defaultWebhookModel,
           defaultWebhookEffort: repoWebhookConfig.defaultWebhookEffort,
@@ -255,6 +256,9 @@ export const webhooksRouter = createTRPCRouter({
         configured: !!row,
         updatedAt: row?.updatedAt ?? null,
         prefix: row?.prefix ?? "",
+        // Whether webhook events always trigger agents, ignoring the prefix
+        // (off unless a row turns it on; the default is to never trigger).
+        triggerOnAllEvents: row?.triggerOnAllEvents ?? false,
         agentImage: row?.agentImage ?? "",
         // Whether the custom agent image looks out of date, judged by the last
         // run on it: reportedContract < current means the harness binary in
@@ -431,6 +435,25 @@ export const webhooksRouter = createTRPCRouter({
       const value = input.effort ? input.effort : null;
       await upsertRepoConfig(ctx.db, input.repoFullName, ctx.session.user.id, {
         defaultWebhookEffort: value,
+      });
+      return { success: true };
+    }),
+
+  // Toggle whether webhook events always trigger agents, ignoring the trigger
+  // prefix. Admin-only; off by default — without it (or a prefix) events never
+  // trigger, since a fired event spends someone's credentials. Partial upsert
+  // so it doesn't clobber other config.
+  setTriggerOnAllEvents: protectedProcedure
+    .input(
+      z.object({
+        repoFullName: z.string().min(1),
+        enabled: z.boolean(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await requireRepoAdmin(ctx, input.repoFullName);
+      await upsertRepoConfig(ctx.db, input.repoFullName, ctx.session.user.id, {
+        triggerOnAllEvents: input.enabled,
       });
       return { success: true };
     }),

@@ -7,6 +7,7 @@ import { type RepoWebhookConfig } from "~/server/agents/webhook-config";
 export type WebhookRunConfig = Pick<
   RepoWebhookConfig,
   | "prefix"
+  | "triggerOnAllEvents"
   | "agentImage"
   | "defaultWebhookModel"
   | "defaultWebhookEffort"

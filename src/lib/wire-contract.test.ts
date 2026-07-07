@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { EFFORT_LEVELS } from "~/lib/effort";
+import { HARNESS_CONTRACT_VERSION } from "~/lib/harness-contract";
 import { TOKEN_MARKER } from "~/lib/tokens";
 
 // Constants that cross the TS↔Go process boundary can't share a package, so
@@ -24,6 +25,7 @@ const contract = JSON.parse(
   resumeMarker: string;
   endSessionSentinel: string;
   effortLevels: string[];
+  harnessContractVersion: number;
 };
 
 describe("wire contract", () => {
@@ -50,5 +52,9 @@ describe("wire contract", () => {
 
   it("matches the effort allow-list surfaced to the dashboard/webhook", () => {
     expect([...EFFORT_LEVELS]).toEqual(contract.effortLevels);
+  });
+
+  it("matches the harness contract version the staleness warning compares against", () => {
+    expect(HARNESS_CONTRACT_VERSION).toBe(contract.harnessContractVersion);
   });
 });

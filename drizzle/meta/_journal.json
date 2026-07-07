@@ -211,6 +211,13 @@
       "when": 1783305948790,
       "tag": "0029_cold_squadron_sinister",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1783446924036,
+      "tag": "0030_redundant_magik",
+      "breakpoints": true
     }
   ]
 }

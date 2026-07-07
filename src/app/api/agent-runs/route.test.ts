@@ -94,16 +94,12 @@ afterEach(() => {
 
 describe("authenticatedJob (via handlers)", () => {
   it("POST rejects a missing token with 401", async () => {
-    const res = await POST(
-      post({ "x-bandolier-job": "job-1" }) as never,
-    );
+    const res = await POST(post({ "x-bandolier-job": "job-1" }) as never);
     expect(res.status).toBe(401);
   });
 
   it("POST rejects a missing job header with 401", async () => {
-    const res = await POST(
-      post({ authorization: "Bearer whatever" }) as never,
-    );
+    const res = await POST(post({ authorization: "Bearer whatever" }) as never);
     expect(res.status).toBe(401);
   });
 
@@ -119,7 +115,10 @@ describe("authenticatedJob (via handlers)", () => {
 
   it("GET rejects a bad token with 401", async () => {
     const res = await GET(
-      get({ "x-bandolier-job": "job-1", authorization: "Bearer nope" }) as never,
+      get({
+        "x-bandolier-job": "job-1",
+        authorization: "Bearer nope",
+      }) as never,
     );
     expect(res.status).toBe(401);
   });
@@ -194,6 +193,51 @@ describe("POST ingest — output persistence resilience", () => {
     expect(res.status).toBe(200);
     expect(putArtifact).not.toHaveBeenCalled();
     expect(updateSets[0]).not.toHaveProperty("transcriptKey");
+  });
+});
+
+describe("POST ingest — harness contract version", () => {
+  it("persists the reported contract version", async () => {
+    selectRows.push([
+      { repoFullName: "acme/app", spawnedBy: null, displayName: null },
+    ]);
+
+    await POST(
+      post({
+        ...authHeaders("job-11"),
+        "x-bandolier-harness-contract": "3",
+      }) as never,
+    );
+
+    const set = updateSets[0] as Record<string, unknown>;
+    expect(set.harnessContract).toBe(3);
+  });
+
+  it("records 0 (unreported) when the header is absent — an old harness build", async () => {
+    selectRows.push([
+      { repoFullName: "acme/app", spawnedBy: null, displayName: null },
+    ]);
+
+    await POST(post(authHeaders("job-12")) as never);
+
+    const set = updateSets[0] as Record<string, unknown>;
+    expect(set.harnessContract).toBe(0);
+  });
+
+  it("records 0 when the header is garbage", async () => {
+    selectRows.push([
+      { repoFullName: "acme/app", spawnedBy: null, displayName: null },
+    ]);
+
+    await POST(
+      post({
+        ...authHeaders("job-13"),
+        "x-bandolier-harness-contract": "not-a-number",
+      }) as never,
+    );
+
+    const set = updateSets[0] as Record<string, unknown>;
+    expect(set.harnessContract).toBe(0);
   });
 });
 
@@ -295,9 +339,7 @@ describe("GET parent transcript", () => {
     const res = await GET(get(authHeaders("job-d")) as never);
 
     expect(res.status).toBe(200);
-    expect(res.headers.get("Content-Type")).toBe(
-      "text/plain; charset=utf-8",
-    );
+    expect(res.headers.get("Content-Type")).toBe("text/plain; charset=utf-8");
     await expect(res.text()).resolves.toBe("parent transcript contents");
   });
 });

@@ -76,6 +76,7 @@ function repoConfig(
 ): RepoWebhookConfig {
   return {
     prefix: null,
+    triggerOnAllEvents: false,
     agentImage: null,
     defaultWebhookModel: null,
     defaultWebhookEffort: null,

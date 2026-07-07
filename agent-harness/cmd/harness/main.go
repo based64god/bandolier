@@ -311,6 +311,15 @@ func runAgent(ctx context.Context, cfg config, mode runMode) error {
 func finish(ctx context.Context, cfg config, mode runMode, name, email string) error {
 	// ── Post-run: push branch and open PR ──────────────────────────────────────
 	if mode.prBranch != "" {
+		// Everything below diffs against cfg.diffBase() (hasCommits, the
+		// authorship rewrite, the PR-writer's log and diff), but the --depth=1
+		// clone is single-branch and may not hold that ref. Self-heal by
+		// fetching it — or fail here with a clear message instead of letting
+		// filter-branch die on an "unknown revision".
+		if err := orSignal(ctx, ensureDiffBase(ctx, cfg), "ensure diff base"); err != nil {
+			return err
+		}
+
 		// Rewrite authorship to the GitHub OAuth identity (and strip Claude/AI
 		// co-author trailers) before anything is pushed, so commits are attributed
 		// solely to the acting user. Done first so the commit subject and generated

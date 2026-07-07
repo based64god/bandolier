@@ -112,6 +112,29 @@ func buildIssueOutputInteractivePrompt() string {
 
 // ── Git plumbing ──────────────────────────────────────────────────────────────
 
+// ensureDiffBase guarantees the ref this run's work is diffed against
+// (cfg.diffBase()) resolves in the clone. The pod clones with --depth=1, which
+// implies --single-branch: only the checked-out branch's remote ref exists. If
+// the run then diffs against a different branch (a stale or misconfigured
+// server↔harness pairing has landed here before), every range downstream —
+// hasCommits, the authorship rewrite, the PR-writer's log and diff — dies on
+// an "unknown revision". Fetch the missing ref explicitly (the single-branch
+// fetch refspec would never map it), and fail with a diagnosable error when
+// the remote can't provide it either.
+func ensureDiffBase(ctx context.Context, cfg config) error {
+	base := cfg.diffBase()
+	if _, err := captureCmd(ctx, cfg.workDir, "git", "rev-parse", "--verify", "--quiet", base+"^{commit}"); err == nil {
+		return nil
+	}
+	branch := strings.TrimPrefix(base, "origin/")
+	log.Printf("[harness] diff base %s missing from the clone — fetching it", base)
+	if err := runCmd(ctx, cfg.workDir, os.Environ(), "git", "fetch", "--depth=1", "origin",
+		fmt.Sprintf("+refs/heads/%s:refs/remotes/origin/%s", branch, branch)); err != nil {
+		return fmt.Errorf("diff base %s is not in the clone and fetching it failed: %w", base, err)
+	}
+	return nil
+}
+
 // hasCommits reports whether branchName carries commits of this run's own —
 // beyond the PR base, or (on a resume) beyond what the branch had already
 // pushed — i.e. whether Claude actually committed anything worth publishing.

@@ -42,6 +42,13 @@ var (
 	stdoutTee  io.Writer = os.Stdout
 )
 
+// harnessContractVersion is this build's server↔harness contract version,
+// reported on the ingest callback so Bandolier can warn a repo admin whose
+// custom agent image was built from harness source older than what the server
+// now expects of it. Pinned in wire-contract.json (repo root) and asserted
+// against it by wire_contract_test.go; bump only together with that file.
+const harnessContractVersion = 1
+
 // outputPRURL / outputIssueURL hold the run's structured output (the pull
 // request or issue the harness produced). They're reported to Bandolier via the
 // ingest callback so a finished run's output is recoverable from the database
@@ -74,6 +81,10 @@ func uploadTranscript() {
 		return
 	}
 	req.Header.Set("Content-Type", "text/plain; charset=utf-8")
+	// Report this build's contract version so the server can flag repos whose
+	// custom agent image is out of date (absence of the header marks builds
+	// older than version reporting itself).
+	req.Header.Set("X-Bandolier-Harness-Contract", fmt.Sprintf("%d", harnessContractVersion))
 	// Report the run's structured output alongside the transcript so it's
 	// persisted durably — pod logs (the live source) vanish with the pod.
 	if outputPRURL != "" {

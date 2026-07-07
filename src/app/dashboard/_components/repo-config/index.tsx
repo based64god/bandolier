@@ -150,6 +150,22 @@ export function RepoConfigModal({
               Container image agents for this repo run on. Leave blank to use
               the server default.
             </p>
+            {config?.agentImageContract.outdated && (
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                <span className="font-semibold">
+                  This image looks out of date.
+                </span>{" "}
+                The last agent run on it{" "}
+                {config.agentImageContract.lastReported === 0
+                  ? "was built before harness version reporting existed"
+                  : `reported harness version v${config.agentImageContract.lastReported}`}
+                , but this server expects v{config.agentImageContract.current}.
+                Stale harnesses can mis-handle newer run features (resumed runs,
+                follow-up comments) and fail after the agent finishes. Rebuild
+                the image from the latest agent-harness source, or clear this
+                field to use the server default.
+              </div>
+            )}
           </div>
 
           {/* Repository system prompt */}

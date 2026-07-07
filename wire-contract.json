@@ -4,5 +4,7 @@
   "awaitInputMarker": "BANDOLIER_AWAIT_INPUT",
   "resumeMarker": "BANDOLIER_RESUME",
   "endSessionSentinel": "__BANDOLIER_END_SESSION__",
-  "effortLevels": ["low", "medium", "high", "xhigh", "max"]
+  "effortLevels": ["low", "medium", "high", "xhigh", "max"],
+  "_harnessContractVersionComment": "Bump by one whenever the server↔harness expectations change in a way that makes an older harness image misbehave (a new env var the harness must honor, a changed callback shape, …). The harness reports its version on the ingest callback; the server compares the last-reported version against this value to warn repo admins running a stale custom agent image.",
+  "harnessContractVersion": 1
 }

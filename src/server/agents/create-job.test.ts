@@ -639,6 +639,18 @@ describe("createAgentJob", () => {
       expect(jobCall().body.spec.template.spec.containers[0]!.image).toBe(
         "ghcr.io/acme/harness:1",
       );
+      // The run row records the same image, so the harness contract version
+      // the run later reports is attributable to it.
+      expect(insertValues).toHaveBeenCalledWith(
+        expect.objectContaining({ agentImage: "ghcr.io/acme/harness:1" }),
+      );
+    });
+
+    it("records the default image on the run row when no override is set", async () => {
+      await createAgentJob(baseSpec());
+      expect(insertValues).toHaveBeenCalledWith(
+        expect.objectContaining({ agentImage: DEFAULT_HARNESS_IMAGE }),
+      );
     });
 
     it("applies the built-in resource limits when the spec carries no compute", async () => {
@@ -802,6 +814,7 @@ describe("createAgentJob", () => {
         issueNumber: null,
         parentJobName: null,
         ciResumeSha: null,
+        agentImage: DEFAULT_HARNESS_IMAGE,
       });
     });
 

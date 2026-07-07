@@ -1,5 +1,5 @@
 import { TRPCError } from "@trpc/server";
-import { eq } from "drizzle-orm";
+import { and, desc, eq, isNotNull } from "drizzle-orm";
 import { z } from "zod";
 
 import { cleanSessionToken, validateAwsCredentials } from "~/server/agents/aws";
@@ -24,8 +24,9 @@ import { isRepoAdmin } from "~/server/agents/github-repos";
 import { parseComputeInput } from "~/server/agents/compute";
 import { type Validation } from "~/server/agents/validation";
 import { EFFORT_LEVELS } from "~/lib/effort";
+import { HARNESS_CONTRACT_VERSION } from "~/lib/harness-contract";
 import { type db } from "~/server/db";
-import { repoWebhookConfig } from "~/server/db/schema";
+import { repoWebhookConfig, taskRun } from "~/server/db/schema";
 import { maskKey, stripWhitespace } from "../credentials";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
 
@@ -227,12 +228,44 @@ export const webhooksRouter = createTRPCRouter({
         .limit(1);
       const allowPrivateEgress = row?.allowPrivateEgress ?? false;
       const allowAllPortsEgress = row?.allowAllPortsEgress ?? false;
+
+      // Staleness signal for a custom agent image: the contract version the
+      // most recent run on that exact image reported via the ingest callback.
+      // Null when there's no custom image or no run on it has called back yet
+      // (nothing to judge); 0 means a harness too old to report a version at
+      // all. The UI warns when this is below HARNESS_CONTRACT_VERSION.
+      let agentImageReportedContract: number | null = null;
+      if (row?.agentImage) {
+        const [latest] = await ctx.db
+          .select({ harnessContract: taskRun.harnessContract })
+          .from(taskRun)
+          .where(
+            and(
+              eq(taskRun.repoFullName, input.repoFullName),
+              eq(taskRun.agentImage, row.agentImage),
+              isNotNull(taskRun.harnessContract),
+            ),
+          )
+          .orderBy(desc(taskRun.updatedAt))
+          .limit(1);
+        agentImageReportedContract = latest?.harnessContract ?? null;
+      }
       return {
         // Whether a config row exists at all (any setting saved).
         configured: !!row,
         updatedAt: row?.updatedAt ?? null,
         prefix: row?.prefix ?? "",
         agentImage: row?.agentImage ?? "",
+        // Whether the custom agent image looks out of date, judged by the last
+        // run on it: reportedContract < current means the harness binary in
+        // that image predates what this server expects of it.
+        agentImageContract: {
+          current: HARNESS_CONTRACT_VERSION,
+          lastReported: agentImageReportedContract,
+          outdated:
+            agentImageReportedContract !== null &&
+            agentImageReportedContract < HARNESS_CONTRACT_VERSION,
+        },
         defaultWebhookModel: row?.defaultWebhookModel ?? null,
         defaultWebhookEffort: row?.defaultWebhookEffort ?? null,
         // Default agent compute for the repo ("" = none; fall through to the

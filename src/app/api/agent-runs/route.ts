@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 
 import { env } from "~/env";
+import { HARNESS_CONTRACT_UNREPORTED } from "~/lib/harness-contract";
 import { verifyIngestToken } from "~/lib/ingest";
 import { parseTokenMarkerPayload } from "~/lib/tokens";
 import {
@@ -148,6 +149,17 @@ export async function POST(req: NextRequest) {
   const tokensHeader = req.headers.get("x-bandolier-tokens");
   const tokens = tokensHeader ? parseTokenMarkerPayload(tokensHeader) : null;
 
+  // The harness's server↔harness contract version. This callback arriving at
+  // all proves a harness ran, so an absent/garbled header is recorded as
+  // "unreported" (a build predating version reporting — certainly stale)
+  // rather than left null, which is reserved for "no callback yet".
+  const contractHeader = req.headers.get("x-bandolier-harness-contract");
+  const parsedContract = contractHeader ? parseInt(contractHeader, 10) : NaN;
+  const harnessContract =
+    Number.isFinite(parsedContract) && parsedContract > 0
+      ? parsedContract
+      : HARNESS_CONTRACT_UNREPORTED;
+
   // Record the output (and transcript key, if uploaded). No-op if the run row
   // was pruned.
   await db
@@ -162,6 +174,7 @@ export async function POST(req: NextRequest) {
         cacheReadInputTokens: tokens.cacheReadInputTokens,
         cacheCreationInputTokens: tokens.cacheCreationInputTokens,
       }),
+      harnessContract,
       updatedAt: new Date(),
     })
     .where(eq(taskRun.jobName, jobName));

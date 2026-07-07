@@ -140,6 +140,22 @@ export const taskRun = pgTable("task_run", {
   outputTokens: integer("output_tokens"),
   cacheReadInputTokens: integer("cache_read_input_tokens"),
   cacheCreationInputTokens: integer("cache_creation_input_tokens"),
+  /**
+   * The harness container image the run's pod ran on (the repo's custom
+   * agentImage, or the built-in default), recorded at deploy time. Lets the
+   * staleness check attribute a run's reported contract version to the image
+   * currently configured — a repo that just fixed its image reference stops
+   * matching old runs immediately. Null for runs predating this column.
+   */
+  agentImage: text("agent_image"),
+  /**
+   * The server↔harness contract version the run's harness reported on the
+   * ingest callback (see wire-contract.json). 0 = the callback arrived without
+   * the header, i.e. a harness built before version reporting — certainly out
+   * of date. Null = no callback yet (run in flight, pod lost before upload, or
+   * a run predating this column), which says nothing about the image.
+   */
+  harnessContract: integer("harness_contract"),
   createdAt: timestamp("created_at")
     .$defaultFn(() => /* @__PURE__ */ new Date())
     .notNull(),

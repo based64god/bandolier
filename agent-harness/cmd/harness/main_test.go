@@ -641,6 +641,73 @@ func TestRewriteCommitAuthorsNoCommits(t *testing.T) {
 	}
 }
 
+// seedRemote creates a bare origin with a `main` branch (one commit) and a
+// `work` branch on top of it, returning the bare repo's path.
+func seedRemote(t *testing.T) string {
+	t.Helper()
+	seed := t.TempDir()
+	remote := t.TempDir()
+	cmdRun(t, remote, "git", "init", "--bare", "-b", "main")
+	cmdRun(t, seed, "git", "init", "-b", "main")
+	cmdRun(t, seed, "git", "remote", "add", "origin", remote)
+	cmdRun(t, seed, "git", "-c", "user.name=x", "-c", "user.email=x@x",
+		"commit", "--allow-empty", "-m", "base")
+	cmdRun(t, seed, "git", "checkout", "-b", "work")
+	cmdRun(t, seed, "git", "-c", "user.name=x", "-c", "user.email=x@x",
+		"commit", "--allow-empty", "-m", "work commit")
+	cmdRun(t, seed, "git", "push", "origin", "main", "work")
+	return remote
+}
+
+func TestEnsureDiffBaseNoOpWhenPresent(t *testing.T) {
+	remote := seedRemote(t)
+	dir := t.TempDir()
+	// A plain clone holds every remote ref, origin/main included.
+	cmdRun(t, dir, "git", "clone", remote, ".")
+
+	cfg := config{workDir: dir, baseBranch: "main"}
+	if err := ensureDiffBase(context.Background(), cfg); err != nil {
+		t.Fatalf("ensureDiffBase with the ref present: %v", err)
+	}
+}
+
+func TestEnsureDiffBaseFetchesMissingRef(t *testing.T) {
+	remote := seedRemote(t)
+	dir := t.TempDir()
+	// The pod's clone shape: --depth=1 --branch <work> is single-branch, so
+	// origin/main does not exist locally — the state that made filter-branch
+	// die on "unknown revision" before this step existed.
+	cmdRun(t, dir, "git", "clone", "--depth=1", "--branch", "work", remote, ".")
+	if err := exec.Command("git", "-C", dir, "rev-parse", "--verify", "--quiet", "origin/main^{commit}").Run(); err == nil {
+		t.Fatal("test setup: origin/main should be absent from a single-branch clone")
+	}
+
+	cfg := config{workDir: dir, baseBranch: "main"}
+	if err := ensureDiffBase(context.Background(), cfg); err != nil {
+		t.Fatalf("ensureDiffBase should fetch the missing base: %v", err)
+	}
+	if err := exec.Command("git", "-C", dir, "rev-parse", "--verify", "--quiet", "origin/main^{commit}").Run(); err != nil {
+		t.Fatalf("origin/main still unresolvable after ensureDiffBase: %v", err)
+	}
+}
+
+func TestEnsureDiffBaseFailsClearlyWhenUnfetchable(t *testing.T) {
+	remote := seedRemote(t)
+	dir := t.TempDir()
+	cmdRun(t, dir, "git", "clone", "--depth=1", "--branch", "work", remote, ".")
+
+	// A base branch the remote doesn't have: the fetch fails, and the error
+	// must name the ref so the failure is diagnosable from the pod log.
+	cfg := config{workDir: dir, baseBranch: "no-such-branch"}
+	err := ensureDiffBase(context.Background(), cfg)
+	if err == nil {
+		t.Fatal("ensureDiffBase should fail for a branch the remote lacks")
+	}
+	if !strings.Contains(err.Error(), "origin/no-such-branch") {
+		t.Errorf("error should name the missing ref, got: %v", err)
+	}
+}
+
 // cmdRun runs a command in dir, failing the test on error.
 func cmdRun(t *testing.T, dir string, name string, args ...string) {
 	t.Helper()

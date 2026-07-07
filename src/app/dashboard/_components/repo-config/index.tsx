@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 
 import { env } from "~/env";
 import { api } from "~/trpc/react";
+import { ToggleSection } from "../credential-ui";
 import { Modal } from "../modal";
 import { RepoCredentialsSection } from "./credentials-sections";
 import {
@@ -38,6 +39,10 @@ export function RepoConfigModal({
       void utils.webhooks.getConfig.invalidate({ repoFullName });
       setResult("Saved ✓");
     },
+  });
+
+  const setTriggerAll = api.webhooks.setTriggerOnAllEvents.useMutation({
+    onSuccess: () => utils.webhooks.getConfig.invalidate({ repoFullName }),
   });
 
   // The GitHub App install page; null when no slug is configured (self-hosters
@@ -125,9 +130,26 @@ export function RepoConfigModal({
               className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 focus:border-purple-500/50 focus:outline-none"
             />
             <p className="text-xs text-white/30">
-              When set, only events whose title or body contains this text
-              trigger an agent. Leave blank to act on all events.
+              Only events whose title or body contains this text trigger an
+              agent. Without a prefix (and with the toggle below off), webhook
+              events never trigger agents.
             </p>
+            <ToggleSection
+              label="Always trigger on events"
+              description="Fire an agent on every issue and comment event, ignoring the trigger prefix. Fired events spend the initiating user's (or the repo's shared) credentials."
+              enabled={config?.triggerOnAllEvents ?? false}
+              disabled={setTriggerAll.isPending || !config}
+              onChange={(v) =>
+                setTriggerAll.mutate({ repoFullName, enabled: v })
+              }
+              accent="purple"
+              switchAriaLabel="Always trigger on webhook events"
+            />
+            {setTriggerAll.error && (
+              <p className="text-xs text-red-400">
+                {setTriggerAll.error.message}
+              </p>
+            )}
           </div>
 
           {/* Agent image */}

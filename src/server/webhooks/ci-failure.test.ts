@@ -198,6 +198,9 @@ function payload(
 
 const CONFIG: WebhookRunConfig = {
   prefix: null,
+  // CI-failure resumes are gated by resumeOnCiFailure, not the trigger gate —
+  // false here pins that the trigger toggle plays no part in this handler.
+  triggerOnAllEvents: false,
   agentImage: null,
   defaultWebhookModel: null,
   defaultWebhookEffort: null,

@@ -16,11 +16,12 @@ import (
 // means any drift — a renamed marker, a reordered effort list — breaks CI
 // instead of silently mismatching in production.
 type wireContract struct {
-	TokenMarkerPrefix  string   `json:"tokenMarkerPrefix"`
-	AwaitInputMarker   string   `json:"awaitInputMarker"`
-	ResumeMarker       string   `json:"resumeMarker"`
-	EndSessionSentinel string   `json:"endSessionSentinel"`
-	EffortLevels       []string `json:"effortLevels"`
+	TokenMarkerPrefix      string   `json:"tokenMarkerPrefix"`
+	AwaitInputMarker       string   `json:"awaitInputMarker"`
+	ResumeMarker           string   `json:"resumeMarker"`
+	EndSessionSentinel     string   `json:"endSessionSentinel"`
+	EffortLevels           []string `json:"effortLevels"`
+	HarnessContractVersion int      `json:"harnessContractVersion"`
 }
 
 func loadWireContract(t *testing.T) wireContract {
@@ -50,6 +51,9 @@ func TestWireContractMarkers(t *testing.T) {
 	}
 	if endSessionSentinel != c.EndSessionSentinel {
 		t.Errorf("endSessionSentinel = %q, contract = %q", endSessionSentinel, c.EndSessionSentinel)
+	}
+	if harnessContractVersion != c.HarnessContractVersion {
+		t.Errorf("harnessContractVersion = %d, contract = %d", harnessContractVersion, c.HarnessContractVersion)
 	}
 }
 

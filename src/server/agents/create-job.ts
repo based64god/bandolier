@@ -829,6 +829,9 @@ export async function recordRun(spec: JobSpec, jobName: string, ns: string) {
     issueNumber: spec.issueNumber ?? null,
     parentJobName: spec.parentJobName ?? null,
     ciResumeSha: spec.ciResumeSha ?? null,
+    // The resolved image (same fallback as the pod spec), so the harness
+    // contract version the run later reports is attributable to this image.
+    agentImage: spec.agentImage ?? DEFAULT_HARNESS_IMAGE,
   });
 }
 

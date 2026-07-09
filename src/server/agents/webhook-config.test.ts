@@ -6,6 +6,7 @@ import { repoWebhookConfig } from "~/server/db/schema";
 import {
   getRepoCredentials,
   getRepoWebhookConfig,
+  shouldTriggerOnEvent,
 } from "~/server/agents/webhook-config";
 
 // Per-repo webhook config loaders over a faked drizzle select chain.
@@ -121,6 +122,7 @@ describe("getRepoWebhookConfig", () => {
     const { database } = makeSelectDb([
       {
         prefix: "/bando",
+        triggerOnAllEvents: true,
         agentImage: "ghcr.io/x/harness:1",
         defaultWebhookModel: "claude-sonnet-4-5",
         defaultWebhookEffort: "high",
@@ -136,6 +138,7 @@ describe("getRepoWebhookConfig", () => {
     ]);
     expect(await getRepoWebhookConfig(database, "o/r")).toEqual({
       prefix: "/bando",
+      triggerOnAllEvents: true,
       agentImage: "ghcr.io/x/harness:1",
       defaultWebhookModel: "claude-sonnet-4-5",
       defaultWebhookEffort: "high",
@@ -154,6 +157,7 @@ describe("getRepoWebhookConfig", () => {
     const { database } = makeSelectDb([
       {
         prefix: null,
+        triggerOnAllEvents: false,
         agentImage: null,
         defaultWebhookModel: null,
         defaultWebhookEffort: null,
@@ -166,6 +170,7 @@ describe("getRepoWebhookConfig", () => {
     ]);
     expect(await getRepoWebhookConfig(database, "o/r")).toEqual({
       prefix: null,
+      triggerOnAllEvents: false,
       agentImage: null,
       defaultWebhookModel: null,
       defaultWebhookEffort: null,
@@ -178,5 +183,34 @@ describe("getRepoWebhookConfig", () => {
         policyYaml: null,
       },
     });
+  });
+});
+
+describe("shouldTriggerOnEvent", () => {
+  const gate = (
+    prefix: string | null,
+    triggerOnAllEvents: boolean,
+    text: string,
+  ) => shouldTriggerOnEvent({ prefix, triggerOnAllEvents }, text);
+
+  it("never triggers by default — no prefix, toggle off", () => {
+    expect(gate(null, false, "any event text at all")).toBe(false);
+  });
+
+  it("never triggers when the repo has no config row", () => {
+    expect(shouldTriggerOnEvent(null, "any event text at all")).toBe(false);
+  });
+
+  it("triggers on a prefix match", () => {
+    expect(gate("/bando", false, "please /bando fix this")).toBe(true);
+  });
+
+  it("skips when the prefix is configured but absent", () => {
+    expect(gate("/bando", false, "just chatting")).toBe(false);
+  });
+
+  it("trigger-on-all-events fires on everything, ignoring the prefix", () => {
+    expect(gate("/bando", true, "no phrase here")).toBe(true);
+    expect(gate(null, true, "no phrase here")).toBe(true);
   });
 });

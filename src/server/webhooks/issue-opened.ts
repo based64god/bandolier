@@ -23,6 +23,7 @@ import {
   makeIssueBranch,
 } from "~/lib/issue-prompt";
 
+import { shouldTriggerOnEvent } from "~/server/agents/webhook-config";
 import { postBotAck } from "./bot-ack";
 import { wantsIssueOutput } from "./labels";
 import { resolveWebhookRun } from "./resolve-run";
@@ -33,20 +34,17 @@ export async function handleIssueOpened(
   config: WebhookRunConfig,
 ): Promise<void> {
   const { issue, repository, sender } = payload;
-  const prefix = config?.prefix ?? null;
   const agentImage = config?.agentImage ?? null;
 
-  // Prefix gate: if a trigger phrase is configured, the issue text must contain
-  // it; otherwise act on every issue.
-  if (prefix) {
-    const text = `${issue.title}\n${issue.body ?? ""}`;
-    if (!text.includes(prefix)) {
-      console.log("[bandolier:webhook] issue skipped — prefix not present", {
-        issue: issue.number,
-        prefix,
-      });
-      return;
-    }
+  // Trigger gate: by default webhook events never spawn agents. The repo opts
+  // in with a trigger phrase the issue text must contain, or with
+  // trigger-on-all-events, which fires on everything and ignores the phrase.
+  if (!shouldTriggerOnEvent(config, `${issue.title}\n${issue.body ?? ""}`)) {
+    console.log("[bandolier:webhook] issue skipped — not triggered", {
+      issue: issue.number,
+      prefix: config?.prefix ?? null,
+    });
+    return;
   }
 
   const run = await resolveWebhookRun({
@@ -241,8 +239,9 @@ export async function handleIssueOpened(
  * the payload's `changes` (which carries only the fields that changed), so we
  * can tell whether the prefix was already there before this edit.
  *
- * Requires a configured trigger phrase: with no prefix, `opened` already acts on
- * every issue, so there is no "newly triggered by an edit" state to detect.
+ * Requires a configured trigger phrase: with no prefix nothing triggers on
+ * edits, and with trigger-on-all-events `opened` already acted on every issue,
+ * so there is no "newly triggered by an edit" state to detect in either case.
  */
 export async function handleIssueEdited(
   payload: IssuePayload,
@@ -251,7 +250,7 @@ export async function handleIssueEdited(
   const { issue, changes } = payload;
   const prefix = config?.prefix ?? null;
 
-  if (!prefix) return;
+  if (!prefix || config?.triggerOnAllEvents) return;
 
   const newText = `${issue.title}\n${issue.body ?? ""}`;
   if (!newText.includes(prefix)) return;

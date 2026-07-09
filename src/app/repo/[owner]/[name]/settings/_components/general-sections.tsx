@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 
 import { env } from "~/env";
 import { api } from "~/trpc/react";
+import { ToggleSection } from "~/app/dashboard/_components/credential-ui";
 
 // The GitHub App install pointer: event delivery is handled by the Bandolier
 // GitHub App, so this card replaces any hand-configured webhook guidance.
@@ -70,6 +71,10 @@ export function RepoBehaviorSection({
     },
   });
 
+  const setTriggerAll = api.webhooks.setTriggerOnAllEvents.useMutation({
+    onSuccess: () => utils.webhooks.getConfig.invalidate({ repoFullName }),
+  });
+
   return (
     <form
       onSubmit={(e) => {
@@ -103,9 +108,22 @@ export function RepoBehaviorSection({
           className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 focus:border-purple-500/50 focus:outline-none"
         />
         <p className="text-xs text-white/30">
-          When set, only events whose title or body contains this text trigger
-          an agent. Leave blank to act on all events.
+          Only events whose title or body contains this text trigger an agent.
+          Without a prefix (and with the toggle below off), webhook events never
+          trigger agents.
         </p>
+        <ToggleSection
+          label="Always trigger on events"
+          description="Fire an agent on every issue and comment event, ignoring the trigger prefix. Fired events spend the initiating user's (or the repo's shared) credentials."
+          enabled={config?.triggerOnAllEvents ?? false}
+          disabled={setTriggerAll.isPending || !config}
+          onChange={(v) => setTriggerAll.mutate({ repoFullName, enabled: v })}
+          accent="purple"
+          switchAriaLabel="Always trigger on webhook events"
+        />
+        {setTriggerAll.error && (
+          <p className="text-xs text-red-400">{setTriggerAll.error.message}</p>
+        )}
       </div>
 
       {/* Agent image */}

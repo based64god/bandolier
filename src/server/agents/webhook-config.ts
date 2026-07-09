@@ -6,8 +6,16 @@ import { type db } from "~/server/db";
 import { repoWebhookConfig } from "~/server/db/schema";
 
 export interface RepoWebhookConfig {
-  /** Trigger phrase events must contain; null means act on all events. */
+  /**
+   * Trigger phrase events must contain; null means webhook events never
+   * trigger agents (unless `triggerOnAllEvents` opts into everything).
+   */
   prefix: string | null;
+  /**
+   * When true, webhook events always trigger agents, ignoring the prefix.
+   * Off by default — see `shouldTriggerOnEvent`.
+   */
+  triggerOnAllEvents: boolean;
   /** Agent harness image override; null means use the server-wide default. */
   agentImage: string | null;
   /** Default model id for webhook-triggered agents; null means provider default. */
@@ -123,6 +131,20 @@ export async function getRepoCredentials(
   return row ? repoCredentials(row) : null;
 }
 
+/**
+ * Whether a webhook event's text should trigger an agent. The default is
+ * never: a repo must opt in, either with a trigger phrase the text has to
+ * contain, or with `triggerOnAllEvents`, which fires on everything and
+ * ignores the phrase. A repo with no config row (null) never triggers.
+ */
+export function shouldTriggerOnEvent(
+  config: Pick<RepoWebhookConfig, "prefix" | "triggerOnAllEvents"> | null,
+  text: string,
+): boolean {
+  if (config?.triggerOnAllEvents) return true;
+  return !!config?.prefix && text.includes(config.prefix);
+}
+
 /** Returns a repo's config (prefix + agent image + default model), or null. */
 export async function getRepoWebhookConfig(
   database: typeof db,
@@ -132,6 +154,7 @@ export async function getRepoWebhookConfig(
   if (!row) return null;
   return {
     prefix: row.prefix ?? null,
+    triggerOnAllEvents: row.triggerOnAllEvents,
     agentImage: row.agentImage ?? null,
     defaultWebhookModel: row.defaultWebhookModel ?? null,
     defaultWebhookEffort: row.defaultWebhookEffort ?? null,

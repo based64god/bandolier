@@ -24,7 +24,6 @@ import {
 } from "./notifications";
 import { OverviewPanel } from "./overview-panel";
 import { recordRecentRepo } from "./recent-repos";
-import { RepoConfigModal } from "./repo-config";
 import { TaskTable, TaskTableSkeleton } from "./task-table";
 
 export function AgentDashboard({
@@ -37,7 +36,6 @@ export function AgentDashboard({
   const router = useRouter();
   const [logPod, setLogPod] = useState<string | null>(null);
   const [showDeploy, setShowDeploy] = useState(false);
-  const [showRepoConfig, setShowRepoConfig] = useState(false);
 
   // The selected repo lives in the URL (repoSlug) so it survives refreshes.
   // Namespace is derived from the slug directly so the agent list can load
@@ -241,7 +239,10 @@ export function AgentDashboard({
         onToggleNotify={() => void toggleNotify()}
         onDeploy={() => setShowDeploy(true)}
         onShowSettings={() => router.push("/settings")}
-        onShowRepoConfig={() => setShowRepoConfig(true)}
+        onShowRepoConfig={() => {
+          if (selectedRepo)
+            router.push(`/repo/${selectedRepo.fullName}/settings`);
+        }}
         onSignOut={handleSignOut}
       />
 
@@ -266,14 +267,15 @@ export function AgentDashboard({
                 Connect a cluster
               </p>
               <p className="mt-1 text-sm text-white/50">
-                Add a kubeconfig to deploy and monitor agents in your cluster.
+                Deploy a cluster with one click — or paste a kubeconfig for one
+                you already have — to run and monitor agents.
               </p>
             </div>
             <button
-              onClick={() => router.push("/settings#kubeconfig")}
+              onClick={() => router.push("/settings#cluster-deploy")}
               className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-black hover:bg-sky-500"
             >
-              Configure kubeconfig
+              Set up a cluster
             </button>
           </div>
         )}
@@ -411,12 +413,6 @@ export function AgentDashboard({
           repoFullName={selectedRepo.fullName}
           defaultRepoUrl={selectedRepo.cloneUrl}
           defaultBranch={selectedRepo.defaultBranch}
-        />
-      )}
-      {showRepoConfig && selectedRepo?.isAdmin && (
-        <RepoConfigModal
-          repoFullName={selectedRepo.fullName}
-          onClose={() => setShowRepoConfig(false)}
         />
       )}
     </div>

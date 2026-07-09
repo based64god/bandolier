@@ -415,7 +415,7 @@ export const accountRouter = createTRPCRouter({
   kubeconfigStatus: protectedProcedure
     // `repoFullName` lets the status account for a repo's own kubeconfig: a repo
     // may provide (and prefer) its own cluster even when the user hasn't set one,
-    // in which case the "Configure kubeconfig" prompt shouldn't render.
+    // in which case the "Set up a cluster" prompt shouldn't render.
     .input(z.object({ repoFullName: z.string().optional() }).optional())
     .query(async ({ ctx, input }) => {
       // When the selected repo prefers its own shared credentials and has a set

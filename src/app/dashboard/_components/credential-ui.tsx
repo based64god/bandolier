@@ -24,7 +24,7 @@ export function useCredentialMutations(invalidate: () => Promise<unknown>) {
 }
 
 // Shared building blocks for the credential sections that appear both
-// user-scoped (settings page) and repo-scoped (RepoConfigModal). Before this,
+// user-scoped (settings page) and repo-scoped (repo settings page). Before this,
 // every provider section duplicated the same masked-row / input-form / feedback
 // markup twice over; these primitives are the single source of truth.
 
@@ -219,7 +219,7 @@ export function SecretForm({
 }
 
 // The CPU / memory compute form shared by the user-scoped (settings page) and
-// repo-scoped (RepoConfigModal) sections. Owns the "null = untouched" input
+// repo-scoped (repo settings page) sections. Owns the "null = untouched" input
 // state and the dirty check both used to duplicate; the caller supplies the
 // stored `values`, an async `onSave` (typically a mutation's `mutateAsync`) and
 // its `pending`/`error`, plus the accent and heading/container copy that differ.

@@ -346,7 +346,7 @@ export function DashboardHeader({
                     }}
                     className={`mt-1 ${menuItemClass}`}
                   >
-                    Repo config
+                    Repo settings
                   </button>
                 )}
                 <button
@@ -404,15 +404,15 @@ export function DashboardHeader({
             loading={reposLoading}
           />
 
-          {/* Repo config (webhooks + agent image) — only when the user can
-              manage this repo (admin on GitHub). Kept on the left so toggling
-              it doesn't shift the Deploy button. */}
+          {/* Repo settings (webhooks, defaults, shared credentials) — only
+              when the user can manage this repo (admin on GitHub). Kept on the
+              left so toggling it doesn't shift the Deploy button. */}
           {canManageRepo && (
             <button
               onClick={onShowRepoConfig}
               className="hidden rounded-lg border border-white/10 px-3 py-1.5 text-sm font-medium whitespace-nowrap text-white/70 hover:bg-white/10 hover:text-white xl:inline-flex"
             >
-              Repo config
+              Repo settings
             </button>
           )}
         </div>

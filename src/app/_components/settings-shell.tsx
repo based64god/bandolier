@@ -134,7 +134,10 @@ export function SettingsShell({
       </header>
 
       <div className="mx-auto flex max-w-5xl flex-col gap-6 px-4 py-6 sm:px-6 md:flex-row md:gap-10 md:py-8">
-        {/* Group tabs — a horizontal row below md:, a sidebar from md: up.
+        {/* Group tabs — a wrapping horizontal row below md:, a sidebar from
+            md: up. Below md: the tabs wrap onto as many rows as they need so
+            they never run off the side of a narrow viewport; flex-nowrap
+            restores the single column once the sidebar layout takes over.
             The sidebar sticks below the sticky header while the panel
             scrolls; self-start keeps it its natural height (a flex child
             stretched to the column's full height has no room to stick).
@@ -142,7 +145,7 @@ export function SettingsShell({
             the 59px header (py-3 + the 34px back-link + border-b) plus this
             wrapper's md:py-8 — or the sidebar visibly slides that difference
             before pinning. */}
-        <nav className="flex gap-1 overflow-x-auto md:sticky md:top-[91px] md:w-52 md:shrink-0 md:flex-col md:gap-4 md:self-start">
+        <nav className="flex flex-wrap gap-1 md:sticky md:top-[91px] md:w-52 md:shrink-0 md:flex-col md:flex-nowrap md:gap-4 md:self-start">
           {nav.map((group) => (
             <div key={group.id} className="md:space-y-1">
               <a

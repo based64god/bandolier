@@ -3,8 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 import { BandolierIcon } from "./bandolier-icon";
+import { useCanGoBack } from "./navigation-history";
 
 // Sidebar structure for a settings page: purpose groups, each listing the
 // cards its panel renders. Group and card ids double as URL hashes
@@ -44,6 +46,7 @@ export function SettingsShell({
   titleAccessory,
   backHref,
   backLabel,
+  backToHistory = false,
   nav,
   defaultGroup,
   children,
@@ -52,11 +55,19 @@ export function SettingsShell({
   titleAccessory?: React.ReactNode;
   backHref: string;
   backLabel: string;
+  // When set, the back control returns to the previous in-app page rather than
+  // the fixed backHref — but only when the user actually arrived from within
+  // the app. A direct visit (deep link, refresh, new tab) has no prior in-app
+  // entry, so we fall back to backHref/backLabel.
+  backToHistory?: boolean;
   nav: SettingsNavGroup[];
   defaultGroup: string;
   children: (active: string) => React.ReactNode;
 }) {
+  const router = useRouter();
+  const cameFromApp = useCanGoBack();
   const [active, setActive] = useState(defaultGroup);
+  const canGoBack = backToHistory && cameFromApp;
 
   const groupForHash = useMemo(
     () =>
@@ -103,12 +114,22 @@ export function SettingsShell({
             <h1 className="text-lg font-semibold tracking-tight">{title}</h1>
             {titleAccessory}
           </div>
-          <Link
-            href={backHref}
-            className="shrink-0 rounded-lg border border-white/10 px-3 py-1.5 text-sm text-white/70 hover:bg-white/10 hover:text-white"
-          >
-            ← {backLabel}
-          </Link>
+          {canGoBack ? (
+            <button
+              type="button"
+              onClick={() => router.back()}
+              className="shrink-0 rounded-lg border border-white/10 px-3 py-1.5 text-sm text-white/70 hover:bg-white/10 hover:text-white"
+            >
+              ← Back
+            </button>
+          ) : (
+            <Link
+              href={backHref}
+              className="shrink-0 rounded-lg border border-white/10 px-3 py-1.5 text-sm text-white/70 hover:bg-white/10 hover:text-white"
+            >
+              ← {backLabel}
+            </Link>
+          )}
         </div>
       </header>
 

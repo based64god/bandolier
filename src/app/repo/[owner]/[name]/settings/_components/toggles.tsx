@@ -1,7 +1,7 @@
 "use client";
 
 import { api } from "~/trpc/react";
-import { ToggleSection } from "../credential-ui";
+import { ToggleSection } from "~/app/dashboard/_components/credential-ui";
 
 // Resumeable tasks: when CI fails on a PR Bandolier opened, auto-resume the run
 // that produced it to investigate and push a fix. Off by default — it spends the
@@ -25,9 +25,9 @@ export function RepoResumeSection({ repoFullName }: { repoFullName: string }) {
   const blockedOnArtifacts = !hasArtifactStore && !enabled;
 
   return (
-    <div className="space-y-3 border-t border-white/10 pt-5">
+    <div className="space-y-3">
       <div className="space-y-1">
-        <h3 className="text-xs font-semibold tracking-wider text-white/50 uppercase">
+        <h3 className="text-sm font-semibold text-purple-300">
           Resume tasks on CI failure
         </h3>
         <p className="text-xs text-white/40">

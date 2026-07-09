@@ -13,7 +13,7 @@ import { api } from "~/trpc/react";
 
 // The user-scoped model-provider credential sections (Anthropic, OpenAI,
 // Gemini, AWS Bedrock), one card each on the settings page's "Model providers"
-// panel. Repo-scoped overrides live in the repo-config modal and share the
+// panel. Repo-scoped overrides live on the repo settings page and share the
 // same credential-ui primitives.
 
 export function AnthropicSection() {

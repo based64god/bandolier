@@ -1,0 +1,1 @@
+ALTER TABLE "repo_webhook_config" ADD COLUMN "trigger_on_all_events" boolean DEFAULT false NOT NULL;

@@ -215,8 +215,13 @@ export const acpFrame = pgTable(
 export const repoWebhookConfig = pgTable("repo_webhook_config", {
   repoFullName: text("repo_full_name").primaryKey(),
   // Optional trigger phrase: when set, only webhook events whose text contains
-  // it are acted on. Null = act on all events.
+  // it are acted on. Null = webhook events never trigger agents, unless
+  // triggerOnAllEvents opts the repo into firing on everything.
   prefix: text("prefix"),
+  // When true, webhook events always trigger agents, ignoring the prefix
+  // entirely. Off by default: a repo must opt in — by phrase or by this
+  // toggle — before events spend anyone's credentials.
+  triggerOnAllEvents: boolean("trigger_on_all_events").notNull().default(false),
   // Optional override for the agent harness container image used by agents run
   // for this repo. Null = use the built-in DEFAULT_HARNESS_IMAGE.
   agentImage: text("agent_image"),

@@ -111,6 +111,9 @@ function issuePayload(
 
 const CONFIG: WebhookRunConfig = {
   prefix: null,
+  // Events never trigger by default, so the happy-path fixture opts into
+  // firing on everything; the trigger-gate tests flip this off.
+  triggerOnAllEvents: true,
   agentImage: null,
   defaultWebhookModel: null,
   defaultWebhookEffort: null,
@@ -185,12 +188,13 @@ describe("bot-loop guard", () => {
   });
 });
 
-// ── Trigger-prefix gate ──────────────────────────────────────────────────────
+// ── Trigger gate ─────────────────────────────────────────────────────────────
 
-describe("trigger-prefix gate", () => {
+describe("trigger gate", () => {
   it("skips when a configured prefix is absent from the comment", async () => {
     await handleIssueComment(issuePayload({ body: "just chatting" }), {
       ...CONFIG,
+      triggerOnAllEvents: false,
       prefix: "/bando",
     });
 
@@ -205,6 +209,7 @@ describe("trigger-prefix gate", () => {
 
     await handleIssueComment(issuePayload({ body: "/bando please go" }), {
       ...CONFIG,
+      triggerOnAllEvents: false,
       prefix: "/bando",
     });
 
@@ -212,12 +217,29 @@ describe("trigger-prefix gate", () => {
     expect(createAgentJob).toHaveBeenCalledTimes(1);
   });
 
-  it("acts on every comment when no prefix is configured", async () => {
+  it("never triggers by default — no prefix, toggle off", async () => {
     parentRows = [
       { jobName: "parent-1", displayName: "d", pullRequestUrl: null },
     ];
 
-    await handleIssueComment(issuePayload({ body: "no prefix here" }), CONFIG);
+    await handleIssueComment(issuePayload({ body: "no prefix here" }), {
+      ...CONFIG,
+      triggerOnAllEvents: false,
+    });
+
+    expect(dbSelect).not.toHaveBeenCalled();
+    expect(createAgentJob).not.toHaveBeenCalled();
+  });
+
+  it("trigger-on-all-events acts on every comment, ignoring the prefix", async () => {
+    parentRows = [
+      { jobName: "parent-1", displayName: "d", pullRequestUrl: null },
+    ];
+
+    await handleIssueComment(issuePayload({ body: "no prefix here" }), {
+      ...CONFIG,
+      prefix: "/bando",
+    });
 
     expect(createAgentJob).toHaveBeenCalledTimes(1);
   });

@@ -3,13 +3,16 @@
 import { useRef, useState } from "react";
 
 import { api } from "~/trpc/react";
-import { CredentialFeedback, ToggleSection } from "../credential-ui";
+import {
+  CredentialFeedback,
+  ToggleSection,
+} from "~/app/dashboard/_components/credential-ui";
 
 // Per-repo network-policy egress toggles. Both loosen the default agent
 // NetworkPolicy (deny inbound; egress only to DNS + the public internet on
 // 80/443, with in-cluster private ranges blocked) and are OFF by default.
 // Enabling either trades isolation for reach, so a prominent security warning
-// sits above the toggles. Admin-only (the whole modal is gated server-side).
+// sits above the toggles. Admin-only (the whole page is gated server-side).
 export function RepoNetworkPolicySection({
   repoFullName,
 }: {
@@ -46,9 +49,9 @@ export function RepoNetworkPolicySection({
   const advancedVisible = showAdvanced || hasCustomYaml;
 
   return (
-    <div className="space-y-4 border-t border-white/10 pt-5">
+    <div className="space-y-4">
       <div className="space-y-1">
-        <h3 className="text-xs font-semibold tracking-wider text-white/50 uppercase">
+        <h3 className="text-sm font-semibold text-amber-300">
           Network policy egress
         </h3>
         <p className="text-xs text-white/40">

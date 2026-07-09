@@ -4,9 +4,12 @@ import { useState } from "react";
 
 import { EFFORT_LEVELS, providerSupportsEffort } from "~/lib/effort";
 import { api } from "~/trpc/react";
-import { ComputeForm, CredentialFeedback } from "../credential-ui";
-import { ProviderTag } from "../provider-tag";
-import { SearchableSelect } from "../searchable-select";
+import {
+  ComputeForm,
+  CredentialFeedback,
+} from "~/app/dashboard/_components/credential-ui";
+import { ProviderTag } from "~/app/dashboard/_components/provider-tag";
+import { SearchableSelect } from "~/app/dashboard/_components/searchable-select";
 
 // Default model for webhook-triggered agents on this repo, chosen from the models
 // the admin's + repo's credentials unlock. Saved immediately on selection.
@@ -30,8 +33,8 @@ export function RepoDefaultModelSection({
   });
 
   return (
-    <div className="space-y-2 border-t border-white/10 pt-5">
-      <h3 className="text-xs font-semibold tracking-wider text-white/50 uppercase">
+    <div className="space-y-2">
+      <h3 className="text-sm font-semibold text-purple-300">
         Default webhook model
       </h3>
       <p className="text-xs text-white/40">
@@ -116,8 +119,11 @@ export function RepoDefaultEffortSection({
   const current = config?.defaultWebhookEffort ?? "";
 
   return (
+    // Shares the webhook-defaults card with the model default above, so it
+    // keeps an internal separator rather than a card of its own (which would
+    // sit empty whenever the provider hides the control).
     <div className="space-y-2 border-t border-white/10 pt-5">
-      <h3 className="text-xs font-semibold tracking-wider text-white/50 uppercase">
+      <h3 className="text-sm font-semibold text-purple-300">
         Default webhook effort
       </h3>
       <p className="text-xs text-white/40">
@@ -181,9 +187,9 @@ export function RepoDefaultComputeSection({
   return (
     <ComputeForm
       accent="purple"
-      containerClassName="space-y-2 border-t border-white/10 pt-5"
+      containerClassName="space-y-2"
       title="Default agent compute"
-      titleClassName="text-xs font-semibold tracking-wider text-white/50 uppercase"
+      titleClassName="text-sm font-semibold text-purple-300"
       description={
         <>
           CPU / memory limit for agents run on this repo, as Kubernetes

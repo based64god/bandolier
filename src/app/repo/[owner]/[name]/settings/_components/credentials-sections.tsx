@@ -3,13 +3,14 @@
 import { useState } from "react";
 
 import { api } from "~/trpc/react";
+import { SettingsCard } from "~/app/_components/settings-shell";
 import {
   CredentialFeedback,
   MaskedCredentialRow,
   SecretForm,
   useCredentialMutations,
-} from "../credential-ui";
-import { parseAwsCredentials } from "../parse-aws";
+} from "~/app/dashboard/_components/credential-ui";
+import { parseAwsCredentials } from "~/app/dashboard/_components/parse-aws";
 
 type Accent = "purple" | "teal" | "blue" | "orange" | "sky" | "emerald";
 
@@ -25,7 +26,7 @@ const ACCENT_TEXT: Record<Accent, string> = {
 };
 
 // A single-key credential shared by everyone working on this repo (Anthropic,
-// OpenAI, …). Admin-only (the whole modal is gated on repo admin server-side).
+// OpenAI, …). Admin-only (the whole page is gated on repo admin server-side).
 // The providers differ only in label/accent/placeholder and which mutation
 // pair saves and removes the key, so they're driven by config rather than
 // copied per provider.
@@ -59,9 +60,9 @@ function RepoApiKeySection({
 
   return (
     <div className="space-y-2">
-      <h4 className={`text-xs font-semibold ${ACCENT_TEXT[accent]}`}>
+      <h3 className={`text-sm font-semibold ${ACCENT_TEXT[accent]}`}>
         {label}
-      </h4>
+      </h3>
       {status?.configured ? (
         <MaskedCredentialRow
           onRemove={() => remove.mutate({ repoFullName })}
@@ -160,9 +161,9 @@ function RepoGeminiSection({
 
   return (
     <div className="space-y-2">
-      <h4 className="text-xs font-semibold text-blue-300">
+      <h3 className="text-sm font-semibold text-blue-300">
         Gemini (Google Cloud project credentials)
-      </h4>
+      </h3>
       {status?.configured ? (
         <MaskedCredentialRow
           onRemove={() => remove.mutate({ repoFullName })}
@@ -249,9 +250,9 @@ function RepoAwsSection({
 
   return (
     <div className="space-y-2">
-      <h4 className="text-xs font-semibold text-orange-300">
+      <h3 className="text-sm font-semibold text-orange-300">
         AWS Bedrock credentials
-      </h4>
+      </h3>
       {status?.configured ? (
         <MaskedCredentialRow
           onRemove={() => remove.mutate({ repoFullName })}
@@ -378,9 +379,9 @@ function RepoArtifactsSection({
 
   return (
     <div className="space-y-2">
-      <h4 className="text-xs font-semibold text-emerald-300">
+      <h3 className="text-sm font-semibold text-emerald-300">
         Run artifact storage (S3)
-      </h4>
+      </h3>
       <p className="text-xs text-white/40">
         A bucket this repo owns for persisted run transcripts. Without one, they
         vanish with the pod. Use credentials scoped to just this bucket — they
@@ -504,7 +505,7 @@ function RepoKubeconfigSection({
 
   return (
     <div className="space-y-2">
-      <h4 className="text-xs font-semibold text-sky-300">Kubeconfig</h4>
+      <h3 className="text-sm font-semibold text-sky-300">Kubeconfig</h3>
       {configured ? (
         <MaskedCredentialRow
           onRemove={() => remove.mutate({ repoFullName })}
@@ -540,8 +541,11 @@ function RepoKubeconfigSection({
 }
 
 // Repo-scoped shared infrastructure: kubeconfig + model credentials, plus the
-// user-vs-repo preference toggle and a prominent security warning.
-export function RepoCredentialsSection({
+// user-vs-repo preference toggle and a prominent security warning. Renders the
+// whole "Shared credentials" settings panel — intro, warning, then one card
+// per credential (the cards mount only once the status query resolves, so the
+// forms never flash their empty state while it loads).
+export function RepoCredentialsPanel({
   repoFullName,
 }: {
   repoFullName: string;
@@ -555,17 +559,16 @@ export function RepoCredentialsSection({
   });
 
   return (
-    <div className="space-y-4 border-t border-white/10 pt-5">
-      <div className="space-y-1">
-        <h3 className="text-xs font-semibold tracking-wider text-white/50 uppercase">
-          Shared credentials
-        </h3>
-        <p className="text-xs text-white/40">
-          A cluster and model credentials shared by everyone who runs agents for
-          this repo (including webhook-triggered runs), so they don&apos;t each
-          need their own. Only repo admins can change them.
-        </p>
-      </div>
+    <>
+      <p className="text-xs text-white/40">
+        A cluster and model credentials shared by everyone who runs agents for
+        this repo (including webhook-triggered runs), so they don&apos;t each
+        need their own. Only repo admins can change them. Without shared
+        credentials, an agent triggered by a GitHub event runs with the
+        credentials of the user who initiated it (e.g. the issue opener), so
+        that user must be signed in to Bandolier with model and cluster
+        credentials configured.
+      </p>
 
       {/* Security warning — these are shared infrastructure. */}
       <div className="flex gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5">
@@ -590,75 +593,93 @@ export function RepoCredentialsSection({
         <p className="text-xs text-white/30">Loading…</p>
       ) : (
         <>
-          <RepoKubeconfigSection
-            repoFullName={repoFullName}
-            configured={creds?.hasKubeconfig ?? false}
-          />
-          <RepoAnthropicSection
-            repoFullName={repoFullName}
-            status={creds?.anthropic}
-          />
-          <RepoOpenAISection
-            repoFullName={repoFullName}
-            status={creds?.openai}
-          />
-          <RepoGeminiSection
-            repoFullName={repoFullName}
-            status={creds?.gemini}
-          />
-          <RepoAwsSection repoFullName={repoFullName} status={creds?.aws} />
-          <RepoArtifactsSection
-            repoFullName={repoFullName}
-            status={creds?.artifacts}
-          />
+          <SettingsCard id="kubeconfig">
+            <RepoKubeconfigSection
+              repoFullName={repoFullName}
+              configured={creds?.hasKubeconfig ?? false}
+            />
+          </SettingsCard>
+          <SettingsCard id="anthropic">
+            <RepoAnthropicSection
+              repoFullName={repoFullName}
+              status={creds?.anthropic}
+            />
+          </SettingsCard>
+          <SettingsCard id="openai">
+            <RepoOpenAISection
+              repoFullName={repoFullName}
+              status={creds?.openai}
+            />
+          </SettingsCard>
+          <SettingsCard id="gemini">
+            <RepoGeminiSection
+              repoFullName={repoFullName}
+              status={creds?.gemini}
+            />
+          </SettingsCard>
+          <SettingsCard id="aws">
+            <RepoAwsSection repoFullName={repoFullName} status={creds?.aws} />
+          </SettingsCard>
+          <SettingsCard id="artifacts">
+            <RepoArtifactsSection
+              repoFullName={repoFullName}
+              status={creds?.artifacts}
+            />
+          </SettingsCard>
 
           {/* Prefer user vs repo credentials. */}
-          <div className="space-y-2 rounded-lg border border-white/10 bg-white/[0.03] p-3">
-            <h4 className="text-xs font-semibold text-white/70">
-              Credential preference
-            </h4>
-            <p className="text-xs text-white/40">
-              When a user has their own credentials and this repo has shared
-              ones, which should an agent use?
-            </p>
-            <div className="flex gap-2 pt-0.5">
-              <button
-                type="button"
-                onClick={() =>
-                  setPrefer.mutate({ repoFullName, prefer: false })
-                }
-                disabled={setPrefer.isPending}
-                className={`flex-1 rounded-lg border px-3 py-2 text-xs font-medium disabled:opacity-50 ${
-                  !creds?.preferRepoCredentials
-                    ? "border-purple-500/50 bg-purple-500/15 text-purple-200"
-                    : "border-white/10 bg-white/5 text-white/60 hover:bg-white/10"
-                }`}
-              >
-                Prefer user credentials
-              </button>
-              <button
-                type="button"
-                onClick={() => setPrefer.mutate({ repoFullName, prefer: true })}
-                disabled={setPrefer.isPending}
-                className={`flex-1 rounded-lg border px-3 py-2 text-xs font-medium disabled:opacity-50 ${
-                  creds?.preferRepoCredentials
-                    ? "border-purple-500/50 bg-purple-500/15 text-purple-200"
-                    : "border-white/10 bg-white/5 text-white/60 hover:bg-white/10"
-                }`}
-              >
-                Prefer repo credentials
-              </button>
+          <SettingsCard id="preference">
+            <div className="space-y-2">
+              <h3 className="text-sm font-semibold text-white/80">
+                Credential preference
+              </h3>
+              <p className="text-xs text-white/40">
+                When a user has their own credentials and this repo has shared
+                ones, which should an agent use?
+              </p>
+              <div className="flex gap-2 pt-0.5">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setPrefer.mutate({ repoFullName, prefer: false })
+                  }
+                  disabled={setPrefer.isPending}
+                  className={`flex-1 rounded-lg border px-3 py-2 text-xs font-medium disabled:opacity-50 ${
+                    !creds?.preferRepoCredentials
+                      ? "border-purple-500/50 bg-purple-500/15 text-purple-200"
+                      : "border-white/10 bg-white/5 text-white/60 hover:bg-white/10"
+                  }`}
+                >
+                  Prefer user credentials
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setPrefer.mutate({ repoFullName, prefer: true })
+                  }
+                  disabled={setPrefer.isPending}
+                  className={`flex-1 rounded-lg border px-3 py-2 text-xs font-medium disabled:opacity-50 ${
+                    creds?.preferRepoCredentials
+                      ? "border-purple-500/50 bg-purple-500/15 text-purple-200"
+                      : "border-white/10 bg-white/5 text-white/60 hover:bg-white/10"
+                  }`}
+                >
+                  Prefer repo credentials
+                </button>
+              </div>
+              <p className="text-[11px] text-white/30">
+                The other side is still used as a fallback when the preferred
+                one isn&apos;t configured.
+              </p>
+              {setPrefer.error && (
+                <p className="text-xs text-red-400">
+                  {setPrefer.error.message}
+                </p>
+              )}
             </div>
-            <p className="text-[11px] text-white/30">
-              The other side is still used as a fallback when the preferred one
-              isn&apos;t configured.
-            </p>
-            {setPrefer.error && (
-              <p className="text-xs text-red-400">{setPrefer.error.message}</p>
-            )}
-          </div>
+          </SettingsCard>
         </>
       )}
-    </div>
+    </>
   );
 }

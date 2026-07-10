@@ -15,6 +15,17 @@ export type TimelineItem =
       text: string;
     }
   | {
+      // A subagent's narration (its assistant text or thinking), kept out of the
+      // main conversation flow and surfaced in the pinned subagent card instead —
+      // users don't drive subagents, so their chatter is reference, not dialogue.
+      type: "subagent-log";
+      id: string;
+      // The spawning Agent/Task call's id: which subagent this narration is from.
+      parentToolCallId: string;
+      variant: "message" | "thinking";
+      text: string;
+    }
+  | {
       type: "tool";
       id: string;
       // The agent-assigned tool_call id, used to match a later
@@ -67,6 +78,37 @@ interface ParsedUpdate {
 /** Text of a message chunk's content, ignoring the tool_call_update array form. */
 function chunkText(content: ParsedUpdate["content"]): string {
   return content && !Array.isArray(content) ? (content.text ?? "") : "";
+}
+
+/**
+ * Appends a subagent narration chunk, coalescing with the immediately-preceding
+ * entry when it's the same subagent and variant (message vs thinking) — the same
+ * chunk-merging the main conversation does, keyed by subagent instead of
+ * messageId so parallel subagents interleaving on one stream stay separate.
+ */
+function pushSubagentLog(
+  items: TimelineItem[],
+  seq: number,
+  parentToolCallId: string,
+  variant: "message" | "thinking",
+  text: string,
+): void {
+  const last = items[items.length - 1];
+  if (
+    last?.type === "subagent-log" &&
+    last.parentToolCallId === parentToolCallId &&
+    last.variant === variant
+  ) {
+    items[items.length - 1] = { ...last, text: last.text + text };
+  } else {
+    items.push({
+      type: "subagent-log",
+      id: `s-${seq}`,
+      parentToolCallId,
+      variant,
+      text,
+    });
+  }
 }
 
 /** Concatenated text of a tool_call_update's content blocks. */
@@ -141,6 +183,13 @@ export function applyFrames(
       case "agent_message_chunk": {
         const text = chunkText(u.content);
         if (!text) break;
+        // A subagent's message (tagged with its spawn's id) goes to the subagent
+        // card, not the conversation. Coalesce consecutive chunks of the same
+        // subagent+variant into one entry.
+        if (u.parentToolCallId) {
+          pushSubagentLog(items, f.seq, u.parentToolCallId, "message", text);
+          break;
+        }
         const last = items[items.length - 1];
         // Coalesce only with the immediately-preceding bubble of the same
         // message. A tool call (or a new messageId) starts a fresh bubble — and
@@ -162,6 +211,14 @@ export function applyFrames(
             text,
           });
         }
+        break;
+      }
+      case "agent_thought_chunk": {
+        // Only a subagent's thinking is surfaced (in the card); the main agent's
+        // thinking isn't rendered in the interactive view, as before.
+        const text = chunkText(u.content);
+        if (!text || !u.parentToolCallId) break;
+        pushSubagentLog(items, f.seq, u.parentToolCallId, "thinking", text);
         break;
       }
       case "user_message_chunk": {
@@ -276,6 +333,8 @@ export function buildToolTree(items: ToolItem[]): ToolNode[] {
 export function groupTimeline(items: TimelineItem[]): TimelineGroup[] {
   const runs: (ToolItem[] | Extract<TimelineItem, { type: "message" }>)[] = [];
   for (const item of items) {
+    // Subagent narration is rendered in the pinned card, not the main flow.
+    if (item.type === "subagent-log") continue;
     if (item.type === "tool") {
       const last = runs[runs.length - 1];
       if (Array.isArray(last)) last.push(item);
@@ -289,6 +348,48 @@ export function groupTimeline(items: TimelineItem[]): TimelineGroup[] {
       ? { type: "tools", id: run[0]!.id, nodes: buildToolTree(run) }
       : { type: "message", id: run.id, item: run },
   );
+}
+
+/** One subagent's narration, ready for the pinned card / popout modal. */
+export interface SubagentNarration {
+  /** The spawning Agent/Task call's id — stable per subagent. */
+  toolCallId: string;
+  /** The subagent's label (from its spawn tool call), e.g. "Agent(Explore): …". */
+  label: string;
+  entries: { variant: "message" | "thinking"; text: string }[];
+}
+
+/**
+ * Groups subagent-narration items by subagent (in first-seen order), resolving
+ * each subagent's label from its spawn tool call. Pure, so the card and its
+ * popout can render from the same timeline the conversation uses.
+ */
+export function collectSubagentNarration(
+  items: TimelineItem[],
+): SubagentNarration[] {
+  const labels = new Map<string, string>();
+  for (const it of items) {
+    if (it.type === "tool" && it.kind === "subagent" && it.toolCallId) {
+      labels.set(it.toolCallId, it.title);
+    }
+  }
+  const order: string[] = [];
+  const byId = new Map<string, SubagentNarration>();
+  for (const it of items) {
+    if (it.type !== "subagent-log") continue;
+    let n = byId.get(it.parentToolCallId);
+    if (!n) {
+      n = {
+        toolCallId: it.parentToolCallId,
+        label: labels.get(it.parentToolCallId) ?? "subagent",
+        entries: [],
+      };
+      byId.set(it.parentToolCallId, n);
+      order.push(it.parentToolCallId);
+    }
+    n.entries.push({ variant: it.variant, text: it.text });
+  }
+  return order.map((id) => byId.get(id)!);
 }
 
 /** Builds a session/prompt JSON-RPC frame for the frontend client to enqueue. */

@@ -143,11 +143,7 @@ func (s *claudeLogSink) subagentPrefix(parentID string) string {
 	if parentID == "" {
 		return ""
 	}
-	label := s.labels[parentID]
-	if label == "" {
-		label = "subagent"
-	}
-	return subagentMarker + " " + label + " " + subagentSep + " "
+	return subagentLinePrefix(s.labels[parentID])
 }
 
 func (*claudeLogSink) onSlashCommands([]string) {}
@@ -220,6 +216,18 @@ const (
 // tool from "Task" to "Agent" in CLI v2.1.63; both names still appear (e.g.
 // permission_denials keep "Task"), so match either.
 func isAgentTool(name string) bool { return name == "Agent" || name == "Task" }
+
+// subagentLinePrefix builds the marker inserted after the [harness] tag on a
+// subagent's transcript line, naming which subagent produced it. Shared by both
+// render paths (the one-shot log sink and the interactive proxy) so they emit
+// the same ⇉ <label> ⟫ form the frontend folds. An empty label falls back to a
+// generic name (the interactive proxy doesn't track per-subagent labels).
+func subagentLinePrefix(label string) string {
+	if label == "" {
+		label = "subagent"
+	}
+	return subagentMarker + " " + label + " " + subagentSep + " "
+}
 
 // maxToolOutput caps how much of a tool result we forward as a tool_call_update:
 // results can be huge (a full file read, a long command's stdout), and both the

@@ -416,9 +416,10 @@ func renderFrameToTranscript(raw []byte) {
 		logToolResult("", b.String())
 	default:
 		var u struct {
-			SessionUpdate string `json:"sessionUpdate"`
-			Title         string `json:"title"`
-			Content       struct {
+			SessionUpdate    string `json:"sessionUpdate"`
+			Title            string `json:"title"`
+			ParentToolCallID string `json:"parentToolCallId"`
+			Content          struct {
 				Text string `json:"text"`
 			} `json:"content"`
 		}
@@ -427,9 +428,21 @@ func renderFrameToTranscript(raw []byte) {
 		}
 		switch u.SessionUpdate {
 		case acp.UpdateAgentMessageChunk:
-			if t := strings.TrimSpace(u.Content.Text); t != "" {
-				fmt.Fprintln(stdoutTee, t)
+			t := strings.TrimSpace(u.Content.Text)
+			if t == "" {
+				break
 			}
+			// A subagent's narration isn't the run's answer — fold it into the
+			// [harness] transcript (attributed generically; the live card carries
+			// the precise label) so it doesn't pollute the output used for
+			// PR-copy / issue generation. Main-agent text surfaces as before.
+			if u.ParentToolCallID != "" {
+				for _, l := range strings.Split(t, "\n") {
+					log.Printf("[harness] %s%s", subagentLinePrefix(""), l)
+				}
+				break
+			}
+			fmt.Fprintln(stdoutTee, t)
 		case acp.UpdateUserMessageChunk:
 			if t := strings.TrimSpace(u.Content.Text); t != "" {
 				logUserInput(t)

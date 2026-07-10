@@ -90,15 +90,15 @@ func flagValue(args []string, flag string) string {
 // handed over as ACP_SYSTEM_PROMPT) and the effort level must reach the claude
 // CLI in interactive mode just as runClaude passes them one-shot.
 func TestClaudeDriverArgs(t *testing.T) {
-	// A max-effort Claude run: the proxy's withRepoPrompt output carries the
-	// ultracode framing, and the driver must forward it plus --effort max.
-	sysPrompt := (config{provider: providerAnthropic, effort: "max"}).withRepoPrompt("frame")
-	args := claudeDriverArgs(&acpAgent{model: "m", effort: "max", sysPrompt: sysPrompt})
+	// A highest-effort Claude run: the proxy's withRepoPrompt output carries the
+	// ultracode framing, and the driver must forward it plus --effort <highest>.
+	sysPrompt := (config{provider: providerAnthropic, effort: highestEffort}).withRepoPrompt("frame")
+	args := claudeDriverArgs(&acpAgent{model: "m", effort: highestEffort, sysPrompt: sysPrompt})
 	if got := flagValue(args, "--append-system-prompt"); got != sysPrompt || !strings.Contains(got, ultracodeFraming) {
 		t.Errorf("--append-system-prompt = %q, want the ultracode system prompt", got)
 	}
-	if got := flagValue(args, "--effort"); got != "max" {
-		t.Errorf("--effort = %q, want max", got)
+	if got := flagValue(args, "--effort"); got != highestEffort {
+		t.Errorf("--effort = %q, want %q", got, highestEffort)
 	}
 
 	// No effort and no system prompt: neither flag is emitted.

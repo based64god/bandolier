@@ -21,6 +21,15 @@ var effortLevels = map[string]bool{
 	"max":    true,
 }
 
+// highestEffort is the top of the effort ladder — the level ultracode binds to,
+// so "ultracode runs at the highest available effort" is a single symbol rather
+// than a literal restated at each use. Pinned to wire-contract.json's
+// highestEffort (and asserted a member of effortLevels) by
+// TestWireContractEffortLevels, so adding a new top level there without updating
+// this constant breaks CI instead of silently leaving ultracode on the old
+// second-highest level.
+const highestEffort = "max"
+
 // normalizeEffort lower-cases and validates a requested effort level, returning
 // "" for anything unrecognized so callers fall back to the CLI default rather
 // than passing an invalid flag.
@@ -109,13 +118,16 @@ func (c config) claudeProvider() bool {
 }
 
 // ultracode reports whether this run enters ultracode mode: Claude Code's
-// standing opt-in to multi-agent orchestration, turned on at maximum reasoning
-// effort. Gated on a Claude provider (only the `claude` CLI takes --effort and
-// ships the Task subagent tool) and the top effort level, so selecting "Max"
-// from the dashboard or an `effort:max` webhook label enables it — and nothing
-// else does. See ultracodeFraming for what it injects.
+// standing opt-in to multi-agent orchestration, turned on at the highest
+// reasoning effort. Gated on a Claude provider (only the `claude` CLI takes
+// --effort and ships the Task subagent tool) and highestEffort, so selecting
+// "Max" from the dashboard or an `effort:max` webhook label enables it — and
+// nothing else does. Keying off highestEffort (not a literal) keeps ultracode
+// bound to the top of the ladder if the levels ever change. The same cfg.effort
+// is forwarded verbatim as --effort (providers_claude.go / acp_agent.go), so an
+// ultracode run always also gets the highest effort. See ultracodeFraming.
 func (c config) ultracode() bool {
-	return c.claudeProvider() && c.effort == "max"
+	return c.claudeProvider() && c.effort == highestEffort
 }
 
 // writesPRCopy reports whether the post-run step generates out-of-band PR copy

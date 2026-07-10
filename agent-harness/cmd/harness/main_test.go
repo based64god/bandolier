@@ -1064,35 +1064,35 @@ func TestWithRepoPrompt(t *testing.T) {
 		t.Errorf("serena-only withRepoPrompt() = %q, want %q", got, want)
 	}
 
-	// A max-effort Claude run appends the ultracode framing last; a non-max
-	// Claude run and a non-Claude max run do not.
-	c = config{provider: providerAnthropic, effort: "max"}
+	// A highest-effort Claude run appends the ultracode framing last; a
+	// below-highest Claude run and a non-Claude highest-effort run do not.
+	c = config{provider: providerAnthropic, effort: highestEffort}
 	if got := c.withRepoPrompt("frame"); got != "frame\n\n"+ultracodeFraming {
 		t.Errorf("ultracode withRepoPrompt() = %q, want ultracode appended", got)
 	}
 	c = config{provider: providerAnthropic, effort: "high"}
 	if got := c.withRepoPrompt("frame"); got != "frame" {
-		t.Errorf("non-max withRepoPrompt() = %q, want no ultracode", got)
+		t.Errorf("below-highest withRepoPrompt() = %q, want no ultracode", got)
 	}
-	c = config{provider: providerOpenAI, effort: "max"}
+	c = config{provider: providerOpenAI, effort: highestEffort}
 	if got := c.withRepoPrompt("frame"); got != "frame" {
-		t.Errorf("non-Claude max withRepoPrompt() = %q, want no ultracode", got)
+		t.Errorf("non-Claude highest-effort withRepoPrompt() = %q, want no ultracode", got)
 	}
 }
 
 func TestUltracode(t *testing.T) {
-	// Only a Claude provider at the top effort level enters ultracode.
+	// Only a Claude provider at the highest effort level enters ultracode.
 	for _, p := range []providerKind{providerAnthropic, providerBedrock} {
-		if !(config{provider: p, effort: "max"}).ultracode() {
-			t.Errorf("ultracode() = false for Claude provider %d at max, want true", p)
+		if !(config{provider: p, effort: highestEffort}).ultracode() {
+			t.Errorf("ultracode() = false for Claude provider %d at highest effort, want true", p)
 		}
 		if (config{provider: p, effort: "high"}).ultracode() {
-			t.Errorf("ultracode() = true for Claude provider %d below max, want false", p)
+			t.Errorf("ultracode() = true for Claude provider %d below highest, want false", p)
 		}
 	}
-	// Non-Claude providers never enter ultracode, even at max effort.
+	// Non-Claude providers never enter ultracode, even at the highest effort.
 	for _, p := range []providerKind{providerNone, providerOpenAI, providerGemini} {
-		if (config{provider: p, effort: "max"}).ultracode() {
+		if (config{provider: p, effort: highestEffort}).ultracode() {
 			t.Errorf("ultracode() = true for non-Claude provider %d, want false", p)
 		}
 	}

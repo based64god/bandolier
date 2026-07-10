@@ -33,3 +33,13 @@ const OUTPUT_ISSUE_LABEL = "output:issue";
 export function wantsIssueOutput(labels: { name: string }[]): boolean {
   return labels.some((l) => l.name.trim().toLowerCase() === OUTPUT_ISSUE_LABEL);
 }
+
+// An `interactive` label starts the run as a long-lived interactive session
+// (Claude driven over streaming JSON, waiting for user input between turns)
+// seeded with the issue, rather than a one-shot run. The user then drives it
+// from the dashboard's ACP session.
+const INTERACTIVE_LABEL = "interactive";
+
+export function wantsInteractive(labels: { name: string }[]): boolean {
+  return labels.some((l) => l.name.trim().toLowerCase() === INTERACTIVE_LABEL);
+}

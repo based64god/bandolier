@@ -149,6 +149,16 @@ export async function POST(req: NextRequest) {
   const tokensHeader = req.headers.get("x-bandolier-tokens");
   const tokens = tokensHeader ? parseTokenMarkerPayload(tokensHeader) : null;
 
+  // The run's terminal state, reported by the harness. The pod's phase is the
+  // live source while the pod exists; persisting it lets the task list show
+  // Succeeded/Failed for runs whose pod the Job TTL has deleted. Values other
+  // than the two pod phases the UI knows are dropped, not stored.
+  const statusHeader = req.headers.get("x-bandolier-status");
+  const status =
+    statusHeader === "Succeeded" || statusHeader === "Failed"
+      ? statusHeader
+      : null;
+
   // The harness's server↔harness contract version. This callback arriving at
   // all proves a harness ran, so an absent/garbled header is recorded as
   // "unreported" (a build predating version reporting — certainly stale)
@@ -166,6 +176,7 @@ export async function POST(req: NextRequest) {
     .update(taskRun)
     .set({
       ...(key && { transcriptKey: key }),
+      ...(status && { status }),
       ...(pullRequestUrl && { pullRequestUrl }),
       ...(createdIssueUrl && { createdIssueUrl }),
       ...(tokens && {
@@ -185,7 +196,7 @@ export async function POST(req: NextRequest) {
   // or the user has no subscriptions. The harness may report the terminal state
   // via x-bandolier-status ("Succeeded"/"Failed"); absent it, a neutral title.
   if (run?.spawnedBy) {
-    const failed = req.headers.get("x-bandolier-status") === "Failed";
+    const failed = status === "Failed";
     await sendPushToUser(run.spawnedBy, {
       title: failed ? "Agent failed" : "Agent finished",
       body: run.displayName ?? jobName,

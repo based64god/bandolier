@@ -235,7 +235,17 @@ export function TaskRow({
         <div
           className={`flex flex-nowrap items-center justify-end gap-1 whitespace-nowrap ${ACTION_ROW_MIN_H}`}
         >
-          {terminating ? (
+          {agent.expired ? (
+            // The pod is gone (Job TTL); the row is served from the persisted
+            // run record, so there is nothing live to terminate — the row still
+            // opens its stored transcript.
+            <span
+              title="The pod has expired; logs come from the stored transcript"
+              className="text-xs text-white/25"
+            >
+              expired
+            </span>
+          ) : terminating ? (
             // Deletion requested — the controls are gone (there's nothing left
             // to confirm) and the status pill carries the "Terminating" cue.
             <span className="text-xs text-white/25">Terminating…</span>

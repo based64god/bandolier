@@ -40,6 +40,12 @@ const (
 	ToolKindSearch  = "search"
 	ToolKindFetch   = "fetch"
 	ToolKindOther   = "other"
+	// ToolKindSubagent is a Bandolier extension (not in the ACP spec's kind
+	// enum): it marks the tool call that spawns a subagent (Claude's Agent/Task
+	// tool) so the client can render it as a labelled parent with its child
+	// tool calls nested beneath. The spec has no subagent concept, so the
+	// dashboard is the only consumer.
+	ToolKindSubagent = "subagent"
 )
 
 // Implementation identifies the agent or client software.
@@ -135,24 +141,37 @@ type SessionNotification struct {
 }
 
 type AgentMessageChunk struct {
-	SessionUpdate string       `json:"sessionUpdate"` // UpdateAgentMessageChunk
-	MessageID     string       `json:"messageId,omitempty"`
-	Content       ContentBlock `json:"content"`
+	SessionUpdate string `json:"sessionUpdate"` // UpdateAgentMessageChunk
+	MessageID     string `json:"messageId,omitempty"`
+	// ParentToolCallID is a Bandolier extension: when set, this message came from
+	// a subagent (the spawning Agent/Task call's id), so the client routes it to
+	// the subagent narration card rather than the main conversation. Empty for
+	// the main agent, so its bubbles are byte-identical to before.
+	ParentToolCallID string       `json:"parentToolCallId,omitempty"`
+	Content          ContentBlock `json:"content"`
 }
 
 type AgentThoughtChunk struct {
-	SessionUpdate string       `json:"sessionUpdate"` // UpdateAgentThoughtChunk
-	MessageID     string       `json:"messageId,omitempty"`
-	Content       ContentBlock `json:"content"`
+	SessionUpdate string `json:"sessionUpdate"` // UpdateAgentThoughtChunk
+	MessageID     string `json:"messageId,omitempty"`
+	// ParentToolCallID mirrors AgentMessageChunk's: set for a subagent's
+	// thinking so the client attributes it to that subagent.
+	ParentToolCallID string       `json:"parentToolCallId,omitempty"`
+	Content          ContentBlock `json:"content"`
 }
 
 type ToolCall struct {
-	SessionUpdate string          `json:"sessionUpdate"` // UpdateToolCall
-	ToolCallID    string          `json:"toolCallId"`
-	Title         string          `json:"title"`
-	Kind          string          `json:"kind,omitempty"`
-	Status        string          `json:"status"`
-	RawInput      json.RawMessage `json:"rawInput,omitempty"`
+	SessionUpdate string `json:"sessionUpdate"` // UpdateToolCall
+	ToolCallID    string `json:"toolCallId"`
+	Title         string `json:"title"`
+	Kind          string `json:"kind,omitempty"`
+	Status        string `json:"status"`
+	// ParentToolCallID is a Bandolier extension linking this tool call to the
+	// subagent-spawning Agent/Task call it ran inside (empty for main-agent
+	// calls). omitempty keeps main-agent frames byte-identical to before. See
+	// ToolKindSubagent.
+	ParentToolCallID string          `json:"parentToolCallId,omitempty"`
+	RawInput         json.RawMessage `json:"rawInput,omitempty"`
 }
 
 type ToolCallUpdate struct {

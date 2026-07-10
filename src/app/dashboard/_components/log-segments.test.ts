@@ -3,8 +3,16 @@ import { describe, expect, it } from "vitest";
 import {
   groupHarnessBlocks,
   harnessOutputText,
+  harnessSubagentText,
   parseSegments,
+  SUBAGENT_MARKER,
+  SUBAGENT_SEP,
 } from "~/app/dashboard/_components/log-segments";
+
+// Builds a subagent-tagged harness line the way the Go harness writes it:
+// [harness] ⇉ <label> ⟫ <body>.
+const subLine = (label: string, body: string) =>
+  `[harness] ${SUBAGENT_MARKER} ${label} ${SUBAGENT_SEP} ${body}`;
 
 describe("parseSegments", () => {
   it("classifies harness, user, and claude lines", () => {
@@ -112,5 +120,56 @@ describe("groupHarnessBlocks", () => {
       { kind: "output", lines: ["alpha"] },
       { kind: "output", lines: ["beta"] },
     ]);
+  });
+
+  it("folds a subagent's run into one labelled block", () => {
+    const lines = [
+      "12:00:01 [harness] → Agent(Explore): find auth",
+      subLine("Agent(Explore): find auth", "→ Grep: login"),
+      subLine("Agent(Explore): find auth", "  ← src/auth.ts"),
+      "12:00:02 [harness] claude finished (turns=1)",
+    ];
+    expect(groupHarnessBlocks(lines)).toEqual([
+      { kind: "line", text: "12:00:01 [harness] → Agent(Explore): find auth" },
+      {
+        kind: "subagent",
+        label: "Agent(Explore): find auth",
+        lines: ["→ Grep: login", "  ← src/auth.ts"],
+      },
+      { kind: "line", text: "12:00:02 [harness] claude finished (turns=1)" },
+    ]);
+  });
+
+  it("keeps distinct subagents in separate blocks", () => {
+    const lines = [
+      subLine("Agent(Explore): a", "→ Read a.ts"),
+      subLine("Agent(Plan): b", "→ Read b.ts"),
+    ];
+    expect(
+      groupHarnessBlocks(lines).filter((b) => b.kind === "subagent"),
+    ).toEqual([
+      { kind: "subagent", label: "Agent(Explore): a", lines: ["→ Read a.ts"] },
+      { kind: "subagent", label: "Agent(Plan): b", lines: ["→ Read b.ts"] },
+    ]);
+  });
+});
+
+describe("harnessSubagentText", () => {
+  it("splits the label and body of a subagent line", () => {
+    expect(
+      harnessSubagentText(subLine("Agent(Explore): find auth", "→ Grep: login")),
+    ).toEqual({ label: "Agent(Explore): find auth", text: "→ Grep: login" });
+  });
+
+  it("tolerates the harness timestamp prefix", () => {
+    expect(
+      harnessSubagentText(`12:00:01 ${subLine("Agent(x): y", "→ Read z")}`),
+    ).toEqual({ label: "Agent(x): y", text: "→ Read z" });
+  });
+
+  it("returns null for a plain, output, or tool-call harness line", () => {
+    expect(harnessSubagentText("[harness] → Bash: git status")).toBeNull();
+    expect(harnessSubagentText("[harness]   ← output")).toBeNull();
+    expect(harnessSubagentText("a plain claude line")).toBeNull();
   });
 });

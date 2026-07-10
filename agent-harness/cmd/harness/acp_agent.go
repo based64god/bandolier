@@ -174,7 +174,13 @@ type claudeDriver struct {
 	agent    *acpAgent
 }
 
-func startClaudeDriver(a *acpAgent) (*claudeDriver, error) {
+// claudeDriverArgs builds the claude CLI arguments for an interactive ACP
+// session — the counterpart to runClaude's one-shot arg list. Split out so the
+// flags are unit-testable without spawning claude, in particular that the
+// system prompt (ACP_SYSTEM_PROMPT, which carries the ultracode framing at max
+// effort — see config.ultracode) and the effort level reach the CLI in
+// interactive mode just as they do one-shot.
+func claudeDriverArgs(a *acpAgent) []string {
 	args := []string{
 		"--print",
 		"--model", a.model,
@@ -189,7 +195,11 @@ func startClaudeDriver(a *acpAgent) (*claudeDriver, error) {
 	if a.sysPrompt != "" {
 		args = append(args, "--append-system-prompt", a.sysPrompt)
 	}
-	cmd := exec.Command("claude", args...)
+	return args
+}
+
+func startClaudeDriver(a *acpAgent) (*claudeDriver, error) {
+	cmd := exec.Command("claude", claudeDriverArgs(a)...)
 	cmd.Dir = a.workDir
 	cmd.Env = buildEnv(a.provider)
 	cmd.Stderr = os.Stderr
@@ -232,36 +242,46 @@ func (d *claudeDriver) handle(raw []byte) { dispatchClaudeEvent(raw, d) }
 // a typeahead menu.
 func (d *claudeDriver) onSlashCommands(names []string) { d.agent.emitAvailableCommands(names) }
 
-func (d *claudeDriver) onText(text string) {
+// onText and onThinking carry parentID (the spawning Agent/Task id when the
+// message came from a subagent). Subagent narration is tagged with
+// ParentToolCallID so the client routes it to the subagent narration card
+// instead of the main conversation flow (ACP has no message nesting, so an
+// untagged bubble would render as the main agent's). Main-agent messages
+// (parentID == "") are forwarded unchanged.
+func (d *claudeDriver) onText(text, parentID string) {
 	a := d.agent
-	a.emit(acp.AgentMessageChunk{SessionUpdate: acp.UpdateAgentMessageChunk, MessageID: a.curMsgID, Content: acp.TextBlock(text)})
+	a.emit(acp.AgentMessageChunk{SessionUpdate: acp.UpdateAgentMessageChunk, MessageID: a.curMsgID, ParentToolCallID: parentID, Content: acp.TextBlock(text)})
 }
 
-func (d *claudeDriver) onThinking(text string) {
+func (d *claudeDriver) onThinking(text, parentID string) {
 	a := d.agent
-	a.emit(acp.AgentThoughtChunk{SessionUpdate: acp.UpdateAgentThoughtChunk, MessageID: a.curMsgID, Content: acp.TextBlock(text)})
+	a.emit(acp.AgentThoughtChunk{SessionUpdate: acp.UpdateAgentThoughtChunk, MessageID: a.curMsgID, ParentToolCallID: parentID, Content: acp.TextBlock(text)})
 }
 
-func (d *claudeDriver) onToolUse(id, name string, input json.RawMessage) {
+func (d *claudeDriver) onToolUse(id, name, parentID string, input json.RawMessage) {
 	// Reuse Claude's own tool_use id as the ACP toolCallId so the follow-up
 	// tool_result (a `user` event) can be matched back to this call via a
-	// tool_call_update.
+	// tool_call_update. A subagent's calls carry parentID = the spawning
+	// Agent/Task id, which is that spawn's own ToolCallID — so the client can
+	// nest children under their parent by id.
 	if id == "" {
 		id = name + "-" + shortUnique()
 	}
 	d.agent.emit(acp.ToolCall{
-		SessionUpdate: acp.UpdateToolCall,
-		ToolCallID:    id,
-		Title:         toolSummary(name, input),
-		Kind:          toolKind(name),
-		Status:        acp.ToolStatusPending,
-		RawInput:      input,
+		SessionUpdate:    acp.UpdateToolCall,
+		ToolCallID:       id,
+		Title:            toolSummary(name, input),
+		Kind:             toolKind(name),
+		Status:           acp.ToolStatusPending,
+		ParentToolCallID: parentID,
+		RawInput:         input,
 	})
 }
 
 // onToolResult forwards a tool's output as a tool_call_update so the transcript
-// (and the UI) can attach it — expandable — to the originating tool call.
-func (d *claudeDriver) onToolResult(id string, isError bool, content json.RawMessage) {
+// (and the UI) can attach it — expandable — to the originating tool call. The
+// result is matched by tool-call id, so parentID isn't needed here.
+func (d *claudeDriver) onToolResult(id, _ string, isError bool, content json.RawMessage) {
 	status := acp.ToolStatusCompleted
 	if isError {
 		status = acp.ToolStatusFailed
@@ -438,6 +458,8 @@ func toolKind(name string) string {
 		return acp.ToolKindSearch
 	case "WebFetch", "WebSearch":
 		return acp.ToolKindFetch
+	case "Agent", "Task":
+		return acp.ToolKindSubagent
 	default:
 		return acp.ToolKindOther
 	}

@@ -6,6 +6,7 @@ import { api } from "~/trpc/react";
 import type { RouterOutputs } from "~/trpc/react";
 import { expiresAtLocal, taskNameLabel, taskNameTooltip } from "./agent-ui";
 import { Conversation, SessionHeader } from "./conversation";
+import { SubagentPanel } from "./subagent-panel";
 import { OutputBadge, SourceBadge } from "./output-badge";
 import { SessionComposer } from "./session-composer";
 import { StatusBadge } from "./status-badge";
@@ -528,6 +529,9 @@ export function InteractiveRow({
             <div className="flex h-[85vh] flex-col">
               <div className="shrink-0">
                 <SessionHeader podName={agent.name} tokens={agent.tokens} />
+              </div>
+              <div className="shrink-0">
+                <SubagentPanel items={session.items} />
               </div>
               <Conversation
                 items={session.items}

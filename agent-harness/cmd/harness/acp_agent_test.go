@@ -195,6 +195,56 @@ func TestClaudeDriverSubagentNesting(t *testing.T) {
 	}
 }
 
+// parseMessageChunks pulls out agent_message_chunk frames with their text and
+// parentToolCallId, so subagent-narration attribution can be asserted.
+func parseMessageChunks(buf interface{ String() string }) []struct {
+	text, parentToolCallID string
+} {
+	var out []struct{ text, parentToolCallID string }
+	for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+		if line == "" {
+			continue
+		}
+		var f struct {
+			Params struct {
+				Update json.RawMessage `json:"update"`
+			} `json:"params"`
+		}
+		if json.Unmarshal([]byte(line), &f) != nil {
+			continue
+		}
+		if acp.UpdateKind(f.Params.Update) != acp.UpdateAgentMessageChunk {
+			continue
+		}
+		var c acp.AgentMessageChunk
+		_ = json.Unmarshal(f.Params.Update, &c)
+		out = append(out, struct{ text, parentToolCallID string }{c.Content.Text, c.ParentToolCallID})
+	}
+	return out
+}
+
+// A subagent's narration must be forwarded tagged with the spawning Agent id, so
+// the client can route it to the subagent card; the main agent's text stays
+// untagged so it renders in the conversation.
+func TestClaudeDriverSubagentNarration(t *testing.T) {
+	var buf bytes.Buffer
+	a := captureEmits(&buf)
+	d := &claudeDriver{agent: a}
+	d.handle([]byte(`{"type":"assistant","parent_tool_use_id":null,"message":{"content":[{"type":"text","text":"main answer"}]}}`))
+	d.handle([]byte(`{"type":"assistant","parent_tool_use_id":"toolu_agent01","message":{"content":[{"type":"text","text":"subagent thought"}]}}`))
+
+	chunks := parseMessageChunks(&buf)
+	if len(chunks) != 2 {
+		t.Fatalf("got %d message chunks, want 2", len(chunks))
+	}
+	if chunks[0].text != "main answer" || chunks[0].parentToolCallID != "" {
+		t.Errorf("main chunk = %+v, want text='main answer' parent=''", chunks[0])
+	}
+	if chunks[1].text != "subagent thought" || chunks[1].parentToolCallID != "toolu_agent01" {
+		t.Errorf("subagent chunk = %+v, want parent=toolu_agent01", chunks[1])
+	}
+}
+
 // collectToolUpdates parses the tool_call_update frames in buf.
 func collectToolUpdates(t *testing.T, buf interface{ String() string }) []acp.ToolCallUpdate {
 	t.Helper()

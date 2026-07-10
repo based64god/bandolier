@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyFrames,
   batchAwaitsInput,
+  collectSubagentNarration,
   END_SESSION_FRAME,
   groupTimeline,
   promptFrame,
@@ -626,6 +627,151 @@ describe("groupTimeline", () => {
     if (g?.type !== "tools") throw new Error("expected tools group");
     expect(g.nodes).toHaveLength(1);
     expect(g.nodes[0]!.item.toolCallId).toBe("sub1");
+  });
+});
+
+describe("subagent narration", () => {
+  it("routes a tagged message/thought to subagent-log, not the conversation", () => {
+    const { items } = applyFrames(
+      [],
+      [
+        update(1, "s", {
+          sessionUpdate: "agent_message_chunk",
+          content: { text: "main answer" },
+        }),
+        update(2, "s", {
+          sessionUpdate: "agent_message_chunk",
+          parentToolCallId: "agent1",
+          content: { text: "sub says " },
+        }),
+        update(3, "s", {
+          sessionUpdate: "agent_message_chunk",
+          parentToolCallId: "agent1",
+          content: { text: "hi" },
+        }),
+        update(4, "s", {
+          sessionUpdate: "agent_thought_chunk",
+          parentToolCallId: "agent1",
+          content: { text: "hmm" },
+        }),
+      ],
+    );
+    // Main answer stays a conversation bubble; subagent chunks coalesce by
+    // variant into subagent-log items kept out of the main flow.
+    expect(items).toEqual<TimelineItem[]>([
+      { type: "message", role: "assistant", id: "a-1", text: "main answer" },
+      {
+        type: "subagent-log",
+        id: "s-2",
+        parentToolCallId: "agent1",
+        variant: "message",
+        text: "sub says hi",
+      },
+      {
+        type: "subagent-log",
+        id: "s-4",
+        parentToolCallId: "agent1",
+        variant: "thinking",
+        text: "hmm",
+      },
+    ]);
+    // groupTimeline drops subagent-log from the rendered conversation flow.
+    expect(groupTimeline(items).some((g) => g.type === "tools")).toBe(false);
+    expect(groupTimeline(items)).toHaveLength(1);
+  });
+
+  it("drops the main agent's thinking (only subagents' is surfaced)", () => {
+    const { items } = applyFrames(
+      [],
+      [
+        update(1, "s", {
+          sessionUpdate: "agent_thought_chunk",
+          content: { text: "main thinking" },
+        }),
+      ],
+    );
+    expect(items).toEqual([]);
+  });
+
+  it("collects narration per subagent, labelled from its spawn call", () => {
+    const { items } = applyFrames(
+      [],
+      [
+        update(1, "s", {
+          sessionUpdate: "tool_call",
+          toolCallId: "agentA",
+          kind: "subagent",
+          title: "Agent(Explore): find auth",
+          status: "pending",
+        }),
+        update(2, "s", {
+          sessionUpdate: "tool_call",
+          toolCallId: "agentB",
+          kind: "subagent",
+          title: "Agent(Plan): sketch fix",
+          status: "pending",
+        }),
+        update(3, "s", {
+          sessionUpdate: "agent_message_chunk",
+          parentToolCallId: "agentA",
+          content: { text: "found it" },
+        }),
+        update(4, "s", {
+          sessionUpdate: "agent_message_chunk",
+          parentToolCallId: "agentB",
+          content: { text: "planning" },
+        }),
+        update(5, "s", {
+          sessionUpdate: "agent_thought_chunk",
+          parentToolCallId: "agentA",
+          content: { text: "considering" },
+        }),
+      ],
+    );
+    expect(collectSubagentNarration(items)).toEqual([
+      {
+        toolCallId: "agentA",
+        label: "Agent(Explore): find auth",
+        entries: [
+          { variant: "message", text: "found it" },
+          { variant: "thinking", text: "considering" },
+        ],
+      },
+      {
+        toolCallId: "agentB",
+        label: "Agent(Plan): sketch fix",
+        entries: [{ variant: "message", text: "planning" }],
+      },
+    ]);
+  });
+
+  it("falls back to a generic label when the spawn call isn't in view", () => {
+    const { items } = applyFrames(
+      [],
+      [
+        update(1, "s", {
+          sessionUpdate: "agent_message_chunk",
+          parentToolCallId: "ghost",
+          content: { text: "orphan narration" },
+        }),
+      ],
+    );
+    const narration = collectSubagentNarration(items);
+    expect(narration).toHaveLength(1);
+    expect(narration[0]!.label).toBe("subagent");
+  });
+
+  it("returns nothing when no subagent narrated", () => {
+    const { items } = applyFrames(
+      [],
+      [
+        update(1, "s", {
+          sessionUpdate: "agent_message_chunk",
+          content: { text: "just the main agent" },
+        }),
+      ],
+    );
+    expect(collectSubagentNarration(items)).toEqual([]);
   });
 });
 

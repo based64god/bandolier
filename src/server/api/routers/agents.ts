@@ -16,7 +16,13 @@ import {
   repoViewSelector,
   requireKubeconfig,
 } from "~/server/agents/authz";
-import { loadPersistedOutputs, podToTask } from "~/server/agents/task-view";
+import {
+  expiredRunToTask,
+  loadExpiredRuns,
+  loadPersistedOutputs,
+  podJobName,
+  podToTask,
+} from "~/server/agents/task-view";
 import {
   type ComputeSpec,
   DEFAULT_CPU_LIMIT,
@@ -150,7 +156,7 @@ export const agentsRouter = createTRPCRouter({
       // logs are gone — rather than a lookup per pod.
       const persistedOutputs = await loadPersistedOutputs(ctx.db, res.items);
 
-      return await Promise.all(
+      const live = await Promise.all(
         res.items.map(async (pod) => {
           const namespace = pod.metadata?.namespace ?? "";
           const task = await podToTask(
@@ -166,6 +172,21 @@ export const agentsRouter = createTRPCRouter({
           return { ...task, namespace };
         }),
       );
+
+      // Runs whose pod the Job's TTL already deleted, recovered from the run
+      // table so finished work (and its persisted transcript) stays listed.
+      const expiredRuns = await loadExpiredRuns(ctx.db, {
+        viewerId: userId,
+        liveJobNames: res.items.map(podJobName),
+      });
+      const expired = await Promise.all(
+        expiredRuns.map(async (run) => ({
+          ...(await expiredRunToTask(run, ctx.db, githubToken, nowMs, userId)),
+          namespace: run.namespace,
+        })),
+      );
+
+      return [...live, ...expired];
     } catch (err) {
       throw new TRPCError({
         code: "INTERNAL_SERVER_ERROR",
@@ -207,7 +228,7 @@ export const agentsRouter = createTRPCRouter({
         // One batched query recovers persisted output for every terminal pod
         // whose logs are gone — rather than a lookup per pod.
         const persistedOutputs = await loadPersistedOutputs(ctx.db, res.items);
-        return await Promise.all(
+        const live = await Promise.all(
           res.items.map((pod) =>
             podToTask(
               pod,
@@ -221,6 +242,23 @@ export const agentsRouter = createTRPCRouter({
             ),
           ),
         );
+
+        // Runs whose pod the Job's TTL already deleted, recovered from the run
+        // table so finished work (and its persisted transcript) stays listed.
+        // Same visibility as the pod query above (see loadExpiredRuns).
+        const expiredRuns = await loadExpiredRuns(ctx.db, {
+          viewerId: userId,
+          namespace: input.namespace,
+          repoFullName: input.repoFullName,
+          liveJobNames: res.items.map(podJobName),
+        });
+        const expired = await Promise.all(
+          expiredRuns.map((run) =>
+            expiredRunToTask(run, ctx.db, githubToken, nowMs, userId),
+          ),
+        );
+
+        return [...live, ...expired];
       } catch (err) {
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",

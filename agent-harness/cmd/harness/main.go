@@ -405,7 +405,7 @@ func main() {
 
 	runErr := run(ctx, cfg)
 	// Persist the transcript regardless of success/failure before exiting.
-	uploadTranscript()
+	uploadTranscript(runErr != nil)
 	if runErr != nil {
 		log.Fatalf("[harness] error: %v", runErr)
 	}

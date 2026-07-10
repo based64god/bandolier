@@ -19,7 +19,7 @@ const EFFORT_LABELS: Record<string, string> = {
   medium: "Medium",
   high: "High",
   xhigh: "Extra high",
-  max: "Max",
+  max: "Max — Ultracode",
 };
 
 export function EffortPicker({
@@ -80,7 +80,9 @@ export function EffortPicker({
       </div>
       <p className="text-xs text-white/40">
         How much Claude thinks before acting. Higher effort is more thorough but
-        slower and costlier. &ldquo;Default&rdquo; leaves it to the model.
+        slower and costlier. &ldquo;Max&rdquo; turns on ultracode — the agent
+        fans work out across parallel subagents and verifies adversarially.
+        &ldquo;Default&rdquo; leaves it to the model.
       </p>
     </div>
   );

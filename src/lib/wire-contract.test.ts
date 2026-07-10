@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { EFFORT_LEVELS } from "~/lib/effort";
+import { EFFORT_LEVELS, HIGHEST_EFFORT } from "~/lib/effort";
 import { HARNESS_CONTRACT_VERSION } from "~/lib/harness-contract";
 import { TOKEN_MARKER } from "~/lib/tokens";
 
@@ -25,6 +25,7 @@ const contract = JSON.parse(
   resumeMarker: string;
   endSessionSentinel: string;
   effortLevels: string[];
+  highestEffort: string;
   harnessContractVersion: number;
 };
 
@@ -52,6 +53,15 @@ describe("wire contract", () => {
 
   it("matches the effort allow-list surfaced to the dashboard/webhook", () => {
     expect([...EFFORT_LEVELS]).toEqual(contract.effortLevels);
+  });
+
+  it("pins the highest effort (the ultracode level) to the top of the ladder", () => {
+    // HIGHEST_EFFORT drives the picker's ultracode label and, across the wire,
+    // the harness's ultracode gate. Binding it to the last effort level and to
+    // the contract keeps "ultracode == highest available effort" from drifting.
+    expect(contract.highestEffort).toBe("max");
+    expect(HIGHEST_EFFORT).toBe(contract.highestEffort);
+    expect(EFFORT_LEVELS.at(-1)).toBe(contract.highestEffort);
   });
 
   it("matches the harness contract version the staleness warning compares against", () => {

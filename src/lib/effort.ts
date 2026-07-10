@@ -19,6 +19,17 @@ export const EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"] as const;
 
 export type EffortLevel = (typeof EFFORT_LEVELS)[number];
 
+/**
+ * The top of the effort ladder: the highest available reasoning effort, and the
+ * level that turns on ultracode on Claude runs. Derived from EFFORT_LEVELS'
+ * order so the "highest" notion has one source rather than a literal restated at
+ * each use (the picker label, the harness gate). Pinned to wire-contract.json's
+ * `highestEffort` by src/lib/wire-contract.test.ts, which the Go harness's
+ * ultracode gate is asserted against too — so the UI and the gate can't drift.
+ */
+export const HIGHEST_EFFORT: EffortLevel =
+  EFFORT_LEVELS[EFFORT_LEVELS.length - 1]!;
+
 /** Narrows an arbitrary string to a known effort level. */
 export function isEffortLevel(value: string): value is EffortLevel {
   return (EFFORT_LEVELS as readonly string[]).includes(value);

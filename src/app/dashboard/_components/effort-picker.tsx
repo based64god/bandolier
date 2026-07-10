@@ -1,6 +1,6 @@
 "use client";
 
-import { EFFORT_LEVELS } from "~/lib/effort";
+import { EFFORT_LEVELS, HIGHEST_EFFORT } from "~/lib/effort";
 import { SearchableSelect } from "./searchable-select";
 
 // ── Effort picker ──────────────────────────────────────────────────────────
@@ -19,8 +19,16 @@ const EFFORT_LABELS: Record<string, string> = {
   medium: "Medium",
   high: "High",
   xhigh: "Extra high",
-  max: "Max — Ultracode",
+  max: "Max",
 };
+
+// The highest level turns on ultracode, so mark it in the picker. Keyed off
+// HIGHEST_EFFORT (not a hardcoded "max") so the badge always follows the real
+// top of the ladder if the levels ever change.
+function effortLabel(level: string): string {
+  const base = EFFORT_LABELS[level] ?? level;
+  return level === HIGHEST_EFFORT ? `${base} — Ultracode` : base;
+}
 
 export function EffortPicker({
   value,
@@ -47,9 +55,8 @@ export function EffortPicker({
           <SearchableSelect
             options={EFFORT_LEVELS.map((level) => ({
               value: level,
-              searchText:
-                `${level} ${EFFORT_LABELS[level] ?? level}`.toLowerCase(),
-              label: <span className="text-white">{EFFORT_LABELS[level]}</span>,
+              searchText: `${level} ${effortLabel(level)}`.toLowerCase(),
+              label: <span className="text-white">{effortLabel(level)}</span>,
             }))}
             value={value || null}
             onChange={(v) => onChange(v ?? "")}

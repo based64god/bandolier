@@ -21,6 +21,7 @@ type wireContract struct {
 	ResumeMarker           string   `json:"resumeMarker"`
 	EndSessionSentinel     string   `json:"endSessionSentinel"`
 	EffortLevels           []string `json:"effortLevels"`
+	HighestEffort          string   `json:"highestEffort"`
 	HarnessContractVersion int      `json:"harnessContractVersion"`
 }
 
@@ -79,5 +80,21 @@ func TestWireContractEffortLevels(t *testing.T) {
 		if normalizeEffort(level) != level {
 			t.Errorf("normalizeEffort(%q) = %q, want %q", level, normalizeEffort(level), level)
 		}
+	}
+
+	// The ultracode gate (config.highestEffort) must equal the contract's
+	// declared highest level, and that level must be the last (top) contract
+	// entry and a valid member. This is what binds ultracode to the true top of
+	// the ladder across the process boundary: adding a new highest level without
+	// updating highestEffort — leaving ultracode on the old second-highest —
+	// breaks CI here.
+	if highestEffort != c.HighestEffort {
+		t.Errorf("highestEffort = %q, contract = %q", highestEffort, c.HighestEffort)
+	}
+	if !effortLevels[c.HighestEffort] {
+		t.Errorf("contract highestEffort %q is not a known effort level", c.HighestEffort)
+	}
+	if last := c.EffortLevels[len(c.EffortLevels)-1]; last != c.HighestEffort {
+		t.Errorf("contract highestEffort = %q, but last effortLevels entry = %q", c.HighestEffort, last)
 	}
 }

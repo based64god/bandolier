@@ -75,6 +75,42 @@ func buildFakeClaude(t *testing.T) string {
 	return dir
 }
 
+// flagValue returns the argument following flag in args, or "" if absent.
+func flagValue(args []string, flag string) string {
+	for i, a := range args {
+		if a == flag && i+1 < len(args) {
+			return args[i+1]
+		}
+	}
+	return ""
+}
+
+// TestClaudeDriverArgs locks the interactive path's forwarding: the ultracode
+// system prompt (built upstream by the proxy via config.withRepoPrompt and
+// handed over as ACP_SYSTEM_PROMPT) and the effort level must reach the claude
+// CLI in interactive mode just as runClaude passes them one-shot.
+func TestClaudeDriverArgs(t *testing.T) {
+	// A max-effort Claude run: the proxy's withRepoPrompt output carries the
+	// ultracode framing, and the driver must forward it plus --effort max.
+	sysPrompt := (config{provider: providerAnthropic, effort: "max"}).withRepoPrompt("frame")
+	args := claudeDriverArgs(&acpAgent{model: "m", effort: "max", sysPrompt: sysPrompt})
+	if got := flagValue(args, "--append-system-prompt"); got != sysPrompt || !strings.Contains(got, ultracodeFraming) {
+		t.Errorf("--append-system-prompt = %q, want the ultracode system prompt", got)
+	}
+	if got := flagValue(args, "--effort"); got != "max" {
+		t.Errorf("--effort = %q, want max", got)
+	}
+
+	// No effort and no system prompt: neither flag is emitted.
+	args = claudeDriverArgs(&acpAgent{model: "m"})
+	if flagValue(args, "--append-system-prompt") != "" {
+		t.Error("--append-system-prompt emitted with an empty system prompt")
+	}
+	if flagValue(args, "--effort") != "" {
+		t.Error("--effort emitted with no effort set")
+	}
+}
+
 // captureEmits builds an agent whose emitted session/update frames land in buf,
 // for testing event translation in isolation.
 func captureEmits(buf io.Writer) *acpAgent {

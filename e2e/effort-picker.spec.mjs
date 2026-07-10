@@ -32,7 +32,7 @@ for (const [label, level] of [
   ["Medium", "medium"],
   ["High", "high"],
   ["Extra high", "xhigh"],
-  ["Max", "max"],
+  ["Max — Ultracode", "max"],
 ]) {
   await pick(label);
   check(
@@ -40,6 +40,12 @@ for (const [label, level] of [
     (await value()) === level,
   );
 }
+
+// ── Max surfaces ultracode ───────────────────────────────────────────────────
+check(
+  "helper text explains ultracode",
+  (await page.getByText("turns on ultracode").count()) === 1,
+);
 
 // ── Preferred toggle pins the current level ──────────────────────────────────
 await pick("High");

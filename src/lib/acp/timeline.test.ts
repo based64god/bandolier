@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyFrames,
   batchAwaitsInput,
+  collectSubagentNarration,
   END_SESSION_FRAME,
   groupTimeline,
   promptFrame,
@@ -518,7 +519,7 @@ describe("groupTimeline", () => {
   });
 
   const toolCounts = (groups: ReturnType<typeof groupTimeline>) =>
-    groups.map((g) => (g.type === "tools" ? g.items.length : "msg"));
+    groups.map((g) => (g.type === "tools" ? g.nodes.length : "msg"));
 
   it("collapses a run of consecutive tool calls into one group", () => {
     const groups = groupTimeline([
@@ -554,6 +555,223 @@ describe("groupTimeline", () => {
 
   it("returns nothing for an empty timeline", () => {
     expect(groupTimeline([])).toEqual([]);
+  });
+
+  const toolWith = (
+    id: string,
+    toolCallId: string,
+    parentToolCallId?: string,
+  ): TimelineItem => ({
+    type: "tool",
+    id,
+    toolCallId,
+    parentToolCallId,
+    kind: parentToolCallId ? "read" : "subagent",
+    title: id,
+    status: "pending",
+  });
+
+  it("nests a subagent's calls under their spawn", () => {
+    const groups = groupTimeline([
+      toolWith("t1", "agent1"),
+      toolWith("t2", "sub1", "agent1"),
+      toolWith("t3", "sub2", "agent1"),
+    ]);
+    expect(groups).toHaveLength(1);
+    const g = groups[0];
+    if (g?.type !== "tools") throw new Error("expected tools group");
+    // One root (the spawn) with two nested children.
+    expect(g.nodes).toHaveLength(1);
+    expect(g.nodes[0]!.item.toolCallId).toBe("agent1");
+    expect(g.nodes[0]!.children.map((c) => c.item.toolCallId)).toEqual([
+      "sub1",
+      "sub2",
+    ]);
+  });
+
+  it("nests grandchildren under a nested subagent (depth > 1)", () => {
+    const groups = groupTimeline([
+      toolWith("t1", "agent1"),
+      toolWith("t2", "agent2", "agent1"),
+      toolWith("t3", "leaf", "agent2"),
+    ]);
+    const g = groups[0];
+    if (g?.type !== "tools") throw new Error("expected tools group");
+    expect(g.nodes[0]!.children[0]!.item.toolCallId).toBe("agent2");
+    expect(g.nodes[0]!.children[0]!.children[0]!.item.toolCallId).toBe("leaf");
+  });
+
+  it("keeps two parallel subagents' interleaved calls under the right parent", () => {
+    const groups = groupTimeline([
+      toolWith("t1", "agentA"),
+      toolWith("t2", "agentB"),
+      toolWith("t3", "a1", "agentA"),
+      toolWith("t4", "b1", "agentB"),
+      toolWith("t5", "a2", "agentA"),
+    ]);
+    const g = groups[0];
+    if (g?.type !== "tools") throw new Error("expected tools group");
+    const byId = new Map(g.nodes.map((n) => [n.item.toolCallId, n]));
+    expect(byId.get("agentA")!.children.map((c) => c.item.toolCallId)).toEqual([
+      "a1",
+      "a2",
+    ]);
+    expect(byId.get("agentB")!.children.map((c) => c.item.toolCallId)).toEqual([
+      "b1",
+    ]);
+  });
+
+  it("renders an orphan child (parent absent) as a root, dropping nothing", () => {
+    const groups = groupTimeline([toolWith("t1", "sub1", "missing")]);
+    const g = groups[0];
+    if (g?.type !== "tools") throw new Error("expected tools group");
+    expect(g.nodes).toHaveLength(1);
+    expect(g.nodes[0]!.item.toolCallId).toBe("sub1");
+  });
+});
+
+describe("subagent narration", () => {
+  it("routes a tagged message/thought to subagent-log, not the conversation", () => {
+    const { items } = applyFrames(
+      [],
+      [
+        update(1, "s", {
+          sessionUpdate: "agent_message_chunk",
+          content: { text: "main answer" },
+        }),
+        update(2, "s", {
+          sessionUpdate: "agent_message_chunk",
+          parentToolCallId: "agent1",
+          content: { text: "sub says " },
+        }),
+        update(3, "s", {
+          sessionUpdate: "agent_message_chunk",
+          parentToolCallId: "agent1",
+          content: { text: "hi" },
+        }),
+        update(4, "s", {
+          sessionUpdate: "agent_thought_chunk",
+          parentToolCallId: "agent1",
+          content: { text: "hmm" },
+        }),
+      ],
+    );
+    // Main answer stays a conversation bubble; subagent chunks coalesce by
+    // variant into subagent-log items kept out of the main flow.
+    expect(items).toEqual<TimelineItem[]>([
+      { type: "message", role: "assistant", id: "a-1", text: "main answer" },
+      {
+        type: "subagent-log",
+        id: "s-2",
+        parentToolCallId: "agent1",
+        variant: "message",
+        text: "sub says hi",
+      },
+      {
+        type: "subagent-log",
+        id: "s-4",
+        parentToolCallId: "agent1",
+        variant: "thinking",
+        text: "hmm",
+      },
+    ]);
+    // groupTimeline drops subagent-log from the rendered conversation flow.
+    expect(groupTimeline(items).some((g) => g.type === "tools")).toBe(false);
+    expect(groupTimeline(items)).toHaveLength(1);
+  });
+
+  it("drops the main agent's thinking (only subagents' is surfaced)", () => {
+    const { items } = applyFrames(
+      [],
+      [
+        update(1, "s", {
+          sessionUpdate: "agent_thought_chunk",
+          content: { text: "main thinking" },
+        }),
+      ],
+    );
+    expect(items).toEqual([]);
+  });
+
+  it("collects narration per subagent, labelled from its spawn call", () => {
+    const { items } = applyFrames(
+      [],
+      [
+        update(1, "s", {
+          sessionUpdate: "tool_call",
+          toolCallId: "agentA",
+          kind: "subagent",
+          title: "Agent(Explore): find auth",
+          status: "pending",
+        }),
+        update(2, "s", {
+          sessionUpdate: "tool_call",
+          toolCallId: "agentB",
+          kind: "subagent",
+          title: "Agent(Plan): sketch fix",
+          status: "pending",
+        }),
+        update(3, "s", {
+          sessionUpdate: "agent_message_chunk",
+          parentToolCallId: "agentA",
+          content: { text: "found it" },
+        }),
+        update(4, "s", {
+          sessionUpdate: "agent_message_chunk",
+          parentToolCallId: "agentB",
+          content: { text: "planning" },
+        }),
+        update(5, "s", {
+          sessionUpdate: "agent_thought_chunk",
+          parentToolCallId: "agentA",
+          content: { text: "considering" },
+        }),
+      ],
+    );
+    expect(collectSubagentNarration(items)).toEqual([
+      {
+        toolCallId: "agentA",
+        label: "Agent(Explore): find auth",
+        entries: [
+          { variant: "message", text: "found it" },
+          { variant: "thinking", text: "considering" },
+        ],
+      },
+      {
+        toolCallId: "agentB",
+        label: "Agent(Plan): sketch fix",
+        entries: [{ variant: "message", text: "planning" }],
+      },
+    ]);
+  });
+
+  it("falls back to a generic label when the spawn call isn't in view", () => {
+    const { items } = applyFrames(
+      [],
+      [
+        update(1, "s", {
+          sessionUpdate: "agent_message_chunk",
+          parentToolCallId: "ghost",
+          content: { text: "orphan narration" },
+        }),
+      ],
+    );
+    const narration = collectSubagentNarration(items);
+    expect(narration).toHaveLength(1);
+    expect(narration[0]!.label).toBe("subagent");
+  });
+
+  it("returns nothing when no subagent narrated", () => {
+    const { items } = applyFrames(
+      [],
+      [
+        update(1, "s", {
+          sessionUpdate: "agent_message_chunk",
+          content: { text: "just the main agent" },
+        }),
+      ],
+    );
+    expect(collectSubagentNarration(items)).toEqual([]);
   });
 });
 

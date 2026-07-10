@@ -21,6 +21,11 @@ export type TimelineItem =
       // tool_call_update back to this call. Undefined for tool calls whose
       // source omitted one (e.g. the codex driver).
       toolCallId?: string;
+      // The tool_call id of the subagent-spawning Agent/Task call this call ran
+      // inside (from the harness's ACP extension). Undefined for main-agent
+      // calls. Used to nest a subagent's calls under their spawn — see
+      // buildToolTree.
+      parentToolCallId?: string;
       kind: string;
       title: string;
       status: string;
@@ -49,6 +54,7 @@ interface ParsedUpdate {
   sessionUpdate?: string;
   messageId?: string;
   toolCallId?: string;
+  parentToolCallId?: string;
   title?: string;
   kind?: string;
   status?: string;
@@ -169,6 +175,7 @@ export function applyFrames(
           type: "tool",
           id: `t-${f.seq}`,
           toolCallId: u.toolCallId,
+          parentToolCallId: u.parentToolCallId,
           kind: u.kind ?? "other",
           title: u.title ?? "",
           status: u.status ?? "pending",
@@ -213,6 +220,18 @@ export function applyFrames(
  * UI can collapse them behind a summary — the interactive mirror of how the
  * non-interactive log collapses runs of [harness] diagnostic lines.
  */
+export type ToolItem = Extract<TimelineItem, { type: "tool" }>;
+
+/**
+ * A tool call plus any calls that ran inside it — the render tree for a subagent
+ * spawn (a `subagent`-kind call) and its nested tool calls. Main-agent calls are
+ * leaf nodes (no children).
+ */
+export interface ToolNode {
+  item: ToolItem;
+  children: ToolNode[];
+}
+
 export type TimelineGroup =
   | {
       type: "message";
@@ -222,29 +241,54 @@ export type TimelineGroup =
   | {
       type: "tools";
       id: string;
-      items: Extract<TimelineItem, { type: "tool" }>[];
+      nodes: ToolNode[];
     };
 
 /**
+ * Nests a run of tool calls into a forest: a call whose parentToolCallId matches
+ * an earlier call's toolCallId becomes that call's child (a subagent's calls
+ * under their spawn), at arbitrary depth. Calls with no in-run parent — main
+ * agent calls, and orphans whose parent isn't in this run — stay roots, so
+ * nothing is dropped. Grouping by id (not adjacency) is what survives parallel
+ * subagents interleaving their calls on one stream.
+ */
+export function buildToolTree(items: ToolItem[]): ToolNode[] {
+  const byId = new Map<string, ToolNode>();
+  const roots: ToolNode[] = [];
+  for (const item of items) {
+    const node: ToolNode = { item, children: [] };
+    if (item.toolCallId) byId.set(item.toolCallId, node);
+    const parent = item.parentToolCallId
+      ? byId.get(item.parentToolCallId)
+      : undefined;
+    if (parent) parent.children.push(node);
+    else roots.push(node);
+  }
+  return roots;
+}
+
+/**
  * Collapses runs of consecutive tool calls in the timeline into `tools` groups,
- * leaving messages as standalone groups. Keeps the folding pure and unit-testable,
+ * leaving messages as standalone groups. Within each group, subagent calls nest
+ * under their spawn (buildToolTree). Keeps the folding pure and unit-testable,
  * mirroring parseSegments for the non-interactive log.
  */
 export function groupTimeline(items: TimelineItem[]): TimelineGroup[] {
-  const groups: TimelineGroup[] = [];
+  const runs: (ToolItem[] | Extract<TimelineItem, { type: "message" }>)[] = [];
   for (const item of items) {
     if (item.type === "tool") {
-      const last = groups[groups.length - 1];
-      if (last?.type === "tools") {
-        last.items.push(item);
-      } else {
-        groups.push({ type: "tools", id: item.id, items: [item] });
-      }
+      const last = runs[runs.length - 1];
+      if (Array.isArray(last)) last.push(item);
+      else runs.push([item]);
     } else {
-      groups.push({ type: "message", id: item.id, item });
+      runs.push(item);
     }
   }
-  return groups;
+  return runs.map((run) =>
+    Array.isArray(run)
+      ? { type: "tools", id: run[0]!.id, nodes: buildToolTree(run) }
+      : { type: "message", id: run.id, item: run },
+  );
 }
 
 /** Builds a session/prompt JSON-RPC frame for the frontend client to enqueue. */

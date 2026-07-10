@@ -29,6 +29,38 @@ export default function ConversationHarness() {
     text: `Line ${i}: the quick brown fox jumps over the lazy dog.`,
   }));
 
+  // A subagent spawn (Agent/Task) with its nested tool calls, so the nested
+  // subagent rendering can be exercised in a browser.
+  items.push(
+    {
+      type: "tool",
+      id: "t-agent",
+      toolCallId: "agent1",
+      kind: "subagent",
+      title: "Agent(Explore): find the auth flow",
+      status: "completed",
+    },
+    {
+      type: "tool",
+      id: "t-c1",
+      toolCallId: "sub1",
+      parentToolCallId: "agent1",
+      kind: "search",
+      title: "Grep: login",
+      status: "completed",
+      output: "src/auth/login.ts:12",
+    },
+    {
+      type: "tool",
+      id: "t-c2",
+      toolCallId: "sub2",
+      parentToolCallId: "agent1",
+      kind: "read",
+      title: "Read: src/auth/login.ts",
+      status: "completed",
+    },
+  );
+
   return (
     <div className="min-h-screen bg-[#06140c] p-8 text-white">
       <h1 className="mb-4 text-lg">Conversation harness</h1>

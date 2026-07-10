@@ -242,16 +242,26 @@ func (d *claudeDriver) handle(raw []byte) { dispatchClaudeEvent(raw, d) }
 // a typeahead menu.
 func (d *claudeDriver) onSlashCommands(names []string) { d.agent.emitAvailableCommands(names) }
 
-// onText and onThinking carry parentID (the spawning Agent/Task id when the
-// message came from a subagent). ACP has no message-nesting affordance, so the
-// interactive view attributes subagents through their tool calls (below), not
-// their narration; parentID is accepted for interface parity and unused here.
-func (d *claudeDriver) onText(text, _ string) {
+// onText and onThinking drop subagent narration (parentID != ""): ACP has no
+// message-nesting affordance, so a subagent's text/thinking would render as an
+// unattributed main-agent bubble — misleading, and it would also split the
+// subagent's tool calls out of their run. The subagent is tracked through its
+// tool calls (nested under the spawn) and its final report (the spawn's
+// tool_result), so its chatter is suppressed here; the non-interactive log
+// still folds it into [harness]. Main-agent messages (parentID == "") are
+// forwarded unchanged.
+func (d *claudeDriver) onText(text, parentID string) {
+	if parentID != "" {
+		return
+	}
 	a := d.agent
 	a.emit(acp.AgentMessageChunk{SessionUpdate: acp.UpdateAgentMessageChunk, MessageID: a.curMsgID, Content: acp.TextBlock(text)})
 }
 
-func (d *claudeDriver) onThinking(text, _ string) {
+func (d *claudeDriver) onThinking(text, parentID string) {
+	if parentID != "" {
+		return
+	}
 	a := d.agent
 	a.emit(acp.AgentThoughtChunk{SessionUpdate: acp.UpdateAgentThoughtChunk, MessageID: a.curMsgID, Content: acp.TextBlock(text)})
 }

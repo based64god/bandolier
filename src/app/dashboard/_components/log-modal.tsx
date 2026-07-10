@@ -5,7 +5,11 @@ import { useLayoutEffect, useRef, useState } from "react";
 import type { TokenUsage } from "~/lib/tokens";
 import { api } from "~/trpc/react";
 import { Modal } from "./modal";
-import { groupHarnessBlocks, parseSegments } from "./log-segments";
+import {
+  groupHarnessBlocks,
+  parseSegments,
+  SUBAGENT_MARKER,
+} from "./log-segments";
 import { TokenReadout } from "./token-readout";
 
 // Lines fetched initially (enough to fill the modal) and per scroll-up page.
@@ -65,6 +69,8 @@ export function HarnessSegment({ lines }: { lines: string[] }) {
         {blocks.map((block, i) =>
           block.kind === "output" ? (
             <ToolOutput key={i} lines={block.lines} />
+          ) : block.kind === "subagent" ? (
+            <SubagentBlock key={i} label={block.label} lines={block.lines} />
           ) : (
             <div
               key={i}
@@ -75,6 +81,36 @@ export function HarnessSegment({ lines }: { lines: string[] }) {
           ),
         )}
       </div>
+    </details>
+  );
+}
+
+// One subagent's activity (its Agent/Task spawn's nested tool calls, output,
+// and narration), folded behind its own expander within the harness segment and
+// labelled with which subagent produced it — the non-interactive echo of the
+// conversation view's nested subagent tool group.
+function SubagentBlock({ label, lines }: { label: string; lines: string[] }) {
+  return (
+    <details className="group/sub my-0.5">
+      <summary className="flex cursor-pointer list-none items-center gap-1.5 text-white/35 hover:text-white/55 [&::-webkit-details-marker]:hidden">
+        <svg
+          viewBox="0 0 12 12"
+          fill="currentColor"
+          className="h-2.5 w-2.5 shrink-0 transition-transform group-open/sub:rotate-90"
+        >
+          <path d="M4 2l5 4-5 4V2z" />
+        </svg>
+        <span className="font-mono text-[11px]">
+          <span className="mr-1 select-none">{SUBAGENT_MARKER}</span>
+          {label}
+          <span className="ml-1.5 text-white/25">
+            ({lines.length} {lines.length === 1 ? "line" : "lines"})
+          </span>
+        </span>
+      </summary>
+      <pre className="mt-0.5 max-h-64 overflow-auto border-l border-white/10 pl-3 font-mono text-[11px] leading-5 break-words whitespace-pre-wrap text-white/35">
+        {lines.join("\n")}
+      </pre>
     </details>
   );
 }

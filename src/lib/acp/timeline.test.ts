@@ -518,7 +518,7 @@ describe("groupTimeline", () => {
   });
 
   const toolCounts = (groups: ReturnType<typeof groupTimeline>) =>
-    groups.map((g) => (g.type === "tools" ? g.items.length : "msg"));
+    groups.map((g) => (g.type === "tools" ? g.nodes.length : "msg"));
 
   it("collapses a run of consecutive tool calls into one group", () => {
     const groups = groupTimeline([
@@ -554,6 +554,78 @@ describe("groupTimeline", () => {
 
   it("returns nothing for an empty timeline", () => {
     expect(groupTimeline([])).toEqual([]);
+  });
+
+  const toolWith = (
+    id: string,
+    toolCallId: string,
+    parentToolCallId?: string,
+  ): TimelineItem => ({
+    type: "tool",
+    id,
+    toolCallId,
+    parentToolCallId,
+    kind: parentToolCallId ? "read" : "subagent",
+    title: id,
+    status: "pending",
+  });
+
+  it("nests a subagent's calls under their spawn", () => {
+    const groups = groupTimeline([
+      toolWith("t1", "agent1"),
+      toolWith("t2", "sub1", "agent1"),
+      toolWith("t3", "sub2", "agent1"),
+    ]);
+    expect(groups).toHaveLength(1);
+    const g = groups[0];
+    if (g?.type !== "tools") throw new Error("expected tools group");
+    // One root (the spawn) with two nested children.
+    expect(g.nodes).toHaveLength(1);
+    expect(g.nodes[0]!.item.toolCallId).toBe("agent1");
+    expect(g.nodes[0]!.children.map((c) => c.item.toolCallId)).toEqual([
+      "sub1",
+      "sub2",
+    ]);
+  });
+
+  it("nests grandchildren under a nested subagent (depth > 1)", () => {
+    const groups = groupTimeline([
+      toolWith("t1", "agent1"),
+      toolWith("t2", "agent2", "agent1"),
+      toolWith("t3", "leaf", "agent2"),
+    ]);
+    const g = groups[0];
+    if (g?.type !== "tools") throw new Error("expected tools group");
+    expect(g.nodes[0]!.children[0]!.item.toolCallId).toBe("agent2");
+    expect(g.nodes[0]!.children[0]!.children[0]!.item.toolCallId).toBe("leaf");
+  });
+
+  it("keeps two parallel subagents' interleaved calls under the right parent", () => {
+    const groups = groupTimeline([
+      toolWith("t1", "agentA"),
+      toolWith("t2", "agentB"),
+      toolWith("t3", "a1", "agentA"),
+      toolWith("t4", "b1", "agentB"),
+      toolWith("t5", "a2", "agentA"),
+    ]);
+    const g = groups[0];
+    if (g?.type !== "tools") throw new Error("expected tools group");
+    const byId = new Map(g.nodes.map((n) => [n.item.toolCallId, n]));
+    expect(byId.get("agentA")!.children.map((c) => c.item.toolCallId)).toEqual([
+      "a1",
+      "a2",
+    ]);
+    expect(byId.get("agentB")!.children.map((c) => c.item.toolCallId)).toEqual([
+      "b1",
+    ]);
+  });
+
+  it("renders an orphan child (parent absent) as a root, dropping nothing", () => {
+    const groups = groupTimeline([toolWith("t1", "sub1", "missing")]);
+    const g = groups[0];
+    if (g?.type !== "tools") throw new Error("expected tools group");
+    expect(g.nodes).toHaveLength(1);
+    expect(g.nodes[0]!.item.toolCallId).toBe("sub1");
   });
 });
 

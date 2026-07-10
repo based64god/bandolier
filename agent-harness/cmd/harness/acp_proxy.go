@@ -413,7 +413,7 @@ func renderFrameToTranscript(raw []byte) {
 		for _, c := range tu.Content {
 			b.WriteString(c.Content.Text)
 		}
-		logToolResult(b.String())
+		logToolResult("", b.String())
 	default:
 		var u struct {
 			SessionUpdate string `json:"sessionUpdate"`

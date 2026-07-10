@@ -5,6 +5,7 @@ import {
   EFFORT_LABEL_PREFIX,
   labelQuery,
   MODEL_LABEL_PREFIX,
+  wantsInteractive,
   wantsIssueOutput,
 } from "~/server/webhooks/labels";
 
@@ -61,5 +62,23 @@ describe("wantsIssueOutput", () => {
 
   it("is false for an empty label set", () => {
     expect(wantsIssueOutput([])).toBe(false);
+  });
+});
+
+describe("wantsInteractive", () => {
+  it("is true when an interactive label is present", () => {
+    expect(wantsInteractive(labels("bug", "interactive"))).toBe(true);
+  });
+
+  it("matches case-insensitively and ignores surrounding whitespace", () => {
+    expect(wantsInteractive(labels(" Interactive "))).toBe(true);
+  });
+
+  it("is false without the label", () => {
+    expect(wantsInteractive(labels("enhancement", "model:opus"))).toBe(false);
+  });
+
+  it("is false for an empty label set", () => {
+    expect(wantsInteractive([])).toBe(false);
   });
 });

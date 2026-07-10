@@ -288,6 +288,40 @@ describe("handleIssueOpened repo-credentials gate", () => {
     expect(createAgentJob).toHaveBeenCalledTimes(1);
     expect(storePendingRun).not.toHaveBeenCalled();
   });
+
+  it("marks the run interactive when the issue carries an `interactive` label", async () => {
+    resolveWebhookRun.mockResolvedValue(resolvedRun("user-token"));
+    createAgentJob.mockResolvedValue("job-int");
+    postBotAck.mockResolvedValue("app-installation");
+
+    await handleIssueOpened(
+      payload({
+        action: "opened",
+        issue: {
+          number: 7,
+          title: "A title",
+          body: "A body",
+          html_url: "https://github.com/o/r/issues/7",
+          labels: [{ name: "interactive" }],
+        },
+      }),
+      config(null, true),
+    );
+
+    expect(createAgentJob).toHaveBeenCalledTimes(1);
+    expect(createAgentJob.mock.calls[0]![0].interactive).toBe(true);
+  });
+
+  it("leaves the run non-interactive without the label", async () => {
+    resolveWebhookRun.mockResolvedValue(resolvedRun("user-token"));
+    createAgentJob.mockResolvedValue("job-plain");
+    postBotAck.mockResolvedValue("app-installation");
+
+    await handleIssueOpened(payload({ action: "opened" }), config(null, true));
+
+    expect(createAgentJob).toHaveBeenCalledTimes(1);
+    expect(createAgentJob.mock.calls[0]![0].interactive).toBeUndefined();
+  });
 });
 
 // ── handleIssueOpened trigger gate ─────────────────────────────────────────────

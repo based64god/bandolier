@@ -23,6 +23,14 @@ import (
 type claudeEvent struct {
 	Type    string `json:"type"`
 	Subtype string `json:"subtype"`
+	// ParentToolUseID links an event produced inside a subagent (spawned via the
+	// Agent/Task tool) back to the spawning tool_use block's id. It is a
+	// top-level field (sibling of Type/Message), empty on main-agent events and
+	// equal to the Agent tool_use id for every assistant/user event the subagent
+	// emits — the sole thread that lets us attribute subagent activity. Nested
+	// subagents chain it to their immediate parent, so one field reconstructs the
+	// whole tree. See https://code.claude.com/docs/en/agent-sdk/subagents.
+	ParentToolUseID string `json:"parent_tool_use_id"`
 	// SlashCommands is carried by the system/init event: the command names
 	// (no leading slash, no descriptions) the session supports.
 	SlashCommands []string `json:"slash_commands"`
@@ -52,12 +60,16 @@ type claudeEvent struct {
 // claudeEventSink receives the normalized events dispatchClaudeEvent extracts
 // from one stream-json line. Every event kind is delivered to the sink; how (or
 // whether) it renders is the sink's choice, not the parser's.
+// The event-scoped callbacks carry parentID: empty for the main agent, or the
+// spawning Agent/Task tool_use id when the event came from a subagent, so each
+// sink can attribute the activity. onSlashCommands/onResult are never
+// subagent-scoped (system/result events), so they take no parentID.
 type claudeEventSink interface {
 	onSlashCommands(names []string)
-	onText(text string)
-	onThinking(text string)
-	onToolUse(id, name string, input json.RawMessage)
-	onToolResult(id string, isError bool, content json.RawMessage)
+	onText(text, parentID string)
+	onThinking(text, parentID string)
+	onToolUse(id, name, parentID string, input json.RawMessage)
+	onToolResult(id, parentID string, isError bool, content json.RawMessage)
 	onResult(ev claudeEvent)
 }
 
@@ -80,14 +92,14 @@ func dispatchClaudeEvent(raw []byte, sink claudeEventSink) {
 			switch c.Type {
 			case "text":
 				if t := strings.TrimSpace(c.Text); t != "" {
-					sink.onText(t)
+					sink.onText(t, ev.ParentToolUseID)
 				}
 			case "thinking":
 				if t := strings.TrimSpace(c.Thinking); t != "" {
-					sink.onThinking(t)
+					sink.onThinking(t, ev.ParentToolUseID)
 				}
 			case "tool_use":
-				sink.onToolUse(c.ID, c.Name, c.Input)
+				sink.onToolUse(c.ID, c.Name, ev.ParentToolUseID, c.Input)
 			}
 		}
 	case "user":
@@ -97,7 +109,7 @@ func dispatchClaudeEvent(raw []byte, sink claudeEventSink) {
 			if c.Type != "tool_result" || c.ToolUseID == "" {
 				continue
 			}
-			sink.onToolResult(c.ToolUseID, c.IsError, c.ToolResult)
+			sink.onToolResult(c.ToolUseID, ev.ParentToolUseID, c.IsError, c.ToolResult)
 		}
 	case "result":
 		sink.onResult(ev)
@@ -107,28 +119,76 @@ func dispatchClaudeEvent(raw []byte, sink claudeEventSink) {
 // claudeLogSink renders Claude events into the pod-log transcript for one-shot
 // runs: assistant text goes to stdout untagged so the dashboard highlights it,
 // while thinking, tool use, and lifecycle events are tagged [harness] so they
-// render as dimmed context.
-type claudeLogSink struct{}
+// render as dimmed context. It is stateful across a run's events (one sink per
+// run — see runClaudeStreaming) so it can remember each subagent's label and
+// attribute that subagent's later events back to it.
+type claudeLogSink struct {
+	// labels maps an Agent/Task tool_use id to a short human label, populated
+	// when the spawn is seen so a subagent's events — which carry that id as
+	// their parentID — can be tagged with which subagent produced them.
+	labels map[string]string
+}
 
-func (claudeLogSink) onSlashCommands([]string) {}
+func newClaudeLogSink() *claudeLogSink { return &claudeLogSink{labels: map[string]string{}} }
 
-func (claudeLogSink) onText(text string) { fmt.Fprintln(stdoutTee, text) }
+// handle is the per-line entry point bound into forEachLine, so every line of a
+// run drives the same (stateful) sink rather than a fresh one.
+func (s *claudeLogSink) handle(raw []byte) { dispatchClaudeEvent(raw, s) }
 
-func (claudeLogSink) onThinking(text string) {
-	lines := strings.Split(text, "\n")
-	log.Printf("[harness] (thinking) %s", lines[0])
-	for _, l := range lines[1:] {
-		log.Printf("[harness]     %s", l)
+// subagentPrefix is the marker inserted after the [harness] tag on a line that
+// belongs to a subagent, naming which one. Empty for main-agent events, so
+// their lines render exactly as before. The frontend (log-segments.ts) folds
+// consecutive lines carrying this marker into a labelled subagent block.
+func (s *claudeLogSink) subagentPrefix(parentID string) string {
+	if parentID == "" {
+		return ""
+	}
+	label := s.labels[parentID]
+	if label == "" {
+		label = "subagent"
+	}
+	return subagentMarker + " " + label + " " + subagentSep + " "
+}
+
+func (*claudeLogSink) onSlashCommands([]string) {}
+
+func (s *claudeLogSink) onText(text, parentID string) {
+	if parentID == "" {
+		fmt.Fprintln(stdoutTee, text)
+		return
+	}
+	// A subagent's assistant text is narration, not the run's answer — fold it
+	// into the [harness] context, attributed to the subagent, rather than
+	// letting it surface as the highlighted final output.
+	prefix := s.subagentPrefix(parentID)
+	for _, l := range strings.Split(text, "\n") {
+		log.Printf("[harness] %s%s", prefix, l)
 	}
 }
 
-func (claudeLogSink) onToolUse(_, name string, input json.RawMessage) { logToolUse(name, input) }
-
-func (claudeLogSink) onToolResult(_ string, _ bool, content json.RawMessage) {
-	logToolResult(toolResultText(content))
+func (s *claudeLogSink) onThinking(text, parentID string) {
+	prefix := s.subagentPrefix(parentID)
+	lines := strings.Split(text, "\n")
+	log.Printf("[harness] %s(thinking) %s", prefix, lines[0])
+	for _, l := range lines[1:] {
+		log.Printf("[harness] %s    %s", prefix, l)
+	}
 }
 
-func (claudeLogSink) onResult(ev claudeEvent) {
+func (s *claudeLogSink) onToolUse(id, name, parentID string, input json.RawMessage) {
+	// Remember an Agent/Task spawn's label so its subagent's later events can be
+	// attributed back to it (they carry this id as their parentID).
+	if isAgentTool(name) {
+		s.labels[id] = toolSummary(name, input)
+	}
+	logToolUse(s.subagentPrefix(parentID), name, input)
+}
+
+func (s *claudeLogSink) onToolResult(_, parentID string, _ bool, content json.RawMessage) {
+	logToolResult(s.subagentPrefix(parentID), toolResultText(content))
+}
+
+func (*claudeLogSink) onResult(ev claudeEvent) {
 	if ev.IsError {
 		log.Printf("[harness] claude finished with error (turns=%d)", ev.NumTurns)
 	} else {
@@ -140,8 +200,26 @@ func (claudeLogSink) onResult(ev claudeEvent) {
 }
 
 // handleClaudeEvent renders one NDJSON event into the transcript (the one-shot
-// path). It is the log-sink specialization of dispatchClaudeEvent.
-func handleClaudeEvent(raw []byte) { dispatchClaudeEvent(raw, claudeLogSink{}) }
+// path). It is the log-sink specialization of dispatchClaudeEvent. It builds a
+// fresh sink per call, so it's only for single-event use (tests); a real run
+// uses one sink across all lines via newClaudeLogSink + handle.
+func handleClaudeEvent(raw []byte) { dispatchClaudeEvent(raw, newClaudeLogSink()) }
+
+// subagentMarker tags a [harness] transcript line as belonging to a subagent;
+// subagentSep separates the subagent's label from the line body. Both are kept
+// byte-identical to the frontend (SUBAGENT_MARKER / SUBAGENT_SEP in
+// log-segments.ts), which folds these lines into a labelled block — the same
+// contract as the ← output marker. Chosen as glyphs that don't occur in tool
+// summaries or output.
+const (
+	subagentMarker = "⇉"
+	subagentSep    = "⟫"
+)
+
+// isAgentTool reports whether a tool name spawns a subagent. Claude renamed the
+// tool from "Task" to "Agent" in CLI v2.1.63; both names still appear (e.g.
+// permission_denials keep "Task"), so match either.
+func isAgentTool(name string) bool { return name == "Agent" || name == "Task" }
 
 // maxToolOutput caps how much of a tool result we forward as a tool_call_update:
 // results can be huge (a full file read, a long command's stdout), and both the
@@ -161,6 +239,17 @@ func toolSummary(name string, input json.RawMessage) string {
 		return s
 	}
 	switch {
+	case isAgentTool(name): // Agent / Task — a subagent spawn
+		// Label from subagent_type + the short description; deliberately drop the
+		// (long) prompt so the summary stays one readable line.
+		kind := str("subagent_type")
+		if kind == "" {
+			kind = "agent"
+		}
+		if d := str("description"); d != "" {
+			return fmt.Sprintf("%s(%s): %s", name, kind, d)
+		}
+		return fmt.Sprintf("%s(%s)", name, kind)
 	case str("command") != "": // Bash
 		return fmt.Sprintf("%s: %s", name, str("command"))
 	case str("file_path") != "": // Read / Write / Edit / NotebookEdit
@@ -214,11 +303,13 @@ func toolResultText(raw json.RawMessage) string {
 
 // logToolUse logs a tool invocation, tagging every line with [harness] so a
 // multi-line command (e.g. a heredoc) still renders entirely as harness context.
-func logToolUse(name string, input json.RawMessage) {
+// prefix is inserted after the [harness] tag: empty for a main-agent call, or a
+// subagentPrefix naming the subagent that made it.
+func logToolUse(prefix, name string, input json.RawMessage) {
 	lines := strings.Split(toolSummary(name, input), "\n")
-	log.Printf("[harness] → %s", lines[0])
+	log.Printf("[harness] %s→ %s", prefix, lines[0])
 	for _, l := range lines[1:] {
-		log.Printf("[harness]     %s", l)
+		log.Printf("[harness] %s    %s", prefix, l)
 	}
 }
 
@@ -229,13 +320,13 @@ func logToolUse(name string, input json.RawMessage) {
 // the frontend parser (harnessOutputText in log-segments.ts) reads the bytes
 // this writes. The text is already truncated by the caller; empty output emits
 // nothing so a resultless call stays a plain one-line entry.
-func logToolResult(text string) {
+func logToolResult(prefix, text string) {
 	text = strings.TrimRight(text, "\n")
 	if strings.TrimSpace(text) == "" {
 		return
 	}
 	for _, l := range strings.Split(text, "\n") {
-		log.Printf("[harness]   ← %s", l)
+		log.Printf("[harness]   %s← %s", prefix, l)
 	}
 }
 
@@ -256,7 +347,10 @@ func runClaudeStreaming(ctx context.Context, dir string, env []string, args ...s
 		return err
 	}
 
-	forEachLine(stdout, handleClaudeEvent)
+	// One sink for the whole run so it can remember each subagent's label across
+	// lines and attribute that subagent's later events (a fresh per-line sink
+	// would forget the spawn).
+	forEachLine(stdout, newClaudeLogSink().handle)
 
 	waitErr := cmd.Wait()
 	stderr.flush()

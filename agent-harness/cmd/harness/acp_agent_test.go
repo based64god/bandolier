@@ -164,6 +164,37 @@ func TestClaudeDriverToolCallTranslation(t *testing.T) {
 	}
 }
 
+// A subagent's tool calls must carry parentToolCallId = the spawning Agent
+// call's id, and the Agent spawn itself must render as kind "subagent" with no
+// parent — the linkage the dashboard nests on.
+func TestClaudeDriverSubagentNesting(t *testing.T) {
+	var buf bytes.Buffer
+	a := captureEmits(&buf)
+	d := &claudeDriver{agent: a}
+	// Main-agent Agent spawn (parent_tool_use_id null), then the subagent's own
+	// Read tagged with the spawn id.
+	d.handle([]byte(`{"type":"assistant","parent_tool_use_id":null,"message":{"content":[{"type":"tool_use","id":"toolu_agent01","name":"Agent","input":{"subagent_type":"Explore","description":"find auth"}}]}}`))
+	d.handle([]byte(`{"type":"assistant","parent_tool_use_id":"toolu_agent01","message":{"content":[{"type":"tool_use","id":"toolu_sub01","name":"Read","input":{"file_path":"a.go"}}]}}`))
+
+	calls := collectUpdates(t, &buf)
+	if len(calls) != 2 {
+		t.Fatalf("got %d tool calls, want 2", len(calls))
+	}
+	spawn, child := calls[0], calls[1]
+	if spawn.Kind != acp.ToolKindSubagent || spawn.ParentToolCallID != "" {
+		t.Errorf("spawn = {kind:%q parent:%q}, want {subagent, ''}", spawn.Kind, spawn.ParentToolCallID)
+	}
+	if spawn.Title != "Agent(Explore): find auth" {
+		t.Errorf("spawn title = %q", spawn.Title)
+	}
+	if child.ParentToolCallID != "toolu_agent01" {
+		t.Errorf("child parentToolCallId = %q, want toolu_agent01", child.ParentToolCallID)
+	}
+	if child.ToolCallID != "toolu_sub01" {
+		t.Errorf("child toolCallId = %q, want toolu_sub01", child.ToolCallID)
+	}
+}
+
 // collectToolUpdates parses the tool_call_update frames in buf.
 func collectToolUpdates(t *testing.T, buf interface{ String() string }) []acp.ToolCallUpdate {
 	t.Helper()

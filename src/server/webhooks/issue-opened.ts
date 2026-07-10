@@ -25,7 +25,7 @@ import {
 
 import { shouldTriggerOnEvent } from "~/server/agents/webhook-config";
 import { postBotAck } from "./bot-ack";
-import { wantsIssueOutput } from "./labels";
+import { wantsInteractive, wantsIssueOutput } from "./labels";
 import { resolveWebhookRun } from "./resolve-run";
 import { type IssuePayload, type WebhookRunConfig } from "./types";
 
@@ -79,6 +79,16 @@ export async function handleIssueOpened(
     });
   }
 
+  // An `interactive` label starts a long-lived interactive session seeded with
+  // the issue, which the opener then drives from the dashboard, rather than a
+  // one-shot run.
+  const interactive = wantsInteractive(issue.labels);
+  if (interactive) {
+    console.log("[bandolier:webhook] interactive session requested", {
+      issue: issue.number,
+    });
+  }
+
   // Attribute commits to the issue author via their GitHub no-reply address, so
   // GitHub links them to that account regardless of the sender's email privacy.
   const gitIdentity = githubGitIdentity(sender.id, sender.login);
@@ -104,6 +114,7 @@ export async function handleIssueOpened(
       ? undefined
       : buildIssueSystemPrompt({ title: issue.title }, agentBranch!),
     agentBranch,
+    interactive: interactive || undefined,
     outputType: issueOutput ? "issue" : undefined,
     displayName: `#${issue.number}: ${issue.title}`,
     repoUrl: repository.clone_url,

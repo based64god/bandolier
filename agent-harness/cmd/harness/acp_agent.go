@@ -174,7 +174,13 @@ type claudeDriver struct {
 	agent    *acpAgent
 }
 
-func startClaudeDriver(a *acpAgent) (*claudeDriver, error) {
+// claudeDriverArgs builds the claude CLI arguments for an interactive ACP
+// session — the counterpart to runClaude's one-shot arg list. Split out so the
+// flags are unit-testable without spawning claude, in particular that the
+// system prompt (ACP_SYSTEM_PROMPT, which carries the ultracode framing at max
+// effort — see config.ultracode) and the effort level reach the CLI in
+// interactive mode just as they do one-shot.
+func claudeDriverArgs(a *acpAgent) []string {
 	args := []string{
 		"--print",
 		"--model", a.model,
@@ -189,7 +195,11 @@ func startClaudeDriver(a *acpAgent) (*claudeDriver, error) {
 	if a.sysPrompt != "" {
 		args = append(args, "--append-system-prompt", a.sysPrompt)
 	}
-	cmd := exec.Command("claude", args...)
+	return args
+}
+
+func startClaudeDriver(a *acpAgent) (*claudeDriver, error) {
+	cmd := exec.Command("claude", claudeDriverArgs(a)...)
 	cmd.Dir = a.workDir
 	cmd.Env = buildEnv(a.provider)
 	cmd.Stderr = os.Stderr

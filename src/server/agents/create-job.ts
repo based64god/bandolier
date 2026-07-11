@@ -176,10 +176,10 @@ export interface JobSpec {
   branch: string;
   model: string;
   /**
-   * Reasoning-effort level for the run (low|medium|high|xhigh|max), passed to the
-   * `claude` CLI as --effort. Only applies to the Claude providers (Anthropic /
-   * Bedrock); callers must not set it for OpenAI/Gemini runs, whose CLIs ignore
-   * it. Unset = the harness/CLI default.
+   * Reasoning-effort level for the run (low|medium|high|xhigh|max), passed to
+   * the `claude` CLI as --effort. Applies to every provider — non-Anthropic
+   * backends get the thinking budget mapped by the harness's embedded proxy.
+   * Unset = the harness/CLI default.
    */
   effort?: string;
   maxTurns?: number;
@@ -389,8 +389,6 @@ function pdbName(jobName: string): string {
 export interface ProviderDescriptor {
   type: "bedrock" | "anthropic" | "openai" | "gemini";
   model: string;
-  /** Whether this is a Claude provider (Bedrock / Anthropic) — gates --effort. */
-  isClaude: boolean;
   /** Non-secret provider env vars (e.g. CLAUDE_CODE_USE_BEDROCK, AWS_REGION). */
   plainEnv: EnvVar[];
   /**
@@ -437,7 +435,6 @@ export function resolveProvider(spec: JobSpec): ProviderDescriptor {
     return {
       type: "bedrock",
       model,
-      isClaude: true,
       plainEnv: [
         { name: "CLAUDE_CODE_USE_BEDROCK", value: "1" },
         { name: "AWS_REGION", value: aws.region },
@@ -463,7 +460,6 @@ export function resolveProvider(spec: JobSpec): ProviderDescriptor {
     return {
       type: "anthropic",
       model,
-      isClaude: true,
       plainEnv: [],
       secretRefs: [{ key }],
       secretData: { [key]: value },
@@ -471,15 +467,16 @@ export function resolveProvider(spec: JobSpec): ProviderDescriptor {
   }
 
   if (provider === "openai") {
-    // The harness writes CODEX_AUTH_JSON to ~/.codex/auth.json for
-    // ChatGPT-subscription auth; the API key takes precedence over it.
+    // The harness's embedded model proxy serves OpenAI models to Claude Code:
+    // with an API key it talks to the OpenAI API, with CODEX_AUTH_JSON (the
+    // contents of `codex login`'s auth.json) it talks to the ChatGPT
+    // subscription backend. The API key takes precedence.
     const [key, value] = spec.openaiApiKey
       ? (["OPENAI_API_KEY", spec.openaiApiKey] as const)
       : (["CODEX_AUTH_JSON", spec.codexAuthJson!] as const);
     return {
       type: "openai",
       model,
-      isClaude: false,
       plainEnv: [],
       secretRefs: [{ key }],
       secretData: { [key]: value },
@@ -487,13 +484,12 @@ export function resolveProvider(spec: JobSpec): ProviderDescriptor {
   }
 
   if (provider === "gemini") {
-    // agy (Antigravity CLI) authenticates via Application Default Credentials;
-    // the harness writes this project credentials JSON to
-    // ~/.gemini/credentials.json.
+    // Gemini models run through the harness's embedded model proxy against
+    // Vertex AI, authenticated with this project credentials JSON (written to
+    // ~/.gemini/credentials.json in the pod).
     return {
       type: "gemini",
       model,
-      isClaude: false,
       plainEnv: [],
       secretRefs: [{ key: "GOOGLE_PROJECT_CREDENTIALS" }],
       secretData: { GOOGLE_PROJECT_CREDENTIALS: spec.geminiApiKey! },
@@ -547,10 +543,11 @@ export function buildEnvVars(
     name: "MAX_TURNS",
     value: String(spec.maxTurns ?? DEFAULT_MAX_TURNS),
   });
-  // Reasoning effort is Claude-only (the `claude` CLI's --effort). Only forward it
-  // on a Claude provider run; the Codex/Antigravity CLIs don't take it. The
-  // harness validates the value and ignores an unknown one.
-  if (spec.effort && provider.isClaude) {
+  // Reasoning effort (the `claude` CLI's --effort). Every provider runs through
+  // the claude CLI — the harness's embedded proxy maps the thinking budget for
+  // non-Anthropic backends — so the value is forwarded unconditionally. The
+  // harness validates it and ignores an unknown one.
+  if (spec.effort) {
     envVars.push({ name: "CLAUDE_EFFORT", value: spec.effort });
   }
   if (spec.prWriterModel) {

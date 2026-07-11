@@ -112,8 +112,9 @@ function RepoAnthropicSection({
   );
 }
 
-// OpenAI key shared by everyone working on this repo (used via the Codex CLI).
-// Admin-only, like the other shared credentials.
+// OpenAI key shared by everyone working on this repo (served to Claude Code
+// through the harness's embedded model proxy). Admin-only, like the other
+// shared credentials.
 function RepoOpenAISection({
   repoFullName,
   status,
@@ -135,8 +136,8 @@ function RepoOpenAISection({
 }
 
 // Gemini project credentials shared by everyone working on this repo (a Google
-// Cloud service-account key, used via the Antigravity CLI). Admin-only, like the
-// other shared credentials.
+// Cloud service-account key, used against Vertex AI through the harness's
+// embedded model proxy). Admin-only, like the other shared credentials.
 function RepoGeminiSection({
   repoFullName,
   status,

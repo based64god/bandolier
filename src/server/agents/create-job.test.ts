@@ -452,7 +452,7 @@ describe("createAgentJob", () => {
       expect(envVar("CLAUDE_EFFORT")?.value).toBe("high");
     });
 
-    it("drops effort for a non-Claude provider", async () => {
+    it("forwards effort for a proxy-routed provider too", async () => {
       await createAgentJob(
         baseSpec({
           anthropicApiKey: undefined,
@@ -460,7 +460,7 @@ describe("createAgentJob", () => {
           effort: "high",
         }),
       );
-      expect(envNames()).not.toContain("CLAUDE_EFFORT");
+      expect(envVar("CLAUDE_EFFORT")?.value).toBe("high");
     });
 
     it("always wires the ingest callback; feature URLs stay off a minimal spec", async () => {
@@ -854,7 +854,6 @@ describe("resolveProvider", () => {
   it("prefers AWS Bedrock over Anthropic", () => {
     const p = resolveProvider(baseSpec({ awsCredentials: aws }));
     expect(p.type).toBe("bedrock");
-    expect(p.isClaude).toBe(true);
     expect(p.plainEnv).toContainEqual({
       name: "CLAUDE_CODE_USE_BEDROCK",
       value: "1",
@@ -890,7 +889,6 @@ describe("resolveProvider", () => {
   it("maps an Anthropic API key to a single secret key", () => {
     const p = resolveProvider(baseSpec());
     expect(p.type).toBe("anthropic");
-    expect(p.isClaude).toBe(true);
     expect(p.secretRefs).toEqual([{ key: "ANTHROPIC_API_KEY" }]);
     expect(p.secretData).toEqual({ ANTHROPIC_API_KEY: "sk-a" });
   });
@@ -918,7 +916,6 @@ describe("resolveProvider", () => {
       baseSpec({ anthropicApiKey: undefined, codexAuthJson: '{"tokens":{}}' }),
     );
     expect(codex.type).toBe("openai");
-    expect(codex.isClaude).toBe(false);
     expect(codex.secretData).toEqual({ CODEX_AUTH_JSON: '{"tokens":{}}' });
   });
 
@@ -927,7 +924,6 @@ describe("resolveProvider", () => {
       baseSpec({ anthropicApiKey: undefined, geminiApiKey: '{"project":1}' }),
     );
     expect(p.type).toBe("gemini");
-    expect(p.isClaude).toBe(false);
     expect(p.secretRefs).toEqual([{ key: "GOOGLE_PROJECT_CREDENTIALS" }]);
     expect(p.secretData).toEqual({
       GOOGLE_PROJECT_CREDENTIALS: '{"project":1}',
@@ -964,7 +960,7 @@ describe("buildEnvVars", () => {
     });
   });
 
-  it("forwards effort only for a Claude provider", () => {
+  it("forwards effort for every provider", () => {
     const claude = buildEnvVars(
       baseSpec({ effort: "high" }),
       "j",
@@ -977,7 +973,7 @@ describe("buildEnvVars", () => {
       effort: "high",
     });
     const openai = buildEnvVars(openaiSpec, "j", resolveProvider(openaiSpec));
-    expect(openai.map((e) => e.name)).not.toContain("CLAUDE_EFFORT");
+    expect(openai.find((e) => e.name === "CLAUDE_EFFORT")?.value).toBe("high");
   });
 
   it("defaults MAX_TURNS to unlimited", () => {

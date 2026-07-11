@@ -29,6 +29,7 @@ import {
   DEFAULT_MEMORY_LIMIT,
 } from "~/lib/compute";
 import { EFFORT_LEVELS, providerSupportsEffort } from "~/lib/effort";
+import { gollmProviderEnv } from "~/server/agents/gollm-catalog";
 import { createAgentJob, DEFAULT_MAX_TURNS } from "~/server/agents/create-job";
 import { getRepoBotToken } from "~/server/agents/github-app";
 import { getUserGithubToken } from "~/server/agents/github-token";
@@ -99,16 +100,23 @@ export const agentsRouter = createTRPCRouter({
         input?.repoFullName,
       );
       const provider = providerForCredentials(creds);
-      if (!provider) {
+      // A user with only gollm-proxied providers still has a usable provider —
+      // report the first so the deploy form doesn't show the no-provider
+      // warning. The badge label comes from the model picker, not here.
+      const firstCustom = creds.customProviders?.[0];
+      if (!provider && !firstCustom) {
         return {
           provider: "none" as const,
           region: null,
           source: "none" as const,
         };
       }
+      const resolvedProvider =
+        provider ?? (`gollm:${firstCustom!.provider}` as const);
       return {
-        provider,
-        region: provider === "bedrock" ? (creds.aws?.region ?? null) : null,
+        provider: resolvedProvider,
+        region:
+          resolvedProvider === "bedrock" ? (creds.aws?.region ?? null) : null,
         source: creds.source,
       };
     }),
@@ -677,6 +685,12 @@ export const agentsRouter = createTRPCRouter({
           // clients may omit it, falling back to the primary-provider precedence.
           modelProvider: z
             .enum(["anthropic", "bedrock", "openai", "gemini"])
+            .or(
+              // gollm-proxied providers ride as "gollm:<catalog id>".
+              z.custom<`gollm:${string}`>(
+                (v) => typeof v === "string" && v.startsWith("gollm:"),
+              ),
+            )
             .optional(),
           // Which credential kind to run on, for providers where both a metered
           // API key and a subscription login can be configured (Anthropic,
@@ -788,6 +802,7 @@ export const agentsRouter = createTRPCRouter({
         openaiApiKey,
         codexAuthJson,
         geminiApiKey,
+        customProvider,
       } = selectRunCredentials(resolved, {
         modelProvider: input.modelProvider,
         modelAuth: input.modelAuth,
@@ -799,7 +814,8 @@ export const agentsRouter = createTRPCRouter({
         !anthropicOauthToken &&
         !openaiApiKey &&
         !codexAuthJson &&
-        !geminiApiKey
+        !geminiApiKey &&
+        !customProvider
       ) {
         throw new TRPCError({
           code: "BAD_REQUEST",
@@ -918,6 +934,12 @@ export const agentsRouter = createTRPCRouter({
           openaiApiKey: openaiApiKey ?? undefined,
           codexAuthJson: codexAuthJson ?? undefined,
           geminiApiKey: geminiApiKey ?? undefined,
+          customProvider: customProvider
+            ? {
+                provider: customProvider.provider,
+                env: gollmProviderEnv(customProvider),
+              }
+            : undefined,
           kubeconfig,
           agentImage: agentImage ?? undefined,
           imagePullSecret,

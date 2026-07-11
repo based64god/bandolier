@@ -42,16 +42,32 @@ const AUTH_TAGS: Record<string, string> = {
   subscription: "Subscription",
 };
 
+// gollm-proxied providers all share one accent; their per-provider label comes
+// from the catalog, passed in as `label` (the picker knows it). This keeps the
+// tag component from importing the ~100-entry catalog into the client bundle.
+const GOLLM_BADGE = "border-sky-500/40 bg-sky-500/10 text-sky-300";
+
 export function ProviderTag({
   provider,
   auth,
+  label,
 }: {
   provider: string;
   auth?: string;
+  /** Display label for a gollm-proxied provider (`gollm:<id>`). */
+  label?: string;
 }) {
-  const accent = PROVIDER_ACCENT[provider];
-  if (!accent) return null;
   const authLabel = auth ? AUTH_TAGS[auth] : undefined;
+
+  // gollm-proxied provider: one shared accent, catalog label (or the bare id).
+  const gollmId = provider.startsWith("gollm:")
+    ? provider.slice("gollm:".length)
+    : null;
+  const accent = PROVIDER_ACCENT[provider];
+  if (!accent && !gollmId) return null;
+
+  const badge = accent?.badge ?? GOLLM_BADGE;
+  const tagLabel = accent?.tagLabel ?? label ?? gollmId ?? provider;
   return (
     <span className="flex shrink-0 items-center gap-1">
       {authLabel && (
@@ -60,9 +76,9 @@ export function ProviderTag({
         </span>
       )}
       <span
-        className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] ${accent.badge}`}
+        className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] ${badge}`}
       >
-        {accent.tagLabel}
+        {tagLabel}
       </span>
     </span>
   );

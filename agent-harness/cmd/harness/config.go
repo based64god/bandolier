@@ -102,12 +102,12 @@ func (c config) diffBase() string {
 func (c config) issueOutput() bool { return c.outputType == "issue" }
 
 // writesPRCopy reports whether the post-run step generates out-of-band PR copy
-// for this run. Proxy-routed providers (OpenAI, Gemini) always use a cheap
-// same-provider writer; a Claude run only does so when a dedicated writer
-// model (PR_WRITER_MODEL) is configured, rather than spending the task model
-// on it.
+// for this run. Every proxy-routed (gollm) provider generates it — with a cheap
+// same-provider writer where the server supplied one (PR_WRITER_MODEL), else
+// the task model. A Claude run only does so when a dedicated writer model is
+// configured, rather than spending the task model on it.
 func (c config) writesPRCopy() bool {
-	return c.provider == providerOpenAI || c.provider == providerGemini || c.prWriter != ""
+	return c.provider == providerGollm || c.prWriter != ""
 }
 
 // withRepoPrompt layers the repo-attached system prompt (REPO_SYSTEM_PROMPT)

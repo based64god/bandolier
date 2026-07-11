@@ -7,6 +7,7 @@ import {
   pgTable,
   text,
   timestamp,
+  unique,
 } from "drizzle-orm/pg-core";
 
 export const user = pgTable("user", {
@@ -387,6 +388,83 @@ export const userGeminiCredentials = pgTable("user_gemini_credentials", {
     .$onUpdate(() => new Date())
     .notNull(),
 });
+
+// Credentials for the model providers served through the harness's embedded
+// gollm proxy (everything beyond Anthropic/Bedrock/OpenAI/Gemini): one row per
+// (user, provider). `provider` is gollm's canonical name and must exist in the
+// provider catalog (~/server/agents/gollm-catalog); the row's fields map onto
+// the env vars gollm reads inside the pod.
+export const userCustomProviderCredentials = pgTable(
+  "user_custom_provider_credentials",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    /** gollm provider id ("groq", "openrouter", "github_copilot", …). */
+    provider: text("provider").notNull(),
+    /** API key / token, mapped to the provider's conventional env var. */
+    apiKey: text("api_key"),
+    /** Endpoint override (required for self-hosted backends). */
+    apiBase: text("api_base"),
+    /**
+     * Extra env vars (JSON object) for providers that need more than a key +
+     * endpoint (OCI's identity fields, watsonx's project id, …). Injected
+     * into the pod verbatim alongside the mapped key/endpoint.
+     */
+    extraEnv: text("extra_env"),
+    /**
+     * Optional model ids (JSON string array) shown in the picker — the source
+     * for providers without an OpenAI-compatible GET /models, and a fallback
+     * when the listing call fails.
+     */
+    models: text("models"),
+    createdAt: timestamp("created_at")
+      .$defaultFn(() => /* @__PURE__ */ new Date())
+      .notNull(),
+    updatedAt: timestamp("updated_at")
+      .$defaultFn(() => /* @__PURE__ */ new Date())
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (t) => [unique().on(t.userId, t.provider)],
+);
+
+// The repo-shared counterpart of user_custom_provider_credentials: gollm-proxied
+// provider credentials scoped to a repo (admin-only), one row per (repo,
+// provider). Mirrors how the repoWebhookConfig columns hold the shared
+// Anthropic/OpenAI/Gemini/Bedrock credentials — the prefer-repo-credentials flag
+// there decides these vs a user's own. Keyed by repo full name (not an FK) so it
+// stands alone from the config row.
+export const repoCustomProviderCredentials = pgTable(
+  "repo_custom_provider_credentials",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    repoFullName: text("repo_full_name").notNull(),
+    /** gollm provider id ("groq", "openrouter", "github_copilot", …). */
+    provider: text("provider").notNull(),
+    /** API key / token, mapped to the provider's conventional env var. */
+    apiKey: text("api_key"),
+    /** Endpoint override (required for self-hosted backends). */
+    apiBase: text("api_base"),
+    /** Extra env vars (JSON object) injected into the pod verbatim. */
+    extraEnv: text("extra_env"),
+    /** Optional model ids (JSON string array) shown in the picker. */
+    models: text("models"),
+    createdAt: timestamp("created_at")
+      .$defaultFn(() => /* @__PURE__ */ new Date())
+      .notNull(),
+    updatedAt: timestamp("updated_at")
+      .$defaultFn(() => /* @__PURE__ */ new Date())
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (t) => [unique().on(t.repoFullName, t.provider)],
+);
 
 // User-provisioned API keys. The full token is shown once at creation and only
 // its SHA-256 hash is stored; a request bearing a valid key acts as its owner

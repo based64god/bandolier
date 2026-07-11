@@ -39,10 +39,7 @@ const NAV: SettingsNavGroup[] = [
     label: "Shared credentials",
     items: [
       { id: "kubeconfig", label: "Kubeconfig" },
-      { id: "anthropic", label: "Anthropic" },
-      { id: "openai", label: "OpenAI" },
-      { id: "gemini", label: "Gemini" },
-      { id: "aws", label: "AWS Bedrock" },
+      { id: "providers", label: "Model providers" },
       { id: "artifacts", label: "Artifact storage" },
       { id: "preference", label: "Credential preference" },
     ],

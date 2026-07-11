@@ -16,6 +16,7 @@ import {
 import { db } from "~/server/db";
 import { parseCpuQuery, parseMemoryQuery } from "~/lib/compute";
 import { parseEffortQuery, providerSupportsEffort } from "~/lib/effort";
+import { gollmProviderEnv } from "~/server/agents/gollm-catalog";
 
 import {
   CPU_LABEL_PREFIX,
@@ -46,6 +47,7 @@ export type WebhookRunSpec = Pick<
   | "openaiApiKey"
   | "codexAuthJson"
   | "geminiApiKey"
+  | "customProvider"
 >;
 
 export interface ResolvedWebhookRun {
@@ -220,6 +222,7 @@ export async function resolveWebhookRun(opts: {
     openaiApiKey,
     codexAuthJson,
     geminiApiKey,
+    customProvider,
   } = selectRunCredentials(resolved, { modelProvider: provider });
   if (
     !awsCredentials &&
@@ -227,7 +230,8 @@ export async function resolveWebhookRun(opts: {
     !anthropicOauthToken &&
     !openaiApiKey &&
     !codexAuthJson &&
-    !geminiApiKey
+    !geminiApiKey &&
+    !customProvider
   ) {
     console.log(
       "[bandolier:webhook] skipped — no credentials for the selected model",
@@ -277,6 +281,12 @@ export async function resolveWebhookRun(opts: {
       openaiApiKey: openaiApiKey ?? undefined,
       codexAuthJson: codexAuthJson ?? undefined,
       geminiApiKey: geminiApiKey ?? undefined,
+      customProvider: customProvider
+        ? {
+            provider: customProvider.provider,
+            env: gollmProviderEnv(customProvider),
+          }
+        : undefined,
     },
     resolved,
   };

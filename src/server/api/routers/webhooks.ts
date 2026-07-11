@@ -5,6 +5,12 @@ import { z } from "zod";
 import { cleanSessionToken, validateAwsCredentials } from "~/server/agents/aws";
 import { validateAnthropicKey } from "~/server/agents/anthropic";
 import {
+  getRepoCustomProviders,
+  normalizeCustomProviderInput,
+  validateCustomProviderInput,
+} from "~/server/agents/custom-providers";
+import { gollmProviderInfo } from "~/server/agents/gollm-catalog";
+import {
   summarizeGeminiCredentials,
   validateGeminiCredentials,
 } from "~/server/agents/gemini";
@@ -26,7 +32,11 @@ import { type Validation } from "~/server/agents/validation";
 import { EFFORT_LEVELS } from "~/lib/effort";
 import { HARNESS_CONTRACT_VERSION } from "~/lib/harness-contract";
 import { type db } from "~/server/db";
-import { repoWebhookConfig, taskRun } from "~/server/db/schema";
+import {
+  repoCustomProviderCredentials,
+  repoWebhookConfig,
+  taskRun,
+} from "~/server/db/schema";
 import { maskKey, stripWhitespace } from "../credentials";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
 
@@ -750,6 +760,81 @@ export const webhooksRouter = createTRPCRouter({
       await upsertRepoConfig(ctx.db, input.repoFullName, ctx.session.user.id, {
         preferRepoCredentials: input.prefer,
       });
+      return { success: true };
+    }),
+
+  // ── Repo-shared gollm-proxied providers (admin-only) ──────────────────────
+  // The repo counterpart of the user-scoped custom providers: every provider
+  // gollm supports beyond the four first-class ones, shared across the repo and
+  // governed by the same prefer-repo-credentials toggle.
+
+  // The repo's configured custom providers, with the key masked.
+  getCustomProviders: protectedProcedure
+    .input(z.object({ repoFullName: z.string().min(1) }))
+    .query(async ({ ctx, input }) => {
+      await requireRepoAdmin(ctx, input.repoFullName);
+      const rows = await getRepoCustomProviders(ctx.db, input.repoFullName);
+      return rows.map((row) => ({
+        provider: row.provider,
+        label: gollmProviderInfo(row.provider)?.label ?? row.provider,
+        apiKeyMasked: row.apiKey ? maskKey(row.apiKey) : null,
+        apiBase: row.apiBase,
+        extraEnvKeys: Object.keys(row.extraEnv ?? {}),
+        models: row.models ?? [],
+      }));
+    }),
+
+  setCustomProvider: protectedProcedure
+    .input(
+      z.object({
+        repoFullName: z.string().min(1),
+        provider: z.string().min(1),
+        /** The provider's declared field env vars → entered values. */
+        fields: z.record(z.string(), z.string()),
+        /** Comma/newline-separated model ids for non-listable providers. */
+        models: z.string().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await requireRepoAdmin(ctx, input.repoFullName);
+      const validation = await validateCustomProviderInput(input);
+      if (!validation.valid) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: validation.error || "Invalid provider credential.",
+        });
+      }
+      const normalized = normalizeCustomProviderInput(input);
+      await ctx.db
+        .insert(repoCustomProviderCredentials)
+        .values({ repoFullName: input.repoFullName, ...normalized })
+        .onConflictDoUpdate({
+          target: [
+            repoCustomProviderCredentials.repoFullName,
+            repoCustomProviderCredentials.provider,
+          ],
+          set: { ...normalized, updatedAt: new Date() },
+        });
+      return { valid: true as const };
+    }),
+
+  deleteCustomProvider: protectedProcedure
+    .input(
+      z.object({
+        repoFullName: z.string().min(1),
+        provider: z.string().min(1),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await requireRepoAdmin(ctx, input.repoFullName);
+      await ctx.db
+        .delete(repoCustomProviderCredentials)
+        .where(
+          and(
+            eq(repoCustomProviderCredentials.repoFullName, input.repoFullName),
+            eq(repoCustomProviderCredentials.provider, input.provider),
+          ),
+        );
       return { success: true };
     }),
 });

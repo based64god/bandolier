@@ -3,12 +3,16 @@
 The Go binary that runs inside each Bandolier agent pod. It reads its task
 configuration from environment variables, optionally clones a git repository,
 drives Claude Code, and — in issue mode — opens a pull request that closes the
-issue. Non-Anthropic providers (OpenAI API key, ChatGPT subscription, Gemini,
-Vertex) are served through an embedded [gollm](../gollm) proxy: the harness
-starts it on localhost, points `ANTHROPIC_BASE_URL` at it, and Claude Code's
-Anthropic-format traffic is translated to the run's real backend. It ships as
-a container image alongside the `claude` CLI, `git`, and `gh` (see the
-[Dockerfile](Dockerfile)).
+issue. The claude CLI speaks Anthropic and Bedrock natively; every other
+provider (OpenAI, Gemini, ChatGPT/Codex subscription, and the ~90 more that
+[gollm](../gollm) supports) is served through an embedded gollm proxy: the
+harness starts it on localhost, points `ANTHROPIC_BASE_URL` at it, and Claude
+Code's Anthropic-format traffic is translated to the run's real backend. The
+server names the gollm backend in `BANDOLIER_LLM_PROVIDER` and injects its
+credential env vars; the harness itself knows no proxied provider by name and
+materializes no credential files — gollm reads each credential inline from the
+environment. It ships as a container image alongside the `claude` CLI, `git`,
+and `gh` (see the [Dockerfile](Dockerfile)).
 
 ## Build
 

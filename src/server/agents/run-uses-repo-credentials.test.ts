@@ -78,6 +78,20 @@ describe("runUsesRepoCredentials", () => {
     ["openaiApiKey", { openaiApiKey: "sk-openai" }],
     ["codexAuthJson", { codexAuthJson: "{}" }],
     ["geminiApiKey", { geminiApiKey: "gm-key" }],
+    [
+      "customProviders",
+      {
+        customProviders: [
+          {
+            provider: "groq",
+            apiKey: "gsk",
+            apiBase: null,
+            extraEnv: null,
+            models: null,
+          },
+        ],
+      },
+    ],
   ];
   it.each(singleCredentialSets)(
     "is true when the repo-sourced set's only credential is %s",

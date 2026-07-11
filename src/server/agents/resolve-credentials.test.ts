@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AwsCredentials } from "~/server/agents/aws";
+import type * as CustomProvidersModule from "~/server/agents/custom-providers";
 import type { ModelCredentials } from "~/server/agents/resolve-credentials";
 import type { db as Database } from "~/server/db";
 import type { RepoCredentials } from "~/server/agents/webhook-config";
@@ -15,6 +16,9 @@ const getUserOpenaiKey = vi.fn<() => Promise<string | null>>();
 const getUserCodexAuthJson = vi.fn<() => Promise<string | null>>();
 const getUserGeminiKey = vi.fn<() => Promise<string | null>>();
 const getRepoCredentials = vi.fn<() => Promise<RepoCredentials | null>>();
+type MockCustomProvider = { provider: string; apiKey?: string };
+const getUserCustomProviders = vi.fn<() => Promise<MockCustomProvider[]>>();
+const getRepoCustomProviders = vi.fn<() => Promise<MockCustomProvider[]>>();
 
 vi.mock("~/server/agents/user-aws", () => ({
   getUserAwsCredentials: () => getUserAwsCredentials(),
@@ -36,6 +40,12 @@ vi.mock("~/server/agents/gemini", () => ({
 }));
 vi.mock("~/server/agents/webhook-config", () => ({
   getRepoCredentials: () => getRepoCredentials(),
+}));
+vi.mock("~/server/agents/custom-providers", async (importOriginal) => ({
+  // Keep the real mergeCustomProviders (pure); mock only the DB getters.
+  ...(await importOriginal<typeof CustomProvidersModule>()),
+  getUserCustomProviders: () => getUserCustomProviders(),
+  getRepoCustomProviders: () => getRepoCustomProviders(),
 }));
 
 const {
@@ -83,6 +93,8 @@ beforeEach(() => {
   getUserCodexAuthJson.mockReset().mockResolvedValue(null);
   getUserGeminiKey.mockReset().mockResolvedValue(null);
   getRepoCredentials.mockReset().mockResolvedValue(null);
+  getUserCustomProviders.mockReset().mockResolvedValue([]);
+  getRepoCustomProviders.mockReset().mockResolvedValue([]);
 });
 
 describe("resolveModelCredentials", () => {
@@ -233,6 +245,60 @@ describe("resolveModelCredentials", () => {
     expect(r.source).toBe("user");
     expect(r.anthropicOauthToken).toBe("sk-ant-oat01-x");
     expect(r.anthropicApiKey).toBeNull();
+  });
+
+  // ── gollm-proxied (custom) providers ──────────────────────────────────────
+
+  it("surfaces the user's own custom providers (user set wins)", async () => {
+    getUserAnthropicKey.mockResolvedValue("sk-user");
+    getUserCustomProviders.mockResolvedValue([{ provider: "groq" }]);
+    const r = await resolveModelCredentials(db, "u1", "owner/repo");
+    expect(r.source).toBe("user");
+    expect(r.customProviders?.map((c) => c.provider)).toEqual(["groq"]);
+  });
+
+  it("routes to the repo set when the user has nothing but the repo shares a custom provider", async () => {
+    getRepoCustomProviders.mockResolvedValue([{ provider: "openrouter" }]);
+    const r = await resolveModelCredentials(db, "u1", "owner/repo");
+    expect(r.source).toBe("repo");
+    expect(r.customProviders?.map((c) => c.provider)).toEqual(["openrouter"]);
+  });
+
+  it("merges repo and user custom providers in the repo set — repo wins per id", async () => {
+    getUserCustomProviders.mockResolvedValue([
+      { provider: "groq", apiKey: "user-groq" },
+      { provider: "openrouter", apiKey: "user-or" },
+    ]);
+    getRepoCustomProviders.mockResolvedValue([
+      { provider: "groq", apiKey: "repo-groq" },
+      { provider: "together", apiKey: "repo-tg" },
+    ]);
+    // Repo prefers its creds so the repo set is returned.
+    getRepoCredentials.mockResolvedValue(
+      repo({ anthropicApiKey: "sk-repo", preferRepoCredentials: true }),
+    );
+    const r = await resolveModelCredentials(db, "u1", "owner/repo");
+    expect(r.source).toBe("repo");
+    const byId = Object.fromEntries(
+      (r.customProviders ?? []).map((c) => [c.provider, c.apiKey]),
+    );
+    // groq: repo wins; openrouter: user fills the gap; together: repo-only.
+    expect(byId).toEqual({
+      groq: "repo-groq",
+      openrouter: "user-or",
+      together: "repo-tg",
+    });
+  });
+
+  it("keeps only the user's own custom providers when the user set wins", async () => {
+    getUserAnthropicKey.mockResolvedValue("sk-user");
+    getUserCustomProviders.mockResolvedValue([{ provider: "groq" }]);
+    getRepoCustomProviders.mockResolvedValue([{ provider: "together" }]);
+    // Default preference → user set wins; the repo's custom providers are not
+    // exposed (mirrors how the repo's Gemini key is invisible when user wins).
+    const r = await resolveModelCredentials(db, "u1", "owner/repo");
+    expect(r.source).toBe("user");
+    expect(r.customProviders?.map((c) => c.provider)).toEqual(["groq"]);
   });
 
   it("does NOT mix the repo's Anthropic key with the user's OAuth token (Claude side is atomic)", async () => {

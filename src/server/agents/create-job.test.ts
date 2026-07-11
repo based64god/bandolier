@@ -389,37 +389,78 @@ describe("createAgentJob", () => {
       });
     });
 
-    it("wires OPENAI_API_KEY for an OpenAI key spec", async () => {
+    it("routes an OpenAI key through the openai proxy backend", async () => {
       const jobName = await createAgentJob(
         baseSpec({ anthropicApiKey: undefined, openaiApiKey: "sk-o" }),
       );
+      // Proxied like every non-native provider: the backend id rides as a plain
+      // env var and the key lands in the per-job secret.
+      expect(jobEnv()).toContainEqual({
+        name: "BANDOLIER_LLM_PROVIDER",
+        value: "openai",
+      });
       expect(jobEnv()).toContainEqual(secretRef(jobName, "OPENAI_API_KEY"));
       expect(credsSecret().body.stringData).toEqual({ OPENAI_API_KEY: "sk-o" });
     });
 
-    it("wires CODEX_AUTH_JSON for a ChatGPT-subscription spec", async () => {
+    it("routes ChatGPT-subscription auth through the chatgpt proxy backend", async () => {
       const jobName = await createAgentJob(
         baseSpec({
           anthropicApiKey: undefined,
           codexAuthJson: '{"tokens":{}}',
         }),
       );
+      expect(jobEnv()).toContainEqual({
+        name: "BANDOLIER_LLM_PROVIDER",
+        value: "chatgpt",
+      });
       expect(jobEnv()).toContainEqual(secretRef(jobName, "CODEX_AUTH_JSON"));
       expect(credsSecret().body.stringData).toEqual({
         CODEX_AUTH_JSON: '{"tokens":{}}',
       });
     });
 
-    it("wires GOOGLE_PROJECT_CREDENTIALS for a Gemini spec", async () => {
+    it("routes Gemini through the vertex proxy backend with inline credentials", async () => {
       const jobName = await createAgentJob(
         baseSpec({ anthropicApiKey: undefined, geminiApiKey: '{"project":1}' }),
       );
+      expect(jobEnv()).toContainEqual({
+        name: "BANDOLIER_LLM_PROVIDER",
+        value: "vertex",
+      });
+      // The service-account JSON is injected inline (no file); gollm's vertex
+      // backend reads it from GOOGLE_APPLICATION_CREDENTIALS_JSON.
       expect(jobEnv()).toContainEqual(
-        secretRef(jobName, "GOOGLE_PROJECT_CREDENTIALS"),
+        secretRef(jobName, "GOOGLE_APPLICATION_CREDENTIALS_JSON"),
       );
       expect(credsSecret().body.stringData).toEqual({
-        GOOGLE_PROJECT_CREDENTIALS: '{"project":1}',
+        GOOGLE_APPLICATION_CREDENTIALS_JSON: '{"project":1}',
       });
+    });
+
+    it("wires a gollm-proxied provider's id and env for a custom-provider spec", async () => {
+      const jobName = await createAgentJob(
+        baseSpec({
+          anthropicApiKey: undefined,
+          customProvider: {
+            provider: "openrouter",
+            env: { OPENROUTER_API_KEY: "sk-or", OPENAI_LIKE_API_BASE: "" },
+          },
+        }),
+      );
+      // The provider id rides as a plain env var the harness routes the proxy by.
+      expect(jobEnv()).toContainEqual({
+        name: "BANDOLIER_LLM_PROVIDER",
+        value: "openrouter",
+      });
+      // Every credential env var becomes a secret ref, and the secret carries
+      // exactly that provider's values.
+      expect(jobEnv()).toContainEqual(secretRef(jobName, "OPENROUTER_API_KEY"));
+      expect(credsSecret().body.stringData).toEqual({
+        OPENROUTER_API_KEY: "sk-or",
+        OPENAI_LIKE_API_BASE: "",
+      });
+      expect(envNames()).not.toContain("ANTHROPIC_API_KEY");
     });
 
     it("stores the GitHub token in the secret when given", async () => {
@@ -906,27 +947,41 @@ describe("resolveProvider", () => {
     expect(p.secretData).toEqual({ ANTHROPIC_API_KEY: "sk-a" });
   });
 
-  it("maps OpenAI and Codex credentials, key first", () => {
-    expect(
-      resolveProvider(
-        baseSpec({ anthropicApiKey: undefined, openaiApiKey: "sk-o" }),
-      ).secretData,
-    ).toEqual({ OPENAI_API_KEY: "sk-o" });
+  it("routes OpenAI/Codex through the proxy (openai backend, key first)", () => {
+    const key = resolveProvider(
+      baseSpec({ anthropicApiKey: undefined, openaiApiKey: "sk-o" }),
+    );
+    expect(key.plainEnv).toContainEqual({
+      name: "BANDOLIER_LLM_PROVIDER",
+      value: "openai",
+    });
+    expect(key.secretData).toEqual({ OPENAI_API_KEY: "sk-o" });
+
     const codex = resolveProvider(
       baseSpec({ anthropicApiKey: undefined, codexAuthJson: '{"tokens":{}}' }),
     );
     expect(codex.type).toBe("openai");
+    expect(codex.plainEnv).toContainEqual({
+      name: "BANDOLIER_LLM_PROVIDER",
+      value: "chatgpt",
+    });
     expect(codex.secretData).toEqual({ CODEX_AUTH_JSON: '{"tokens":{}}' });
   });
 
-  it("maps a Gemini key to GOOGLE_PROJECT_CREDENTIALS", () => {
+  it("routes Gemini through the proxy's vertex backend with inline creds", () => {
     const p = resolveProvider(
       baseSpec({ anthropicApiKey: undefined, geminiApiKey: '{"project":1}' }),
     );
     expect(p.type).toBe("gemini");
-    expect(p.secretRefs).toEqual([{ key: "GOOGLE_PROJECT_CREDENTIALS" }]);
+    expect(p.plainEnv).toContainEqual({
+      name: "BANDOLIER_LLM_PROVIDER",
+      value: "vertex",
+    });
+    expect(p.secretRefs).toEqual([
+      { key: "GOOGLE_APPLICATION_CREDENTIALS_JSON" },
+    ]);
     expect(p.secretData).toEqual({
-      GOOGLE_PROJECT_CREDENTIALS: '{"project":1}',
+      GOOGLE_APPLICATION_CREDENTIALS_JSON: '{"project":1}',
     });
   });
 });

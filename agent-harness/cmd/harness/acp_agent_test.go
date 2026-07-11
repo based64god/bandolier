@@ -75,6 +75,42 @@ func buildFakeClaude(t *testing.T) string {
 	return dir
 }
 
+// flagValue returns the argument following flag in args, or "" if absent.
+func flagValue(args []string, flag string) string {
+	for i, a := range args {
+		if a == flag && i+1 < len(args) {
+			return args[i+1]
+		}
+	}
+	return ""
+}
+
+// TestClaudeDriverArgs locks the interactive path's forwarding: the ultracode
+// system prompt (built upstream by the proxy via config.withRepoPrompt and
+// handed over as ACP_SYSTEM_PROMPT) and the effort level must reach the claude
+// CLI in interactive mode just as runClaude passes them one-shot.
+func TestClaudeDriverArgs(t *testing.T) {
+	// A highest-effort Claude run: the proxy's withRepoPrompt output carries the
+	// ultracode framing, and the driver must forward it plus --effort <highest>.
+	sysPrompt := (config{provider: providerAnthropic, effort: highestEffort}).withRepoPrompt("frame")
+	args := claudeDriverArgs(&acpAgent{model: "m", effort: highestEffort, sysPrompt: sysPrompt})
+	if got := flagValue(args, "--append-system-prompt"); got != sysPrompt || !strings.Contains(got, ultracodeFraming) {
+		t.Errorf("--append-system-prompt = %q, want the ultracode system prompt", got)
+	}
+	if got := flagValue(args, "--effort"); got != highestEffort {
+		t.Errorf("--effort = %q, want %q", got, highestEffort)
+	}
+
+	// No effort and no system prompt: neither flag is emitted.
+	args = claudeDriverArgs(&acpAgent{model: "m"})
+	if flagValue(args, "--append-system-prompt") != "" {
+		t.Error("--append-system-prompt emitted with an empty system prompt")
+	}
+	if flagValue(args, "--effort") != "" {
+		t.Error("--effort emitted with no effort set")
+	}
+}
+
 // captureEmits builds an agent whose emitted session/update frames land in buf,
 // for testing event translation in isolation.
 func captureEmits(buf io.Writer) *acpAgent {
@@ -125,6 +161,87 @@ func TestClaudeDriverToolCallTranslation(t *testing.T) {
 	}
 	if calls[0].Status != acp.ToolStatusPending {
 		t.Errorf("status = %q", calls[0].Status)
+	}
+}
+
+// A subagent's tool calls must carry parentToolCallId = the spawning Agent
+// call's id, and the Agent spawn itself must render as kind "subagent" with no
+// parent — the linkage the dashboard nests on.
+func TestClaudeDriverSubagentNesting(t *testing.T) {
+	var buf bytes.Buffer
+	a := captureEmits(&buf)
+	d := &claudeDriver{agent: a}
+	// Main-agent Agent spawn (parent_tool_use_id null), then the subagent's own
+	// Read tagged with the spawn id.
+	d.handle([]byte(`{"type":"assistant","parent_tool_use_id":null,"message":{"content":[{"type":"tool_use","id":"toolu_agent01","name":"Agent","input":{"subagent_type":"Explore","description":"find auth"}}]}}`))
+	d.handle([]byte(`{"type":"assistant","parent_tool_use_id":"toolu_agent01","message":{"content":[{"type":"tool_use","id":"toolu_sub01","name":"Read","input":{"file_path":"a.go"}}]}}`))
+
+	calls := collectUpdates(t, &buf)
+	if len(calls) != 2 {
+		t.Fatalf("got %d tool calls, want 2", len(calls))
+	}
+	spawn, child := calls[0], calls[1]
+	if spawn.Kind != acp.ToolKindSubagent || spawn.ParentToolCallID != "" {
+		t.Errorf("spawn = {kind:%q parent:%q}, want {subagent, ''}", spawn.Kind, spawn.ParentToolCallID)
+	}
+	if spawn.Title != "Agent(Explore): find auth" {
+		t.Errorf("spawn title = %q", spawn.Title)
+	}
+	if child.ParentToolCallID != "toolu_agent01" {
+		t.Errorf("child parentToolCallId = %q, want toolu_agent01", child.ParentToolCallID)
+	}
+	if child.ToolCallID != "toolu_sub01" {
+		t.Errorf("child toolCallId = %q, want toolu_sub01", child.ToolCallID)
+	}
+}
+
+// parseMessageChunks pulls out agent_message_chunk frames with their text and
+// parentToolCallId, so subagent-narration attribution can be asserted.
+func parseMessageChunks(buf interface{ String() string }) []struct {
+	text, parentToolCallID string
+} {
+	var out []struct{ text, parentToolCallID string }
+	for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+		if line == "" {
+			continue
+		}
+		var f struct {
+			Params struct {
+				Update json.RawMessage `json:"update"`
+			} `json:"params"`
+		}
+		if json.Unmarshal([]byte(line), &f) != nil {
+			continue
+		}
+		if acp.UpdateKind(f.Params.Update) != acp.UpdateAgentMessageChunk {
+			continue
+		}
+		var c acp.AgentMessageChunk
+		_ = json.Unmarshal(f.Params.Update, &c)
+		out = append(out, struct{ text, parentToolCallID string }{c.Content.Text, c.ParentToolCallID})
+	}
+	return out
+}
+
+// A subagent's narration must be forwarded tagged with the spawning Agent id, so
+// the client can route it to the subagent card; the main agent's text stays
+// untagged so it renders in the conversation.
+func TestClaudeDriverSubagentNarration(t *testing.T) {
+	var buf bytes.Buffer
+	a := captureEmits(&buf)
+	d := &claudeDriver{agent: a}
+	d.handle([]byte(`{"type":"assistant","parent_tool_use_id":null,"message":{"content":[{"type":"text","text":"main answer"}]}}`))
+	d.handle([]byte(`{"type":"assistant","parent_tool_use_id":"toolu_agent01","message":{"content":[{"type":"text","text":"subagent thought"}]}}`))
+
+	chunks := parseMessageChunks(&buf)
+	if len(chunks) != 2 {
+		t.Fatalf("got %d message chunks, want 2", len(chunks))
+	}
+	if chunks[0].text != "main answer" || chunks[0].parentToolCallID != "" {
+		t.Errorf("main chunk = %+v, want text='main answer' parent=''", chunks[0])
+	}
+	if chunks[1].text != "subagent thought" || chunks[1].parentToolCallID != "toolu_agent01" {
+		t.Errorf("subagent chunk = %+v, want parent=toolu_agent01", chunks[1])
 	}
 }
 

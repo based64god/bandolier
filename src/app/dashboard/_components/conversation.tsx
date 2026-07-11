@@ -2,7 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { groupTimeline, type TimelineItem } from "~/lib/acp/timeline";
+import {
+  groupTimeline,
+  type TimelineItem,
+  type ToolNode,
+} from "~/lib/acp/timeline";
 import type { RouterOutputs } from "~/trpc/react";
 import { TokenReadout } from "./token-readout";
 
@@ -98,7 +102,7 @@ export function Conversation({
         ) : (
           groupTimeline(items).map((group) =>
             group.type === "tools" ? (
-              <ToolGroup key={group.id} items={group.items} />
+              <ToolGroup key={group.id} nodes={group.nodes} />
             ) : (
               <MessageRow key={group.id} item={group.item} />
             ),
@@ -150,18 +154,24 @@ const TOOL_KIND_GLYPH: Record<string, string> = {
   search: "⌕",
   fetch: "↗",
   think: "✦",
+  // A spawned subagent (Claude's Agent/Task tool): a fan-out mark, since its own
+  // tool calls nest beneath it.
+  subagent: "⇉",
   other: "▢",
 };
 
+// Total tool calls in a node forest, counting nested subagent calls, so the
+// group summary reflects everything inside — not just the top-level rows.
+function countNodes(nodes: ToolNode[]): number {
+  return nodes.reduce((n, node) => n + 1 + countNodes(node.children), 0);
+}
+
 // A run of consecutive tool calls, collapsed behind a summary so the mechanical
 // activity between assistant turns doesn't bury the conversation — the
-// interactive mirror of the log modal's HarnessSegment. A single tool call still
-// renders as one summarized row rather than a redundant fold.
-function ToolGroup({
-  items,
-}: {
-  items: Extract<TimelineItem, { type: "tool" }>[];
-}) {
+// interactive mirror of the log modal's HarnessSegment. Subagent calls nest
+// under their spawn. A single tool call still renders as one summarized row.
+function ToolGroup({ nodes }: { nodes: ToolNode[] }) {
+  const count = countNodes(nodes);
   return (
     <details className="group">
       <summary className="flex cursor-pointer list-none items-center gap-1.5 font-mono text-[11px] text-white/40 hover:text-white/60 [&::-webkit-details-marker]:hidden">
@@ -173,15 +183,33 @@ function ToolGroup({
           <path d="M4 2l5 4-5 4V2z" />
         </svg>
         <span>
-          {items.length} tool {items.length === 1 ? "call" : "calls"}
+          {count} tool {count === 1 ? "call" : "calls"}
         </span>
       </summary>
       <div className="mt-1 ml-4 space-y-1 border-l border-white/10 pl-3">
-        {items.map((item) => (
-          <ToolRow key={item.id} item={item} />
+        {nodes.map((node) => (
+          <ToolNodeRow key={node.item.id} node={node} />
         ))}
       </div>
     </details>
+  );
+}
+
+// One tool call plus, indented beneath it, the calls a subagent made inside it.
+// Recurses so nested subagents (an agent spawning an agent) keep nesting.
+function ToolNodeRow({ node }: { node: ToolNode }) {
+  if (node.children.length === 0) {
+    return <ToolRow item={node.item} />;
+  }
+  return (
+    <div>
+      <ToolRow item={node.item} />
+      <div className="mt-1 ml-3 space-y-1 border-l border-white/10 pl-3">
+        {node.children.map((child) => (
+          <ToolNodeRow key={child.item.id} node={child} />
+        ))}
+      </div>
+    </div>
   );
 }
 

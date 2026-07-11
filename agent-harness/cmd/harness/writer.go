@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 )
@@ -14,9 +12,9 @@ import (
 //
 // PR and issue copy is written by a cheap out-of-band writer model — the latest
 // Sonnet/GPT-mini/Flash (PR_WRITER_MODEL), falling back to the task model —
-// independent of the model that performed the task. generateWriterContent owns
-// the shared shape (timeout, model fallback, TITLE/BODY parsing); only the raw
-// CLI invocation differs per provider, delegated to a writerExecFn.
+// independent of the model that performed the task. Every provider runs the
+// writer through the claude CLI; non-Anthropic writer models resolve through
+// the embedded model proxy like the task model does.
 
 // maxPRDiffBytes caps how much of the diff is sent to the PR-writer model, to
 // keep the prompt within a reasonable size on large changes.
@@ -112,7 +110,7 @@ func generateWriterContent(ctx context.Context, cfg config, prompt string) (stri
 	defer cancel()
 
 	log.Printf("[harness] writing title/description with %s (%s)", writerModel, cfg.provider)
-	out, err := writerExecFor(cfg.provider)(genCtx, cfg, writerModel, prompt)
+	out, err := writerExecClaude(genCtx, cfg, writerModel, prompt)
 	if err != nil {
 		log.Printf("[harness] warn: copy generation failed: %v", err)
 		return "", ""
@@ -120,7 +118,7 @@ func generateWriterContent(ctx context.Context, cfg config, prompt string) (stri
 	return parsePRContent(out)
 }
 
-// writerExecClaude runs the writer model via the claude CLI (Anthropic/Bedrock).
+// writerExecClaude runs the writer model via the claude CLI.
 func writerExecClaude(ctx context.Context, cfg config, writerModel, prompt string) (string, error) {
 	return captureCmdEnv(ctx, cfg.workDir, buildEnv(cfg.provider),
 		"claude", "--print",
@@ -128,42 +126,6 @@ func writerExecClaude(ctx context.Context, cfg config, writerModel, prompt strin
 		"--max-turns", "1",
 		"--dangerously-skip-permissions",
 		prompt)
-}
-
-// writerExecCodex runs the writer model via `codex exec`, capturing only the
-// final message with --output-last-message rather than scraping stdout (which
-// also carries Codex's progress output).
-func writerExecCodex(ctx context.Context, cfg config, writerModel, prompt string) (string, error) {
-	outFile := filepath.Join(os.TempDir(), "codex-pr-"+shortUnique()+".txt")
-	defer os.Remove(outFile)
-
-	if _, err := captureCmdEnv(ctx, cfg.workDir, buildEnv(cfg.provider),
-		"codex", "exec",
-		"--model", writerModel,
-		"--ephemeral",
-		"--skip-git-repo-check",
-		"--dangerously-bypass-approvals-and-sandbox",
-		"--output-last-message", outFile,
-		prompt); err != nil {
-		return "", err
-	}
-	out, err := os.ReadFile(outFile)
-	if err != nil {
-		return "", err
-	}
-	return string(out), nil
-}
-
-// writerExecGemini runs the writer model via agy. agy has no structured-output
-// mode, so the plain-text reply is returned for parsing.
-func writerExecGemini(ctx context.Context, cfg config, writerModel, prompt string) (string, error) {
-	writerCfg := cfg
-	writerCfg.model = writerModel
-	var buf strings.Builder
-	if err := agyExec(ctx, writerCfg, buildEnv(cfg.provider), prompt, &buf); err != nil {
-		return "", err
-	}
-	return buf.String(), nil
 }
 
 // parsePRContent extracts the title and body from the PR-writer model's reply,

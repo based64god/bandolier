@@ -2,18 +2,23 @@
 
 The Go binary that runs inside each Bandolier agent pod. It reads its task
 configuration from environment variables, optionally clones a git repository,
-drives an agent CLI (Claude Code, Codex, or Antigravity), and — in issue mode —
-opens a pull request that closes the issue. It ships as a container image
-alongside the agent CLIs, `git`, and `gh` (see the [Dockerfile](Dockerfile)).
+drives Claude Code, and — in issue mode — opens a pull request that closes the
+issue. Non-Anthropic providers (OpenAI API key, ChatGPT subscription, Gemini,
+Vertex) are served through an embedded [gollm](../gollm) proxy: the harness
+starts it on localhost, points `ANTHROPIC_BASE_URL` at it, and Claude Code's
+Anthropic-format traffic is translated to the run's real backend. It ships as
+a container image alongside the `claude` CLI, `git`, and `gh` (see the
+[Dockerfile](Dockerfile)).
 
 ## Build
 
 ```sh
-# Local binary (from this directory):
+# Local binary (from this directory; the vendored ../gollm module must be present):
 go build ./cmd/harness        # produces ./harness
 
-# Container image (Go binary + agent CLIs + git/gh):
-docker build -t bandolier-agent-harness .
+# Container image (Go binary + claude CLI + git/gh), built from the REPO ROOT so
+# the vendored gollm module is in the build context:
+cd .. && docker build -f agent-harness/Dockerfile -t bandolier-agent-harness .
 ```
 
 The `harness` binary this leaves in the working directory is a gitignored local

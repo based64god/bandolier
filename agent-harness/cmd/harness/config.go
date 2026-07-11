@@ -11,8 +11,9 @@ import (
 // effortLevels are the values the `claude` CLI accepts for --effort. This
 // allow-list crosses to the dashboard/webhook side, so its values are pinned in
 // wire-contract.json and asserted by both test suites (see
-// wire_contract_test.go). Effort is a Claude-only control; the Codex and
-// Antigravity CLIs don't take it.
+// wire_contract_test.go). Every provider is driven by the claude CLI, so the
+// flag applies to all runs; the model proxy maps it for non-Anthropic backends
+// where the translation supports it.
 var effortLevels = map[string]bool{
 	"low":    true,
 	"medium": true,
@@ -44,7 +45,7 @@ type config struct {
 	title            string // short label used for branch slug, PR title, commit message
 	workDir          string
 	model            string
-	effort           string // reasoning-effort level for the claude CLI (--effort); Claude providers only
+	effort           string // reasoning-effort level for the claude CLI (--effort)
 	prWriter         string // out-of-band model for writing the PR title/description
 	repoURL          string
 	branch           string
@@ -72,9 +73,9 @@ type config struct {
 	contextURL string
 	// serenaPrompt is Serena's Claude-Code system-prompt override
 	// (`serena prompts print-cc-system-prompt-override`), populated once per run
-	// for Claude providers by setupSerena and appended to whatever framing the
-	// harness builds. It steers Claude toward Serena's semantic code-navigation
-	// tools over the built-in file tools. Empty for non-Claude providers.
+	// by setupSerena and appended to whatever framing the harness builds. It
+	// steers Claude toward Serena's semantic code-navigation tools over the
+	// built-in file tools.
 	serenaPrompt string
 }
 
@@ -100,28 +101,21 @@ func (c config) diffBase() string {
 // harness opens an issue written from the transcript by the writer model.
 func (c config) issueOutput() bool { return c.outputType == "issue" }
 
-// claudeProvider reports whether the run drives the `claude` CLI (Anthropic API
-// or AWS Bedrock), as opposed to Codex (OpenAI) or Antigravity (Gemini). Serena
-// is wired for all three, but the Claude path additionally applies a Claude-Code
-// system-prompt override that the other CLIs don't take.
-func (c config) claudeProvider() bool {
-	return c.provider == providerAnthropic || c.provider == providerBedrock
-}
-
 // writesPRCopy reports whether the post-run step generates out-of-band PR copy
-// for this run. Codex and Gemini always use a cheap same-provider writer; a
-// Claude run only does so when a dedicated writer model (PR_WRITER_MODEL) is
-// configured, rather than spending the task model on it.
+// for this run. Proxy-routed providers (OpenAI, Gemini) always use a cheap
+// same-provider writer; a Claude run only does so when a dedicated writer
+// model (PR_WRITER_MODEL) is configured, rather than spending the task model
+// on it.
 func (c config) writesPRCopy() bool {
 	return c.provider == providerOpenAI || c.provider == providerGemini || c.prWriter != ""
 }
 
 // withRepoPrompt layers the repo-attached system prompt (REPO_SYSTEM_PROMPT)
-// and, for Claude runs, Serena's Claude-Code system-prompt override onto
-// whatever framing the harness built for a run, so a repo-wide instruction and
-// the Serena tool-preference steer apply to every run regardless of mode. Any
-// side may be empty. It does not replace the framing — each layer is appended
-// after it, repo prompt first then the Serena override.
+// and Serena's Claude-Code system-prompt override onto whatever framing the
+// harness built for a run, so a repo-wide instruction and the Serena
+// tool-preference steer apply to every run regardless of mode. Any side may be
+// empty. It does not replace the framing — each layer is appended after it,
+// repo prompt first then the Serena override.
 func (c config) withRepoPrompt(sysPrompt string) string {
 	parts := make([]string, 0, 3)
 	for _, p := range []string{sysPrompt, c.repoSystemPrompt, c.serenaPrompt} {
@@ -130,15 +124,6 @@ func (c config) withRepoPrompt(sysPrompt string) string {
 		}
 	}
 	return strings.Join(parts, "\n\n")
-}
-
-// foldSystemPrompt folds the instructional framing into the prompt, for CLIs
-// (Codex, Gemini) that have no `--append-system-prompt` equivalent.
-func foldSystemPrompt(sysPrompt, task string) string {
-	if sysPrompt == "" {
-		return task
-	}
-	return sysPrompt + "\n\n---\n\n" + task
 }
 
 func loadConfig() (config, error) {

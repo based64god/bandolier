@@ -1,0 +1,12 @@
+# BuildKit reads this file (Dockerfile.dockerignore beside agent-harness/
+# Dockerfile) instead of the repo-root .dockerignore when the harness image is
+# built from the repo-root context — which it must be, since the build copies
+# both agent-harness/ and the vendored gollm/ module. Exclude everything but
+# those two Go trees.
+*
+!agent-harness/
+!gollm/
+
+# local build artifacts inside the kept trees
+agent-harness/harness
+agent-harness/.claude

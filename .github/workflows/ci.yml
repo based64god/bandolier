@@ -176,6 +176,12 @@ jobs:
       - name: Test
         run: go test -race -count=1 ./...
 
+      # The harness embeds the vendored gollm module (go.mod replace ../gollm),
+      # so its tests gate the harness image too.
+      - name: Test gollm (vendored module)
+        working-directory: gollm
+        run: go vet ./... && go test -race -count=1 ./...
+
   chart:
     name: Helm chart (lint · kubeconform)
     runs-on: ubuntu-latest

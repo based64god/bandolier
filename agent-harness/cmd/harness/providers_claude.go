@@ -292,6 +292,22 @@ func runClaude(ctx context.Context, cfg config) error {
 	// Log the system prompt and prompt line-by-line so each line keeps the
 	// [harness] tag (the dashboard dims harness lines; an untagged multi-line
 	// block would render as Claude output).
-	logCodexPrompt("starting claude with prompt:", sysPrompt, cfg.task)
+	logPrompt("starting claude with prompt:", sysPrompt, cfg.task)
 	return runClaudeStreaming(ctx, cfg.workDir, buildEnv(cfg.provider), claudeArgs...)
+}
+
+// logPrompt logs the system prompt and task line-by-line with the [harness]
+// tag so a multi-line prompt renders as harness context rather than assistant
+// output.
+func logPrompt(label, sysPrompt, task string) {
+	if sysPrompt != "" {
+		log.Printf("[harness] system prompt:")
+		for _, line := range strings.Split(sysPrompt, "\n") {
+			log.Printf("[harness]   %s", line)
+		}
+	}
+	log.Printf("[harness] %s", label)
+	for _, line := range strings.Split(task, "\n") {
+		log.Printf("[harness]   %s", line)
+	}
 }

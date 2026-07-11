@@ -87,7 +87,10 @@ export default function DeployModalHarness() {
   // click (an event, not an effect) means the data is in the cache before the
   // modal's mount queries run, so they read the fixtures instead of fetching.
   const open = (id: Scenario) => {
-    utils.agents.providerInfo.setData({ repoFullName: REPO }, PROVIDER_INFO[id]);
+    utils.agents.providerInfo.setData(
+      { repoFullName: REPO },
+      PROVIDER_INFO[id],
+    );
     utils.agents.deployDefaults.setData({ repoFullName: REPO }, DEFAULTS);
     utils.repos.issues.setData({ repoFullName: REPO }, ISSUES);
     utils.models.list.setData({ repoFullName: REPO }, { models: MODELS[id] });

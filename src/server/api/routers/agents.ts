@@ -684,8 +684,8 @@ export const agentsRouter = createTRPCRouter({
           // the run to the picked one. Optional: unset falls back to the
           // API-key-beats-subscription precedence.
           modelAuth: z.enum(["api_key", "subscription"]).optional(),
-          // Reasoning effort for the run (Claude providers only; ignored for
-          // OpenAI/Gemini). Optional — unset uses the CLI default.
+          // Reasoning effort for the run. Applies to every provider (all
+          // runs drive the claude CLI). Optional — unset uses the CLI default.
           effort: z.enum(EFFORT_LEVELS).optional(),
           maxTurns: z
             .number()
@@ -897,8 +897,8 @@ export const agentsRouter = createTRPCRouter({
           repoFullName: input.repoFullName,
           branch: input.branch,
           model: input.model,
-          // Effort is Claude-only; drop it for OpenAI/Gemini runs even if a
-          // client sent one, so it's never forwarded to a CLI that rejects it.
+          // Effort applies wherever the provider has a reasoning knob;
+          // providerSupportsEffort is the single opt-out point.
           effort:
             provider && providerSupportsEffort(provider)
               ? input.effort

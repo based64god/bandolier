@@ -2,12 +2,12 @@ import type { ModelProvider } from "~/server/agents/models";
 
 // ── Reasoning effort ───────────────────────────────────────────────────────
 //
-// Claude models accept a reasoning-effort level (the `claude` CLI's --effort
-// flag): how much the model thinks and acts before answering. Higher effort
-// trades latency and tokens for thoroughness. Effort only applies to the Claude
-// providers (Anthropic API, AWS Bedrock) — the OpenAI (Codex) and Gemini
-// (Antigravity) CLIs don't take it, so the picker is hidden for those and the
-// value is never forwarded to their jobs.
+// Every run is driven by the `claude` CLI, which accepts a reasoning-effort
+// level (--effort): how much the model thinks and acts before answering.
+// Higher effort trades latency and tokens for thoroughness. For non-Anthropic
+// providers the harness's embedded gollm proxy maps the resulting thinking
+// budget onto the backend's reasoning knob (e.g. OpenAI reasoning_effort), so
+// the picker applies to all providers.
 
 /**
  * The effort levels the `claude` CLI accepts for `--effort`, lowest to highest.
@@ -25,13 +25,13 @@ export function isEffortLevel(value: string): value is EffortLevel {
 }
 
 /**
- * Whether a provider's CLI supports the reasoning-effort flag. Only the Claude
- * side does — Bedrock and the Anthropic API both run the `claude` CLI. OpenAI
- * (Codex) and Gemini (Antigravity) ignore it, so callers must not surface the
- * picker or forward a value for them.
+ * Whether a provider supports the reasoning-effort flag. All of them do now
+ * that every run is driven by the `claude` CLI (the embedded proxy translates
+ * the thinking budget for non-Anthropic backends); the signature stays so a
+ * future provider without a reasoning knob can opt out in one place.
  */
-export function providerSupportsEffort(provider: ModelProvider): boolean {
-  return provider === "anthropic" || provider === "bedrock";
+export function providerSupportsEffort(_provider: ModelProvider): boolean {
+  return true;
 }
 
 /**

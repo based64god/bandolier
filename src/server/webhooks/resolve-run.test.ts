@@ -247,7 +247,7 @@ describe("resolveWebhookRun — effort precedence", () => {
     expect(run?.specBase.effort).toBe("medium");
   });
 
-  it("leaves effort unset for a provider that does not support it", async () => {
+  it("resolves effort for proxy-routed providers too", async () => {
     listModelsForUser.mockResolvedValue({
       models: [model({ id: "gpt-5", provider: "openai" })],
     });
@@ -260,10 +260,10 @@ describe("resolveWebhookRun — effort precedence", () => {
     const run = await resolveWebhookRun(
       baseOpts({
         labels: [{ name: "effort:high" }],
-        defaultEffort: "high",
+        defaultEffort: "medium",
       }),
     );
-    expect(run?.specBase.effort).toBeUndefined();
+    expect(run?.specBase.effort).toBe("high");
   });
 });
 

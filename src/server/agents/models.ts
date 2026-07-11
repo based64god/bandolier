@@ -90,10 +90,11 @@ const SUBSCRIPTION_ANTHROPIC_MODELS: ModelOption[] = (
 }));
 
 /**
- * The models the Codex CLI offers with ChatGPT-subscription auth. A pasted
- * auth.json holds OAuth session tokens that can't call GET /v1/models, so the
- * picker uses this static list. Keep in sync with the Codex CLI's ChatGPT
- * model set (https://developers.openai.com/codex/models).
+ * The models a ChatGPT subscription serves through the Codex backend (which
+ * the harness's embedded model proxy speaks). A pasted auth.json holds OAuth
+ * session tokens that can't call GET /v1/models, so the picker uses this
+ * static list. Keep in sync with the ChatGPT/Codex model set
+ * (https://developers.openai.com/codex/models).
  */
 const SUBSCRIPTION_CODEX_MODELS: ModelOption[] = (
   [

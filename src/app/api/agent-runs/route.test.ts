@@ -241,6 +241,67 @@ describe("POST ingest — harness contract version", () => {
   });
 });
 
+describe("POST ingest — terminal status persistence", () => {
+  it("persists a reported Succeeded status on the run row", async () => {
+    selectRows.push([
+      { repoFullName: "acme/app", spawnedBy: null, displayName: null },
+    ]);
+
+    await POST(
+      post({
+        ...authHeaders("job-20"),
+        "x-bandolier-status": "Succeeded",
+      }) as never,
+    );
+
+    const set = updateSets[0] as Record<string, unknown>;
+    expect(set.status).toBe("Succeeded");
+  });
+
+  it("persists a reported Failed status on the run row", async () => {
+    selectRows.push([
+      { repoFullName: "acme/app", spawnedBy: null, displayName: null },
+    ]);
+
+    await POST(
+      post({
+        ...authHeaders("job-21"),
+        "x-bandolier-status": "Failed",
+      }) as never,
+    );
+
+    const set = updateSets[0] as Record<string, unknown>;
+    expect(set.status).toBe("Failed");
+  });
+
+  it("leaves status unset when the header is absent (old harness build)", async () => {
+    selectRows.push([
+      { repoFullName: "acme/app", spawnedBy: null, displayName: null },
+    ]);
+
+    await POST(post(authHeaders("job-22")) as never);
+
+    const set = updateSets[0] as Record<string, unknown>;
+    expect(set).not.toHaveProperty("status");
+  });
+
+  it("drops a status value the UI doesn't know rather than storing it", async () => {
+    selectRows.push([
+      { repoFullName: "acme/app", spawnedBy: null, displayName: null },
+    ]);
+
+    await POST(
+      post({
+        ...authHeaders("job-23"),
+        "x-bandolier-status": "Exploded",
+      }) as never,
+    );
+
+    const set = updateSets[0] as Record<string, unknown>;
+    expect(set).not.toHaveProperty("status");
+  });
+});
+
 describe("POST ingest — push notification", () => {
   it("sends a push to the spawning user with a neutral title on success", async () => {
     selectRows.push([

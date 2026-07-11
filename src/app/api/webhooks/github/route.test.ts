@@ -43,7 +43,8 @@ vi.mock("~/server/webhooks/ci-failure", () => ({
 
 const handleInstallation = vi.fn<() => Promise<void>>();
 vi.mock("~/server/webhooks/installation", () => ({
-  handleInstallation: (...args: unknown[]) => handleInstallation(...(args as [])),
+  handleInstallation: (...args: unknown[]) =>
+    handleInstallation(...(args as [])),
 }));
 
 const getRepoWebhookConfig = vi.fn<() => Promise<unknown>>();

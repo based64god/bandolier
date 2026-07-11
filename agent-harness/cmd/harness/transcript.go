@@ -64,7 +64,9 @@ var (
 // in object storage when the server has a bucket configured. Reporting the
 // output is the point of this call — it runs for every run, not just when S3
 // artifacts are enabled. No-op only when the ingest env isn't injected.
-func uploadTranscript() {
+// `failed` reports the run's terminal state so the persisted row can show
+// Succeeded/Failed after the pod (whose phase is the live source) is gone.
+func uploadTranscript(failed bool) {
 	url := os.Getenv("BANDOLIER_INGEST_URL")
 	if url == "" || bando.token == "" || bando.job == "" {
 		return
@@ -85,6 +87,14 @@ func uploadTranscript() {
 	// custom agent image is out of date (absence of the header marks builds
 	// older than version reporting itself).
 	req.Header.Set("X-Bandolier-Harness-Contract", fmt.Sprintf("%d", harnessContractVersion))
+	// Report the run's terminal state so it's persisted on the run row: the pod's
+	// phase is the live source, but it vanishes with the pod. Mirrors the values
+	// of the pod phase the server would otherwise read (Succeeded/Failed).
+	status := "Succeeded"
+	if failed {
+		status = "Failed"
+	}
+	req.Header.Set("X-Bandolier-Status", status)
 	// Report the run's structured output alongside the transcript so it's
 	// persisted durably — pod logs (the live source) vanish with the pod.
 	if outputPRURL != "" {

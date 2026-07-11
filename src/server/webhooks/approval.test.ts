@@ -13,8 +13,7 @@ import { type IssueCommentPayload } from "./types";
 // them fire (dispatch vs. decline vs. ignore) for each maintainer-gate outcome.
 // `isMaintainerOrHigher` is a pure ranking function, so the real one is kept.
 const dispatchPendingRun = vi.fn<(run: PendingRun) => Promise<string>>();
-const getUnresolvedPendingRun =
-  vi.fn<() => Promise<PendingRun | null>>();
+const getUnresolvedPendingRun = vi.fn<() => Promise<PendingRun | null>>();
 const markResolved =
   vi.fn<
     (
@@ -36,10 +35,8 @@ vi.mock("~/server/agents/github-app", () => ({
   getRepoBotToken: () => getRepoBotToken(),
 }));
 
-const listCommentReactions =
-  vi.fn<() => Promise<CommentReaction[]>>();
-const postIssueCommentWithFallback =
-  vi.fn<() => Promise<string | null>>();
+const listCommentReactions = vi.fn<() => Promise<CommentReaction[]>>();
+const postIssueCommentWithFallback = vi.fn<() => Promise<string | null>>();
 vi.mock("~/server/agents/github-issues", () => ({
   listCommentReactions: () => listCommentReactions(),
   postIssueCommentWithFallback: () => postIssueCommentWithFallback(),
@@ -101,7 +98,9 @@ beforeEach(() => {
   markResolved.mockReset().mockResolvedValue(true);
   getRepoBotToken.mockReset().mockResolvedValue("bot-tok");
   listCommentReactions.mockReset().mockResolvedValue([]);
-  postIssueCommentWithFallback.mockReset().mockResolvedValue("app-installation");
+  postIssueCommentWithFallback
+    .mockReset()
+    .mockResolvedValue("app-installation");
   getUserRepoPermission.mockReset().mockResolvedValue("maintain");
 });
 
@@ -136,9 +135,9 @@ describe("handleApprovalComment", () => {
 
     it("ignores a non-maintainer but still consumes the comment (returns true)", async () => {
       getUserRepoPermission.mockResolvedValue("write");
-      expect(await handleApprovalComment(comment("/bando approve", "dev"))).toBe(
-        true,
-      );
+      expect(
+        await handleApprovalComment(comment("/bando approve", "dev")),
+      ).toBe(true);
 
       expect(markResolved).not.toHaveBeenCalled();
       expect(dispatchPendingRun).not.toHaveBeenCalled();
@@ -194,9 +193,9 @@ describe("handleApprovalComment", () => {
 
     it("ignores a decline from a non-maintainer", async () => {
       getUserRepoPermission.mockResolvedValue("read");
-      expect(await handleApprovalComment(comment("/bando decline", "dev"))).toBe(
-        true,
-      );
+      expect(
+        await handleApprovalComment(comment("/bando decline", "dev")),
+      ).toBe(true);
       expect(markResolved).not.toHaveBeenCalled();
     });
   });

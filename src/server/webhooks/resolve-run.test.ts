@@ -17,30 +17,27 @@ import type {
 // label-parse behaviour under test is the real thing.
 
 const getGithubAccountByGithubId =
-  vi.fn<
-    () => Promise<{ userId: string; accessToken: string | null } | null>
-  >();
+  vi.fn<() => Promise<{ userId: string; accessToken: string | null } | null>>();
 vi.mock("~/server/agents/github-token", () => ({
   getGithubAccountByGithubId: () => getGithubAccountByGithubId(),
 }));
 
 const resolveModelCredentials = vi.fn<() => Promise<ModelCredentials>>();
-const selectRunCredentials =
-  vi.fn<
-    (
-      resolved: ModelCredentials,
-      opts: { modelProvider?: ProviderName },
-    ) => {
-      provider: ProviderName | null;
-      authKind: null;
-      aws: AwsCredentials | null;
-      anthropicApiKey: string | null;
-      anthropicOauthToken: string | null;
-      openaiApiKey: string | null;
-      codexAuthJson: string | null;
-      geminiApiKey: string | null;
-    }
-  >();
+const selectRunCredentials = vi.fn<
+  (
+    resolved: ModelCredentials,
+    opts: { modelProvider?: ProviderName },
+  ) => {
+    provider: ProviderName | null;
+    authKind: null;
+    aws: AwsCredentials | null;
+    anthropicApiKey: string | null;
+    anthropicOauthToken: string | null;
+    openaiApiKey: string | null;
+    codexAuthJson: string | null;
+    geminiApiKey: string | null;
+  }
+>();
 vi.mock("~/server/agents/resolve-credentials", () => ({
   resolveModelCredentials: () => resolveModelCredentials(),
   selectRunCredentials: (
@@ -55,17 +52,20 @@ const fuzzyPickModel =
 const pickDefaultModel = vi.fn<(models: ModelOption[]) => string | undefined>();
 const pickPrWriterModel =
   vi.fn<
-    (models: ModelOption[], selected: ModelOption | undefined) =>
-      | string
-      | undefined
+    (
+      models: ModelOption[],
+      selected: ModelOption | undefined,
+    ) => string | undefined
   >();
 vi.mock("~/server/agents/models", () => ({
   listModelsForUser: () => listModelsForUser(),
   fuzzyPickModel: (query: string, models: ModelOption[]) =>
     fuzzyPickModel(query, models),
   pickDefaultModel: (models: ModelOption[]) => pickDefaultModel(models),
-  pickPrWriterModel: (models: ModelOption[], selected: ModelOption | undefined) =>
-    pickPrWriterModel(models, selected),
+  pickPrWriterModel: (
+    models: ModelOption[],
+    selected: ModelOption | undefined,
+  ) => pickPrWriterModel(models, selected),
 }));
 
 const resolveCompute = vi.fn<() => Promise<ComputeDefaults>>();

@@ -122,6 +122,14 @@ export const taskRun = pgTable("task_run", {
   /** Object-storage key for the rendered transcript, set on harness callback. */
   transcriptKey: text("transcript_key"),
   /**
+   * The run's terminal state ("Succeeded" | "Failed"), reported by the harness
+   * ingest callback. The pod's phase is the live source while the pod exists;
+   * this keeps the outcome for the persisted task list after the Job's TTL
+   * deletes it. Null until the callback arrives (or for runs whose harness
+   * predates status reporting).
+   */
+  status: text("status"),
+  /**
    * The run's durable output, reported by the harness ingest callback. Pod logs
    * are the live source while the pod exists, but they vanish with the pod (TTL
    * deletion, eviction, node loss); persisting the URLs here keeps a finished

@@ -9,10 +9,12 @@ on:
     tags: ["v*.*.*"]
     paths:
       - "agent-harness/**"
+      - "gollm/**"
       - ".github/workflows/agent-harness-image.yml"
   pull_request:
     paths:
       - "agent-harness/**"
+      - "gollm/**"
       - ".github/workflows/agent-harness-image.yml"
 
 env:
@@ -57,7 +59,9 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
-          context: ./agent-harness
+          # Repo-root context: the harness build embeds the vendored gollm
+          # module (go.mod replace ../gollm), so both trees must be present.
+          context: .
           file: ./agent-harness/Dockerfile
           platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' }}

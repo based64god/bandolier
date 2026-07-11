@@ -1,8 +1,6 @@
 package main
 
 import (
-	"context"
-	"encoding/json"
 	"log"
 	"os"
 	"path/filepath"
@@ -15,10 +13,10 @@ type providerKind int
 
 const (
 	providerNone      providerKind = iota
-	providerAnthropic              // direct Anthropic API or Claude subscription OAuth (claude CLI)
-	providerBedrock                // AWS Bedrock (claude CLI)
-	providerOpenAI                 // OpenAI API or ChatGPT subscription (codex CLI)
-	providerGemini                 // Google Gemini models via the Antigravity CLI (agy)
+	providerAnthropic              // direct Anthropic API or Claude subscription OAuth
+	providerBedrock                // AWS Bedrock (claude CLI native)
+	providerOpenAI                 // OpenAI API key or ChatGPT subscription, via the embedded gollm proxy
+	providerGemini                 // Google Gemini / Vertex, via the embedded gollm proxy
 )
 
 func detectProvider() providerKind {
@@ -34,7 +32,7 @@ func detectProvider() providerKind {
 		return providerAnthropic
 	}
 	// CODEX_AUTH_JSON carries the contents of `codex login`'s auth.json for
-	// ChatGPT-subscription users; buildEnv materializes it at ~/.codex/auth.json.
+	// ChatGPT-subscription users; the model proxy's chatgpt backend consumes it.
 	if os.Getenv("OPENAI_API_KEY") != "" || os.Getenv("CODEX_AUTH_JSON") != "" {
 		return providerOpenAI
 	}
@@ -72,9 +70,17 @@ func logProvider(cfg config) {
 	case providerAnthropic:
 		log.Printf("[harness] provider: Anthropic API (model=%s)", cfg.model)
 	case providerOpenAI:
-		log.Printf("[harness] provider: OpenAI Codex (model=%s)", cfg.model)
+		if os.Getenv("OPENAI_API_KEY") == "" {
+			log.Printf("[harness] provider: ChatGPT subscription via model proxy (model=%s)", cfg.model)
+		} else {
+			log.Printf("[harness] provider: OpenAI API via model proxy (model=%s)", cfg.model)
+		}
 	case providerGemini:
-		log.Printf("[harness] provider: Google Antigravity / Gemini (model=%s)", cfg.model)
+		if os.Getenv("GOOGLE_PROJECT_CREDENTIALS") != "" {
+			log.Printf("[harness] provider: Google Vertex AI via model proxy (model=%s)", cfg.model)
+		} else {
+			log.Printf("[harness] provider: Google Gemini via model proxy (model=%s)", cfg.model)
+		}
 	default:
 		log.Printf("[harness] warn: no LLM credentials found — the agent will likely fail")
 	}
@@ -82,26 +88,21 @@ func logProvider(cfg config) {
 
 // ── Subprocess environment ────────────────────────────────────────────────────
 
+// buildEnv assembles the environment for a claude invocation. Proxy-routed
+// providers need nothing extra here: startModelProxy exported
+// ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN process-wide, so os.Environ()
+// already carries the rewrite.
 func buildEnv(provider providerKind) []string {
 	env := os.Environ()
-	switch provider {
-	case providerBedrock:
+	if provider == providerBedrock {
 		env = setEnvIfMissing(env, "CLAUDE_CODE_USE_BEDROCK", "1")
-	case providerOpenAI:
-		env = setupCodexCredentials(env)
-	case providerGemini:
-		// agy (Antigravity CLI) authenticates against a Google Cloud project via
-		// Application Default Credentials. The server injects the project
-		// credentials JSON as GOOGLE_PROJECT_CREDENTIALS; materialize it and point
-		// agy at it. Legacy *_API_KEY values are still honored as a fallback.
-		env = setupGeminiCredentials(env)
 	}
 	return env
 }
 
 // codexAuthPath is where the harness materializes `codex login`'s auth.json
-// (injected as CODEX_AUTH_JSON) — ~/.codex/auth.json, where the Codex CLI
-// looks for its ChatGPT-subscription session.
+// (injected as CODEX_AUTH_JSON) — ~/.codex/auth.json, the gollm chatgpt
+// backend's default location, so refreshed tokens persist for the run.
 func codexAuthPath() string {
 	return filepath.Join(homeDir(), ".codex", "auth.json")
 }
@@ -131,79 +132,11 @@ func materializeSecret(path, contents, label string) bool {
 	return true
 }
 
-// setupCodexCredentials prepares Codex CLI authentication. With OPENAI_API_KEY
-// it mirrors the key to CODEX_API_KEY (which some Codex versions read instead,
-// so either name works). With CODEX_AUTH_JSON — the contents of `codex login`'s
-// auth.json, for ChatGPT-subscription users — it writes the file to
-// ~/.codex/auth.json where the CLI expects it. The server injects exactly one
-// of the two; the API key wins if both are somehow present.
-func setupCodexCredentials(env []string) []string {
-	if key := os.Getenv("OPENAI_API_KEY"); key != "" {
-		return setEnvIfMissing(env, "CODEX_API_KEY", key)
-	}
-	authJSON := os.Getenv("CODEX_AUTH_JSON")
-	if authJSON == "" {
-		return env
-	}
-	materializeSecret(codexAuthPath(), authJSON, "Codex auth.json")
-	return env
-}
-
 // geminiCredentialsPath is where the harness materializes the Google project
-// credentials JSON. It lives under ~/.gemini so agy finds it alongside its own
-// config; GOOGLE_APPLICATION_CREDENTIALS points the google-genai auth at it.
+// credentials JSON (injected as GOOGLE_PROJECT_CREDENTIALS);
+// GOOGLE_APPLICATION_CREDENTIALS points the gollm vertex backend at it.
 func geminiCredentialsPath() string {
 	return filepath.Join(homeDir(), ".gemini", "credentials.json")
-}
-
-// setupGeminiCredentials writes the Google project credentials JSON (injected as
-// GOOGLE_PROJECT_CREDENTIALS) to ~/.gemini/credentials.json and sets the env
-// agy needs to authenticate against the project: ADC via
-// GOOGLE_APPLICATION_CREDENTIALS, Vertex mode, and the project id parsed out of
-// the JSON. When no credentials JSON is present it falls back to mirroring a
-// legacy GEMINI_API_KEY/GOOGLE_API_KEY into ANTIGRAVITY_API_KEY.
-func setupGeminiCredentials(env []string) []string {
-	creds := os.Getenv("GOOGLE_PROJECT_CREDENTIALS")
-	if creds == "" {
-		if os.Getenv("ANTIGRAVITY_API_KEY") == "" {
-			if key := os.Getenv("GEMINI_API_KEY"); key != "" {
-				env = setEnvIfMissing(env, "ANTIGRAVITY_API_KEY", key)
-			} else if key := os.Getenv("GOOGLE_API_KEY"); key != "" {
-				env = setEnvIfMissing(env, "ANTIGRAVITY_API_KEY", key)
-			}
-		}
-		return env
-	}
-
-	path := geminiCredentialsPath()
-	if !materializeSecret(path, creds, "Gemini credentials") {
-		return env
-	}
-
-	env = setEnvIfMissing(env, "GOOGLE_APPLICATION_CREDENTIALS", path)
-	env = setEnvIfMissing(env, "GOOGLE_GENAI_USE_VERTEXAI", "true")
-	// Target the project named in the credentials so a second secret isn't needed.
-	if proj := projectIDFromCredentials(creds); proj != "" {
-		env = setEnvIfMissing(env, "GOOGLE_CLOUD_PROJECT", proj)
-	}
-	return env
-}
-
-// projectIDFromCredentials extracts the project id from a Google credentials
-// JSON (service-account key or ADC), preferring project_id and falling back to
-// quota_project_id. Returns "" if the JSON can't be parsed or has neither.
-func projectIDFromCredentials(creds string) string {
-	var parsed struct {
-		ProjectID      string `json:"project_id"`
-		QuotaProjectID string `json:"quota_project_id"`
-	}
-	if err := json.Unmarshal([]byte(creds), &parsed); err != nil {
-		return ""
-	}
-	if parsed.ProjectID != "" {
-		return parsed.ProjectID
-	}
-	return parsed.QuotaProjectID
 }
 
 func setEnvIfMissing(env []string, key, value string) []string {
@@ -214,25 +147,4 @@ func setEnvIfMissing(env []string, key, value string) []string {
 		}
 	}
 	return append(env, prefix+value)
-}
-
-// ── Writer models (out-of-band PR/issue copy) ─────────────────────────────────
-
-// writerExecFn runs the out-of-band writer model on a TITLE/BODY prompt and
-// returns its raw reply text. Only the CLI invocation differs per provider; the
-// shared generateWriterContent wraps the timeout, model fallback, and parsing
-// around it.
-type writerExecFn func(ctx context.Context, cfg config, writerModel, prompt string) (string, error)
-
-// writerExecFor selects the raw writer invocation for the run's provider: codex
-// for OpenAI, agy for Gemini, and the claude CLI otherwise.
-func writerExecFor(provider providerKind) writerExecFn {
-	switch provider {
-	case providerOpenAI:
-		return writerExecCodex
-	case providerGemini:
-		return writerExecGemini
-	default:
-		return writerExecClaude
-	}
 }

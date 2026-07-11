@@ -65,6 +65,19 @@ func run(ctx context.Context, cfg config) error {
 	}
 	logProvider(cfg)
 
+	// Non-Anthropic providers are served through the embedded gollm proxy: it
+	// speaks the Anthropic Messages API on localhost and translates to the
+	// run's real backend, so the claude CLI drives every provider. Started
+	// before any claude invocation (agent, writer model, acp-agent child) and
+	// kept up for the whole run.
+	if needsModelProxy(cfg.provider) {
+		stopProxy, err := startModelProxy(cfg)
+		if err != nil {
+			return fmt.Errorf("start model proxy: %w", err)
+		}
+		defer stopProxy()
+	}
+
 	name, email := gitIdentity(cfg)
 	if err := setupGit(ctx, cfg, name, email); err != nil {
 		return err
@@ -284,25 +297,14 @@ func runAgent(ctx context.Context, cfg config, mode runMode) error {
 		cfg.systemPrompt = interactiveFraming(mode.issueOutput, mode.prBranch)
 	}
 
-	switch {
-	case cfg.provider == providerOpenAI:
-		if cfg.interactive {
-			return orSignal(ctx, runACPProxy(ctx, cfg), "codex")
-		}
-		return orSignal(ctx, runCodex(ctx, cfg, mode.prBranch), "codex")
-	case cfg.provider == providerGemini:
-		if cfg.interactive {
-			log.Printf("[harness] interactive mode via agy (model=%s)", cfg.model)
-			return orSignal(ctx, runGeminiInteractive(ctx, cfg, cfg.task), "gemini")
-		}
-		return orSignal(ctx, runGemini(ctx, cfg, mode.prBranch), "gemini")
-	case cfg.interactive:
+	// Every provider is driven through the claude CLI — non-Anthropic backends
+	// sit behind the embedded model proxy (see modelproxy.go).
+	if cfg.interactive {
 		// Interactive session: drive Claude over streaming JSON and pause for the
 		// user's next message between turns.
 		return orSignal(ctx, runACPProxy(ctx, cfg), "claude")
-	default:
-		return orSignal(ctx, runClaude(ctx, cfg), "claude")
 	}
+	return orSignal(ctx, runClaude(ctx, cfg), "claude")
 }
 
 // finish runs the post-run steps for the resolved mode: rewriting commit

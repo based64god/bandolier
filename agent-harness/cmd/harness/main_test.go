@@ -331,84 +331,29 @@ func TestSetEnvIfMissing(t *testing.T) {
 	})
 }
 
-func TestBackendPrefixOpenAIKey(t *testing.T) {
-	t.Setenv("OPENAI_API_KEY", "sk-openai")
-	got, err := backendPrefix(config{provider: providerOpenAI})
-	if err != nil || got != "openai" {
-		t.Errorf("backendPrefix = %q, %v, want openai", got, err)
+func TestBackendPrefixGollm(t *testing.T) {
+	// Every proxied provider is named by BANDOLIER_LLM_PROVIDER; the backend
+	// prefix is that id verbatim, and the harness materializes nothing — the
+	// server injects each backend's credential env vars (a bare key here, an
+	// inline auth.json for chatgpt, inline service-account JSON for vertex).
+	cases := []string{"openai", "chatgpt", "gemini", "vertex", "openrouter"}
+	for _, backend := range cases {
+		t.Run(backend, func(t *testing.T) {
+			t.Setenv("BANDOLIER_LLM_PROVIDER", backend)
+			got, err := backendPrefix(config{provider: providerGollm})
+			if err != nil || got != backend {
+				t.Fatalf("backendPrefix = %q, %v, want %q", got, err, backend)
+			}
+			if want := "gollm:" + backend; providerGollm.String() != want {
+				t.Errorf("providerGollm.String() = %q, want %q", providerGollm.String(), want)
+			}
+		})
 	}
 }
 
-func TestBackendPrefixChatGPTSubscription(t *testing.T) {
-	// With ChatGPT-subscription auth injected (and no API key), the auth.json is
-	// materialized at ~/.codex/auth.json and the gollm chatgpt backend pointed
-	// at it, so refreshed tokens persist for the run.
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("OPENAI_API_KEY", "")
-	t.Setenv("CHATGPT_AUTH_FILE", "") // registers cleanup for the os.Setenv below
-	authJSON := `{"OPENAI_API_KEY":null,"tokens":{"access_token":"at","refresh_token":"rt","account_id":"acc"}}`
-	t.Setenv("CODEX_AUTH_JSON", authJSON)
-
-	got, err := backendPrefix(config{provider: providerOpenAI})
-	if err != nil || got != "chatgpt" {
-		t.Fatalf("backendPrefix = %q, %v, want chatgpt", got, err)
-	}
-
-	path := filepath.Join(home, ".codex", "auth.json")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("auth.json not written: %v", err)
-	}
-	if string(data) != authJSON {
-		t.Errorf("auth.json should contain the injected JSON verbatim, got: %s", data)
-	}
-	if os.Getenv("CHATGPT_AUTH_FILE") != path {
-		t.Errorf("CHATGPT_AUTH_FILE = %q, want %q", os.Getenv("CHATGPT_AUTH_FILE"), path)
-	}
-}
-
-func TestBackendPrefixVertex(t *testing.T) {
-	// With project credentials JSON injected, the file is materialized and
-	// GOOGLE_APPLICATION_CREDENTIALS points the gollm vertex backend at it (the
-	// project id comes from the JSON itself).
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", "") // cleanup for the os.Setenv below
-	t.Setenv("GOOGLE_PROJECT_CREDENTIALS", `{"type":"service_account","project_id":"my-proj"}`)
-
-	got, err := backendPrefix(config{provider: providerGemini})
-	if err != nil || got != "vertex" {
-		t.Fatalf("backendPrefix = %q, %v, want vertex", got, err)
-	}
-
-	credPath := filepath.Join(home, ".gemini", "credentials.json")
-	data, err := os.ReadFile(credPath)
-	if err != nil {
-		t.Fatalf("credentials file not written: %v", err)
-	}
-	if !strings.Contains(string(data), "my-proj") {
-		t.Errorf("credentials file should contain the injected JSON, got: %s", data)
-	}
-	if os.Getenv("GOOGLE_APPLICATION_CREDENTIALS") != credPath {
-		t.Errorf("GOOGLE_APPLICATION_CREDENTIALS = %q, want %q", os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"), credPath)
-	}
-}
-
-func TestBackendPrefixGemini(t *testing.T) {
-	// An API key (any of the legacy spellings) routes to the gemini backend;
-	// the antigravity spelling is mirrored to GEMINI_API_KEY, which gollm reads.
-	t.Setenv("GOOGLE_PROJECT_CREDENTIALS", "")
-	t.Setenv("GEMINI_API_KEY", "")
-	t.Setenv("GOOGLE_API_KEY", "")
-	t.Setenv("ANTIGRAVITY_API_KEY", "AIza-antigravity")
-
-	got, err := backendPrefix(config{provider: providerGemini})
-	if err != nil || got != "gemini" {
-		t.Fatalf("backendPrefix = %q, %v, want gemini", got, err)
-	}
-	if os.Getenv("GEMINI_API_KEY") != "AIza-antigravity" {
-		t.Errorf("ANTIGRAVITY_API_KEY should be mirrored to GEMINI_API_KEY, got %q", os.Getenv("GEMINI_API_KEY"))
+func TestBackendPrefixRejectsNonGollm(t *testing.T) {
+	if _, err := backendPrefix(config{provider: providerAnthropic}); err == nil {
+		t.Error("backendPrefix should error for a native (non-proxied) provider")
 	}
 }
 
@@ -442,15 +387,16 @@ func TestModelList(t *testing.T) {
 }
 
 func TestStartModelProxyServesAnthropicSurface(t *testing.T) {
-	// Full integration: start the embedded proxy for an OpenAI-key run and
+	// Full integration: start the embedded proxy for a proxied (OpenAI) run and
 	// check it exports the claude CLI's env and serves the authenticated
 	// Anthropic-format surface on localhost.
+	t.Setenv("BANDOLIER_LLM_PROVIDER", "openai")
 	t.Setenv("OPENAI_API_KEY", "sk-test")
 	t.Setenv("ANTHROPIC_BASE_URL", "")
 	t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
 	t.Setenv("ANTHROPIC_SMALL_FAST_MODEL", "")
 
-	stop, err := startModelProxy(config{provider: providerOpenAI, model: "gpt-5.5", prWriter: "gpt-5.4-mini"})
+	stop, err := startModelProxy(config{provider: providerGollm, model: "gpt-5.5", prWriter: "gpt-5.4-mini"})
 	if err != nil {
 		t.Fatalf("startModelProxy: %v", err)
 	}
@@ -731,47 +677,28 @@ func TestToolSummaryUnknownShape(t *testing.T) {
 }
 
 func TestDetectProvider(t *testing.T) {
-	// Clear all provider-selecting vars, then assert each selection path.
-	for _, k := range []string{"CLAUDE_CODE_USE_BEDROCK", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "OPENAI_API_KEY", "CODEX_AUTH_JSON", "GOOGLE_PROJECT_CREDENTIALS", "GOOGLE_APPLICATION_CREDENTIALS", "ANTIGRAVITY_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"} {
+	// Clear the vars detectProvider inspects, then assert each selection path.
+	for _, k := range []string{"CLAUDE_CODE_USE_BEDROCK", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "BANDOLIER_LLM_PROVIDER"} {
 		t.Setenv(k, "")
 	}
 	if got := detectProvider(); got != providerNone {
 		t.Errorf("no env → %v, want providerNone", got)
 	}
 
-	t.Setenv("CODEX_AUTH_JSON", `{"tokens":{"access_token":"x"}}`)
-	if got := detectProvider(); got != providerOpenAI {
-		t.Errorf("CODEX_AUTH_JSON set → %v, want providerOpenAI", got)
+	// Every proxied provider is selected by BANDOLIER_LLM_PROVIDER, regardless
+	// of which backend it names (openai, chatgpt, gemini, vertex, groq, …).
+	t.Setenv("BANDOLIER_LLM_PROVIDER", "groq")
+	if got := detectProvider(); got != providerGollm {
+		t.Errorf("BANDOLIER_LLM_PROVIDER set → %v, want providerGollm", got)
 	}
-	t.Setenv("CODEX_AUTH_JSON", "")
 
+	// A native credential takes its own path even when BANDOLIER_LLM_PROVIDER
+	// is also set (the server never sets both, but native must win).
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-x")
 	if got := detectProvider(); got != providerAnthropic {
 		t.Errorf("CLAUDE_CODE_OAUTH_TOKEN set → %v, want providerAnthropic", got)
 	}
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
-
-	t.Setenv("GOOGLE_PROJECT_CREDENTIALS", `{"project_id":"p"}`)
-	if got := detectProvider(); got != providerGemini {
-		t.Errorf("GOOGLE_PROJECT_CREDENTIALS set → %v, want providerGemini", got)
-	}
-	t.Setenv("GOOGLE_PROJECT_CREDENTIALS", "")
-
-	t.Setenv("ANTIGRAVITY_API_KEY", "AIza-antigravity")
-	if got := detectProvider(); got != providerGemini {
-		t.Errorf("ANTIGRAVITY_API_KEY set → %v, want providerGemini", got)
-	}
-
-	t.Setenv("ANTIGRAVITY_API_KEY", "")
-	t.Setenv("GEMINI_API_KEY", "AIza-gemini")
-	if got := detectProvider(); got != providerGemini {
-		t.Errorf("legacy GEMINI_API_KEY set → %v, want providerGemini", got)
-	}
-
-	t.Setenv("OPENAI_API_KEY", "sk-openai")
-	if got := detectProvider(); got != providerOpenAI {
-		t.Errorf("OPENAI_API_KEY beats Gemini → %v, want providerOpenAI", got)
-	}
 
 	t.Setenv("CLAUDE_CODE_USE_BEDROCK", "1")
 	if got := detectProvider(); got != providerBedrock {
@@ -781,7 +708,7 @@ func TestDetectProvider(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_USE_BEDROCK", "")
 	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-x")
 	if got := detectProvider(); got != providerAnthropic {
-		t.Errorf("ANTHROPIC_API_KEY beats OpenAI → %v, want providerAnthropic", got)
+		t.Errorf("ANTHROPIC_API_KEY → %v, want providerAnthropic", got)
 	}
 
 	t.Setenv("AWS_ACCESS_KEY_ID", "AKIA")

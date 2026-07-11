@@ -15,7 +15,7 @@ import (
 // environment.
 func clearVertexEnv(t *testing.T) {
 	t.Helper()
-	for _, k := range []string{"VERTEXAI_PROJECT", "GOOGLE_CLOUD_PROJECT", "VERTEXAI_LOCATION", "GOOGLE_APPLICATION_CREDENTIALS"} {
+	for _, k := range []string{"VERTEXAI_PROJECT", "GOOGLE_CLOUD_PROJECT", "VERTEXAI_LOCATION", "GOOGLE_APPLICATION_CREDENTIALS", "GOOGLE_APPLICATION_CREDENTIALS_JSON", "GOOGLE_CREDENTIALS"} {
 		t.Setenv(k, "")
 	}
 }
@@ -119,6 +119,41 @@ func TestEnvFallbacks(t *testing.T) {
 	}
 	if c.auth != "Bearer fake-token" {
 		t.Errorf("Authorization = %q", c.auth)
+	}
+}
+
+// TestInlineCredentialsFromEnv feeds the service-account key as raw JSON in
+// GOOGLE_APPLICATION_CREDENTIALS_JSON — no file, no Extra — which is how an
+// in-process proxy hands vertex its credentials.
+func TestInlineCredentialsFromEnv(t *testing.T) {
+	clearVertexEnv(t)
+	_, pemKey := testKey(t)
+	var hits int
+	var assertion string
+	tokenSrv := fakeTokenServer(t, &hits, &assertion)
+	defer tokenSrv.Close()
+
+	t.Setenv("GOOGLE_APPLICATION_CREDENTIALS_JSON", testCredentials(t, pemKey, tokenSrv.URL))
+	t.Setenv("VERTEXAI_PROJECT", "env-proj")
+
+	var c captured
+	apiSrv := httptest.NewServer(captureHandler(t, &c, "application/json", minimalGeminiResponse))
+	defer apiSrv.Close()
+
+	p, err := api.NewProvider("vertex", api.ProviderConfig{
+		Extra: map[string]string{"token_url": tokenSrv.URL, "api_endpoint": apiSrv.URL},
+	})
+	if err != nil {
+		t.Fatalf("NewProvider: %v", err)
+	}
+	if _, err := p.Complete(context.Background(), minimalRequest("gemini-2.0-flash")); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	if !strings.Contains(c.path, "/projects/env-proj/") {
+		t.Errorf("path = %s, want env project", c.path)
+	}
+	if c.auth != "Bearer fake-token" {
+		t.Errorf("Authorization = %q, want the minted token", c.auth)
 	}
 }
 

@@ -29,9 +29,9 @@ import (
 
 // needsModelProxy reports whether the provider's traffic must be rewritten
 // through the embedded proxy. Anthropic and Bedrock speak the claude CLI's
-// native protocols already.
+// native protocols already; every other provider is gollm-proxied.
 func needsModelProxy(p providerKind) bool {
-	return p == providerOpenAI || p == providerGemini
+	return p == providerGollm
 }
 
 // startModelProxy builds the run's gollm config, starts the proxy on an
@@ -88,50 +88,22 @@ func startModelProxy(cfg config) (stop func(), err error) {
 	}, nil
 }
 
-// backendPrefix resolves the gollm provider prefix for the run's credentials,
-// materializing credential files where a backend expects them:
-//
-//   - OPENAI_API_KEY            → openai/   (metered API)
-//   - CODEX_AUTH_JSON           → chatgpt/  (ChatGPT subscription; auth.json
-//     materialized at ~/.codex/auth.json so gollm can persist refreshed tokens)
-//   - GOOGLE_PROJECT_CREDENTIALS → vertex/  (service account, project derived
-//     from the JSON; GOOGLE_APPLICATION_CREDENTIALS points at the file)
-//   - GEMINI_API_KEY / GOOGLE_API_KEY / ANTIGRAVITY_API_KEY → gemini/
+// backendPrefix resolves the gollm backend the proxy routes to. The server
+// owns every credential decision: it names the backend in
+// BANDOLIER_LLM_PROVIDER (openai, chatgpt, gemini, vertex, groq, …) and injects
+// that backend's conventional credential env vars, which gollm reads directly.
+// The harness materializes nothing — gollm accepts each credential in whatever
+// env shape it arrives in (an inline auth.json for the ChatGPT backend, inline
+// service-account JSON for Vertex, a bare key for the rest).
 func backendPrefix(cfg config) (string, error) {
-	switch cfg.provider {
-	case providerOpenAI:
-		if os.Getenv("OPENAI_API_KEY") != "" {
-			return "openai", nil
-		}
-		if authJSON := os.Getenv("CODEX_AUTH_JSON"); authJSON != "" {
-			if materializeSecret(codexAuthPath(), authJSON, "ChatGPT auth.json") {
-				// The provider prefers the file (rotated refresh tokens persist);
-				// the env copy stays as its fallback.
-				os.Setenv("CHATGPT_AUTH_FILE", codexAuthPath())
-			}
-			return "chatgpt", nil
-		}
-		return "", fmt.Errorf("openai provider selected but neither OPENAI_API_KEY nor CODEX_AUTH_JSON is set")
-	case providerGemini:
-		if creds := os.Getenv("GOOGLE_PROJECT_CREDENTIALS"); creds != "" {
-			path := geminiCredentialsPath()
-			if !materializeSecret(path, creds, "Google credentials") {
-				return "", fmt.Errorf("could not materialize Google credentials")
-			}
-			os.Setenv("GOOGLE_APPLICATION_CREDENTIALS", path)
-			return "vertex", nil
-		}
-		// Legacy API-key envs; gollm's gemini provider reads GEMINI_API_KEY /
-		// GOOGLE_API_KEY itself, so only the antigravity spelling needs mirroring.
-		if os.Getenv("GEMINI_API_KEY") == "" && os.Getenv("GOOGLE_API_KEY") == "" {
-			if key := os.Getenv("ANTIGRAVITY_API_KEY"); key != "" {
-				os.Setenv("GEMINI_API_KEY", key)
-			}
-		}
-		return "gemini", nil
-	default:
+	if cfg.provider != providerGollm {
 		return "", fmt.Errorf("provider %s does not use the model proxy", cfg.provider)
 	}
+	backend := gollmBackend()
+	if backend == "" {
+		return "", fmt.Errorf("gollm provider selected but BANDOLIER_LLM_PROVIDER is empty")
+	}
+	return backend, nil
 }
 
 // modelList declares the aliases the claude CLI will request: the task model,

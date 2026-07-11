@@ -268,24 +268,35 @@ export interface JobSpec {
    */
   anthropicOauthToken?: string;
   /**
-   * The acting user's OpenAI API key. Used when an OpenAI model is selected; the
-   * harness runs these through the OpenAI Codex CLI.
+   * The acting user's OpenAI API key. Used when an OpenAI model is selected;
+   * routed through the embedded gollm proxy's `openai` backend (injected as
+   * OPENAI_API_KEY).
    */
   openaiApiKey?: string;
   /**
    * The acting user's ChatGPT-subscription auth (contents of `codex login`'s
-   * ~/.codex/auth.json). An alternative to `openaiApiKey`; injected as
-   * CODEX_AUTH_JSON and materialized by the harness at ~/.codex/auth.json.
+   * ~/.codex/auth.json). An alternative to `openaiApiKey`; routed through the
+   * proxy's `chatgpt` backend, which reads it inline (injected as
+   * CODEX_AUTH_JSON — no file is written in the pod).
    */
   codexAuthJson?: string;
   /**
-   * The acting user's Google Cloud project credentials JSON (service-account key
-   * or ADC). Used when a Gemini model is selected; the harness runs these through
-   * the Antigravity CLI (agy), which authenticates against the project via
-   * Application Default Credentials. Injected as GOOGLE_PROJECT_CREDENTIALS and
-   * written to ~/.gemini/credentials.json in the harness.
+   * The acting user's Google Cloud project credentials JSON (service-account
+   * key). Used when a Gemini model is selected; routed through the proxy's
+   * `vertex` backend, which reads the key inline (injected as
+   * GOOGLE_APPLICATION_CREDENTIALS_JSON) and derives the project id from it.
    */
   geminiApiKey?: string;
+  /**
+   * A gollm-proxied provider credential (Groq, OpenRouter, vLLM, … — see
+   * ~/server/agents/gollm-catalog): the provider id plus the env vars the pod
+   * needs, already mapped from the stored credential. The harness routes the
+   * run through its embedded proxy with this provider as the backend.
+   */
+  customProvider?: {
+    provider: string;
+    env: Record<string, string>;
+  };
   /** The acting user's kubeconfig — the cluster the agent is deployed into. Required. */
   kubeconfig: string;
   /**
@@ -387,7 +398,7 @@ function pdbName(jobName: string): string {
  * out of sync the way the two hand-kept copies used to.
  */
 export interface ProviderDescriptor {
-  type: "bedrock" | "anthropic" | "openai" | "gemini";
+  type: "bedrock" | "anthropic" | "openai" | "gemini" | "custom";
   model: string;
   /** Non-secret provider env vars (e.g. CLAUDE_CODE_USE_BEDROCK, AWS_REGION). */
   plainEnv: EnvVar[];
@@ -410,6 +421,16 @@ export interface ProviderDescriptor {
  */
 export function resolveProvider(spec: JobSpec): ProviderDescriptor {
   const model = spec.model;
+
+  // A catalog custom provider carries its own env mapping and gollm backend id.
+  if (spec.customProvider) {
+    return proxiedProvider(
+      "custom",
+      model,
+      spec.customProvider.provider,
+      spec.customProvider.env,
+    );
+  }
 
   // Route by the single provider precedence the registry defines, so this
   // path can't drift from the resolver. The spec spells the Bedrock field
@@ -467,39 +488,53 @@ export function resolveProvider(spec: JobSpec): ProviderDescriptor {
   }
 
   if (provider === "openai") {
-    // The harness's embedded model proxy serves OpenAI models to Claude Code:
-    // with an API key it talks to the OpenAI API, with CODEX_AUTH_JSON (the
-    // contents of `codex login`'s auth.json) it talks to the ChatGPT
-    // subscription backend. The API key takes precedence.
-    const [key, value] = spec.openaiApiKey
-      ? (["OPENAI_API_KEY", spec.openaiApiKey] as const)
-      : (["CODEX_AUTH_JSON", spec.codexAuthJson!] as const);
-    return {
-      type: "openai",
-      model,
-      plainEnv: [],
-      secretRefs: [{ key }],
-      secretData: { [key]: value },
-    };
+    // OpenAI is proxied like every non-native provider: the harness routes its
+    // embedded gollm proxy by BANDOLIER_LLM_PROVIDER. An API key uses gollm's
+    // `openai` backend; the ChatGPT-subscription auth.json (from `codex login`)
+    // uses the `chatgpt` backend, which reads CODEX_AUTH_JSON inline. The key
+    // takes precedence.
+    const [backend, key, value] = spec.openaiApiKey
+      ? (["openai", "OPENAI_API_KEY", spec.openaiApiKey] as const)
+      : (["chatgpt", "CODEX_AUTH_JSON", spec.codexAuthJson!] as const);
+    return proxiedProvider("openai", model, backend, { [key]: value });
   }
 
   if (provider === "gemini") {
-    // Gemini models run through the harness's embedded model proxy against
-    // Vertex AI, authenticated with this project credentials JSON (written to
-    // ~/.gemini/credentials.json in the pod).
-    return {
-      type: "gemini",
-      model,
-      plainEnv: [],
-      secretRefs: [{ key: "GOOGLE_PROJECT_CREDENTIALS" }],
-      secretData: { GOOGLE_PROJECT_CREDENTIALS: spec.geminiApiKey! },
-    };
+    // Gemini runs against Vertex AI through the proxy's `vertex` backend, which
+    // reads the service-account key JSON inline from
+    // GOOGLE_APPLICATION_CREDENTIALS_JSON (the project id is derived from the
+    // key itself). No file is written in the pod.
+    return proxiedProvider("gemini", model, "vertex", {
+      GOOGLE_APPLICATION_CREDENTIALS_JSON: spec.geminiApiKey!,
+    });
   }
 
   // Only user-provided credentials are ever used — there is no server fallback.
   throw new Error(
     "No model credentials available. Configure AWS, Anthropic, OpenAI, or Gemini credentials in account settings.",
   );
+}
+
+/**
+ * Builds a descriptor for a proxied provider: BANDOLIER_LLM_PROVIDER names the
+ * gollm backend the harness routes to, and every credential env var becomes a
+ * per-job secret ref. Shared by the OpenAI/Gemini paths and the generic
+ * custom-provider path (which they now match — the harness treats all three
+ * identically).
+ */
+function proxiedProvider(
+  type: ProviderDescriptor["type"],
+  model: string,
+  backend: string,
+  env: Record<string, string>,
+): ProviderDescriptor {
+  return {
+    type,
+    model,
+    plainEnv: [{ name: "BANDOLIER_LLM_PROVIDER", value: backend }],
+    secretRefs: Object.keys(env).map((key) => ({ key })),
+    secretData: env,
+  };
 }
 
 /**

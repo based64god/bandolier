@@ -8,23 +8,13 @@ import {
 } from "~/app/_components/settings-shell";
 import { ApiKeysSection } from "./api-keys-section";
 import { ComputeSection, KubeconfigSection } from "./infrastructure-sections";
-import {
-  AnthropicSection,
-  AwsSection,
-  GeminiSection,
-  OpenAISection,
-} from "./provider-sections";
+import { UserProviderDirectory } from "./user-provider-directory";
 
 const NAV: SettingsNavGroup[] = [
   {
     id: "providers",
     label: "Model providers",
-    items: [
-      { id: "anthropic", label: "Anthropic" },
-      { id: "openai", label: "OpenAI" },
-      { id: "gemini", label: "Gemini" },
-      { id: "aws", label: "AWS Bedrock" },
-    ],
+    items: [{ id: "providers", label: "All providers" }],
   },
   {
     id: "infrastructure",
@@ -54,28 +44,9 @@ export function SettingsPage() {
       {(active) => (
         <>
           {active === "providers" && (
-            <>
-              <p className="text-xs text-white/40">
-                Configure how your agents reach their model. For Claude, AWS
-                Bedrock takes precedence when both are set; otherwise your
-                Anthropic key is used. OpenAI keys and Gemini project
-                credentials add their models to the picker alongside Claude —
-                you choose per deploy. Credentials are verified before
-                they&apos;re saved and again before each deploy.
-              </p>
-              <SettingsCard id="anthropic">
-                <AnthropicSection />
-              </SettingsCard>
-              <SettingsCard id="openai">
-                <OpenAISection />
-              </SettingsCard>
-              <SettingsCard id="gemini">
-                <GeminiSection />
-              </SettingsCard>
-              <SettingsCard id="aws">
-                <AwsSection />
-              </SettingsCard>
-            </>
+            <section id="providers" className="scroll-mt-20">
+              <UserProviderDirectory />
+            </section>
           )}
 
           {active === "infrastructure" && (

@@ -232,6 +232,20 @@
       "when": 1783634664449,
       "tag": "0032_fresh_weapon_omega",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1783744673471,
+      "tag": "0033_sparkling_johnny_blaze",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1783746262611,
+      "tag": "0034_previous_mariko_yashida",
+      "breakpoints": true
     }
   ]
 }

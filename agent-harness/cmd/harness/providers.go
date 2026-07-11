@@ -3,20 +3,26 @@ package main
 import (
 	"log"
 	"os"
-	"path/filepath"
 	"strings"
 )
 
 // ── Provider detection ────────────────────────────────────────────────────────
+//
+// Two tiers of provider. The claude CLI speaks Anthropic and Bedrock natively
+// (full prompt-cache and thinking fidelity), so those run directly. Everything
+// else — OpenAI, Gemini, and the ~90 other providers gollm supports — is
+// proxied: the server names the gollm backend in BANDOLIER_LLM_PROVIDER and
+// injects that backend's credential env vars, and the embedded gollm proxy
+// rewrites the claude CLI's Anthropic-format traffic to it. The harness itself
+// no longer knows any proxied provider by name.
 
 type providerKind int
 
 const (
 	providerNone      providerKind = iota
-	providerAnthropic              // direct Anthropic API or Claude subscription OAuth
+	providerAnthropic              // direct Anthropic API or Claude subscription OAuth (claude CLI native)
 	providerBedrock                // AWS Bedrock (claude CLI native)
-	providerOpenAI                 // OpenAI API key or ChatGPT subscription, via the embedded gollm proxy
-	providerGemini                 // Google Gemini / Vertex, via the embedded gollm proxy
+	providerGollm                  // any gollm-proxied provider named by BANDOLIER_LLM_PROVIDER
 )
 
 func detectProvider() providerKind {
@@ -31,19 +37,20 @@ func detectProvider() providerKind {
 	if os.Getenv("ANTHROPIC_API_KEY") != "" || os.Getenv("CLAUDE_CODE_OAUTH_TOKEN") != "" {
 		return providerAnthropic
 	}
-	// CODEX_AUTH_JSON carries the contents of `codex login`'s auth.json for
-	// ChatGPT-subscription users; the model proxy's chatgpt backend consumes it.
-	if os.Getenv("OPENAI_API_KEY") != "" || os.Getenv("CODEX_AUTH_JSON") != "" {
-		return providerOpenAI
-	}
-	if os.Getenv("GOOGLE_PROJECT_CREDENTIALS") != "" ||
-		os.Getenv("GOOGLE_APPLICATION_CREDENTIALS") != "" ||
-		os.Getenv("ANTIGRAVITY_API_KEY") != "" ||
-		os.Getenv("GEMINI_API_KEY") != "" ||
-		os.Getenv("GOOGLE_API_KEY") != "" {
-		return providerGemini
+	// Every proxied provider (OpenAI, Gemini, Vertex, ChatGPT subscription, and
+	// the rest of gollm's roster) is selected the same way: the server sets
+	// BANDOLIER_LLM_PROVIDER to the gollm backend id and injects its credential
+	// env vars.
+	if os.Getenv("BANDOLIER_LLM_PROVIDER") != "" {
+		return providerGollm
 	}
 	return providerNone
+}
+
+// gollmBackend returns the gollm provider id the proxy routes to for a
+// providerGollm run.
+func gollmBackend() string {
+	return os.Getenv("BANDOLIER_LLM_PROVIDER")
 }
 
 // String renders a providerKind for diagnostics.
@@ -53,10 +60,8 @@ func (p providerKind) String() string {
 		return "anthropic"
 	case providerBedrock:
 		return "bedrock"
-	case providerOpenAI:
-		return "openai"
-	case providerGemini:
-		return "gemini"
+	case providerGollm:
+		return "gollm:" + gollmBackend()
 	default:
 		return "none"
 	}
@@ -69,18 +74,8 @@ func logProvider(cfg config) {
 		log.Printf("[harness] provider: AWS Bedrock (region=%s, model=%s)", os.Getenv("AWS_REGION"), cfg.model)
 	case providerAnthropic:
 		log.Printf("[harness] provider: Anthropic API (model=%s)", cfg.model)
-	case providerOpenAI:
-		if os.Getenv("OPENAI_API_KEY") == "" {
-			log.Printf("[harness] provider: ChatGPT subscription via model proxy (model=%s)", cfg.model)
-		} else {
-			log.Printf("[harness] provider: OpenAI API via model proxy (model=%s)", cfg.model)
-		}
-	case providerGemini:
-		if os.Getenv("GOOGLE_PROJECT_CREDENTIALS") != "" {
-			log.Printf("[harness] provider: Google Vertex AI via model proxy (model=%s)", cfg.model)
-		} else {
-			log.Printf("[harness] provider: Google Gemini via model proxy (model=%s)", cfg.model)
-		}
+	case providerGollm:
+		log.Printf("[harness] provider: %s via model proxy (model=%s)", gollmBackend(), cfg.model)
 	default:
 		log.Printf("[harness] warn: no LLM credentials found — the agent will likely fail")
 	}
@@ -98,45 +93,6 @@ func buildEnv(provider providerKind) []string {
 		env = setEnvIfMissing(env, "CLAUDE_CODE_USE_BEDROCK", "1")
 	}
 	return env
-}
-
-// codexAuthPath is where the harness materializes `codex login`'s auth.json
-// (injected as CODEX_AUTH_JSON) — ~/.codex/auth.json, the gollm chatgpt
-// backend's default location, so refreshed tokens persist for the run.
-func codexAuthPath() string {
-	return filepath.Join(homeDir(), ".codex", "auth.json")
-}
-
-// homeDir returns the current user's home directory, falling back to /root when
-// it can't be determined (the harness runs as root in its container).
-func homeDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		return "/root"
-	}
-	return home
-}
-
-// materializeSecret writes secret contents to path, creating the parent
-// directory 0700 and the file 0600. On any failure it logs a warning naming
-// what failed via label and returns false so callers can warn-and-continue.
-func materializeSecret(path, contents, label string) bool {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		log.Printf("[harness] warn: could not create %s: %v", filepath.Dir(path), err)
-		return false
-	}
-	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
-		log.Printf("[harness] warn: could not write %s: %v", label, err)
-		return false
-	}
-	return true
-}
-
-// geminiCredentialsPath is where the harness materializes the Google project
-// credentials JSON (injected as GOOGLE_PROJECT_CREDENTIALS);
-// GOOGLE_APPLICATION_CREDENTIALS points the gollm vertex backend at it.
-func geminiCredentialsPath() string {
-	return filepath.Join(homeDir(), ".gemini", "credentials.json")
 }
 
 func setEnvIfMissing(env []string, key, value string) []string {

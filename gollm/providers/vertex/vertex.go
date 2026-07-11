@@ -84,12 +84,18 @@ func (p *Provider) project() (string, error) {
 	return "", authError(`no GCP project for vertex: set Extra["project"] or VERTEXAI_PROJECT / GOOGLE_CLOUD_PROJECT`)
 }
 
-// credentials loads the service-account key: inline JSON first, then the file
-// named by GOOGLE_APPLICATION_CREDENTIALS. The token URL may be overridden
-// via Extra["token_url"] (tests point it at a fake endpoint).
+// credentials loads the service-account key. The order is: inline JSON via
+// Extra["credentials_json"], inline JSON via env (GOOGLE_APPLICATION_CREDENTIALS_JSON
+// or GOOGLE_CREDENTIALS), then the file named by GOOGLE_APPLICATION_CREDENTIALS.
+// The env-JSON forms let a caller pass the raw key through the environment
+// without writing a temp file — the shape an in-process proxy hands its
+// credentials in. The token URL may be overridden via Extra["token_url"]
+// (tests point it at a fake endpoint).
 func (p *Provider) credentials() (*serviceAccount, string, error) {
 	var data []byte
 	if inline := p.extra("credentials_json"); inline != "" {
+		data = []byte(inline)
+	} else if inline := credentialsJSONFromEnv(); inline != "" {
 		data = []byte(inline)
 	} else if path := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"); path != "" {
 		b, err := os.ReadFile(path)
@@ -98,7 +104,7 @@ func (p *Provider) credentials() (*serviceAccount, string, error) {
 		}
 		data = b
 	} else {
-		return nil, "", authError(`no credentials for vertex: set Extra["credentials_json"], GOOGLE_APPLICATION_CREDENTIALS, or pass an OAuth access token as the API key`)
+		return nil, "", authError(`no credentials for vertex: set Extra["credentials_json"], GOOGLE_APPLICATION_CREDENTIALS_JSON (or GOOGLE_CREDENTIALS) with the key JSON, GOOGLE_APPLICATION_CREDENTIALS with a file path, or pass an OAuth access token as the API key`)
 	}
 	sa, err := parseServiceAccount(data)
 	if err != nil {
@@ -112,6 +118,21 @@ func (p *Provider) credentials() (*serviceAccount, string, error) {
 		tokenURL = defaultTokenURL
 	}
 	return sa, tokenURL, nil
+}
+
+// credentialsJSONFromEnv returns inline service-account JSON supplied through
+// the environment. GOOGLE_APPLICATION_CREDENTIALS_JSON is the explicit form;
+// GOOGLE_CREDENTIALS is accepted only when it looks like JSON (some setups use
+// that name for a file path). A path-shaped GOOGLE_APPLICATION_CREDENTIALS is
+// left to the file branch.
+func credentialsJSONFromEnv() string {
+	if v := strings.TrimSpace(os.Getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON")); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(os.Getenv("GOOGLE_CREDENTIALS")); strings.HasPrefix(v, "{") {
+		return v
+	}
+	return ""
 }
 
 // bearer resolves the OAuth token: a per-request or configured token is used

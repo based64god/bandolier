@@ -1,0 +1,4 @@
+gollm
+/dist/
+*.test
+coverage.out

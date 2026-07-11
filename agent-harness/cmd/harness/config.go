@@ -22,6 +22,15 @@ var effortLevels = map[string]bool{
 	"max":    true,
 }
 
+// highestEffort is the top of the effort ladder — the level ultracode binds to,
+// so "ultracode runs at the highest available effort" is a single symbol rather
+// than a literal restated at each use. Pinned to wire-contract.json's
+// highestEffort (and asserted a member of effortLevels) by
+// TestWireContractEffortLevels, so adding a new top level there without updating
+// this constant breaks CI instead of silently leaving ultracode on the old
+// second-highest level.
+const highestEffort = "max"
+
 // normalizeEffort lower-cases and validates a requested effort level, returning
 // "" for anything unrecognized so callers fall back to the CLI default rather
 // than passing an invalid flag.
@@ -101,6 +110,27 @@ func (c config) diffBase() string {
 // harness opens an issue written from the transcript by the writer model.
 func (c config) issueOutput() bool { return c.outputType == "issue" }
 
+// claudeProvider reports whether the run drives the `claude` CLI (Anthropic API
+// or AWS Bedrock), as opposed to Codex (OpenAI) or Antigravity (Gemini). Serena
+// is wired for all three, but the Claude path additionally applies a Claude-Code
+// system-prompt override that the other CLIs don't take.
+func (c config) claudeProvider() bool {
+	return c.provider == providerAnthropic || c.provider == providerBedrock
+}
+
+// ultracode reports whether this run enters ultracode mode: Claude Code's
+// standing opt-in to multi-agent orchestration, turned on at the highest
+// reasoning effort. Gated on a Claude provider (only the `claude` CLI takes
+// --effort and ships the Task subagent tool) and highestEffort, so selecting
+// "Max" from the dashboard or an `effort:max` webhook label enables it — and
+// nothing else does. Keying off highestEffort (not a literal) keeps ultracode
+// bound to the top of the ladder if the levels ever change. The same cfg.effort
+// is forwarded verbatim as --effort (providers_claude.go / acp_agent.go), so an
+// ultracode run always also gets the highest effort. See ultracodeFraming.
+func (c config) ultracode() bool {
+	return c.claudeProvider() && c.effort == highestEffort
+}
+
 // writesPRCopy reports whether the post-run step generates out-of-band PR copy
 // for this run. Every proxy-routed (gollm) provider generates it — with a cheap
 // same-provider writer where the server supplied one (PR_WRITER_MODEL), else
@@ -110,15 +140,35 @@ func (c config) writesPRCopy() bool {
 	return c.provider == providerGollm || c.prWriter != ""
 }
 
+// ultracodeFraming is the system-prompt section that turns on ultracode mode.
+// It mirrors Claude Code's ultracode opt-in as a standing instruction: default
+// to fanning work out across parallel subagents, verify adversarially before
+// committing, and optimize for the most exhaustive, correct result rather than
+// for token or latency cost. Appended by withRepoPrompt only when
+// config.ultracode() holds (a Claude run at max effort).
+const ultracodeFraming = `<ultracode>
+Ultracode mode is ON for this session. Treat this as a standing instruction for the whole run, not a one-off.
+
+- Default to decomposing substantial work across parallel subagents (the Task tool): fan out to explore, implement, and review concurrently instead of doing everything in one linear pass. Go solo only on trivial or purely mechanical edits.
+- For multi-phase work, run the phases in sequence — understand, then implement, then review — spawning a fresh set of subagents per phase and reading their results before deciding the next.
+- Verify adversarially before you commit: have independent subagents try to refute each nontrivial finding or change, and drop whatever does not survive.
+- Optimize for the most exhaustive, correct outcome. Token and latency cost are not a constraint here; thoroughness wins.
+</ultracode>`
+
 // withRepoPrompt layers the repo-attached system prompt (REPO_SYSTEM_PROMPT)
 // and Serena's Claude-Code system-prompt override onto whatever framing the
 // harness built for a run, so a repo-wide instruction and the Serena
 // tool-preference steer apply to every run regardless of mode. Any side may be
 // empty. It does not replace the framing — each layer is appended after it,
-// repo prompt first then the Serena override.
+// repo prompt first then the Serena override. On a max-effort Claude run
+// (config.ultracode()) the ultracode framing is appended last.
 func (c config) withRepoPrompt(sysPrompt string) string {
-	parts := make([]string, 0, 3)
-	for _, p := range []string{sysPrompt, c.repoSystemPrompt, c.serenaPrompt} {
+	layers := []string{sysPrompt, c.repoSystemPrompt, c.serenaPrompt}
+	if c.ultracode() {
+		layers = append(layers, ultracodeFraming)
+	}
+	parts := make([]string, 0, len(layers))
+	for _, p := range layers {
 		if strings.TrimSpace(p) != "" {
 			parts = append(parts, p)
 		}

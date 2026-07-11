@@ -53,6 +53,33 @@ export const OUTPUT_MARKER = "←";
 
 const HARNESS_TAG = "[harness]";
 
+// Marks a [harness] line as belonging to a subagent (Claude's Agent/Task tool),
+// with SUBAGENT_SEP separating the subagent's label from the line body. Kept
+// byte-identical to the harness (subagentMarker / subagentSep in
+// providers_claude.go), which writes the bytes this parses — the same
+// cross-language contract as OUTPUT_MARKER.
+export const SUBAGENT_MARKER = "⇉";
+export const SUBAGENT_SEP = "⟫";
+
+// The subagent {label, body} of a harness line, or null when the line isn't one.
+// A line qualifies when — after its [harness] tag and indentation — it begins
+// with "⇉ "; the label runs up to the " ⟫ " separator and the rest is the body
+// (a → tool call, ← output, thinking, or narration the subagent produced).
+export function harnessSubagentText(
+  line: string,
+): { label: string; text: string } | null {
+  const tag = line.indexOf(HARNESS_TAG);
+  if (tag < 0) return null;
+  const after = line.slice(tag + HARNESS_TAG.length).replace(/^\s+/, "");
+  const head = SUBAGENT_MARKER + " ";
+  if (!after.startsWith(head)) return null;
+  const rest = after.slice(head.length);
+  const sep = " " + SUBAGENT_SEP + " ";
+  const at = rest.indexOf(sep);
+  if (at < 0) return null;
+  return { label: rest.slice(0, at), text: rest.slice(at + sep.length) };
+}
+
 // The tool-output content of a harness line, or null when the line isn't one. A
 // line qualifies when — after its [harness] tag and the harness's own
 // indentation — it begins with OUTPUT_MARKER. The marker and the single space
@@ -73,11 +100,24 @@ export function harnessOutputText(line: string): string | null {
 // transcript expands a tool call's result on its own row.
 export type HarnessBlock =
   | { kind: "line"; text: string }
-  | { kind: "output"; lines: string[] };
+  | { kind: "output"; lines: string[] }
+  | { kind: "subagent"; label: string; lines: string[] };
 
 export function groupHarnessBlocks(lines: string[]): HarnessBlock[] {
   const blocks: HarnessBlock[] = [];
   for (const line of lines) {
+    // A subagent line folds into a block keyed by its label, so one subagent's
+    // run of activity groups together and distinct subagents stay separate.
+    const sub = harnessSubagentText(line);
+    if (sub) {
+      const last = blocks[blocks.length - 1];
+      if (last?.kind === "subagent" && last.label === sub.label) {
+        last.lines.push(sub.text);
+      } else {
+        blocks.push({ kind: "subagent", label: sub.label, lines: [sub.text] });
+      }
+      continue;
+    }
     const out = harnessOutputText(line);
     if (out === null) {
       blocks.push({ kind: "line", text: line });

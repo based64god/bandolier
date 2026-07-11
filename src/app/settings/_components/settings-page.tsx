@@ -38,6 +38,7 @@ export function SettingsPage() {
       title="Settings"
       backHref="/"
       backLabel="Dashboard"
+      backToHistory
       nav={NAV}
       defaultGroup="providers"
     >

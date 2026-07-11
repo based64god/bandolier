@@ -4,6 +4,7 @@ import { type Metadata, type Viewport } from "next";
 import { Geist } from "next/font/google";
 
 import { KonamiEasterEgg } from "~/app/_components/konami-easter-egg";
+import { NavigationHistoryProvider } from "~/app/_components/navigation-history";
 import { PullToRefresh } from "~/app/_components/pull-to-refresh";
 import { PwaRegister } from "~/app/_components/pwa-register";
 import { UpdatePrompt } from "~/app/_components/update-prompt";
@@ -73,7 +74,9 @@ export default function RootLayout({
             __html: `try{if(localStorage.getItem('h4x0r')==='1')document.documentElement.classList.add('h4x0r')}catch(e){}`,
           }}
         />
-        <TRPCReactProvider>{children}</TRPCReactProvider>
+        <TRPCReactProvider>
+          <NavigationHistoryProvider>{children}</NavigationHistoryProvider>
+        </TRPCReactProvider>
         <PwaRegister />
         <PullToRefresh />
         <UpdatePrompt />

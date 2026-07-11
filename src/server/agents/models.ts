@@ -9,18 +9,24 @@ import {
   friendlyAwsError,
   type AwsCredentials,
 } from "~/server/agents/aws";
+import {
+  listCustomProviderModels,
+  gollmProviderName,
+} from "~/server/agents/custom-providers";
 import { listGeminiModels as fetchGeminiModels } from "~/server/agents/gemini";
+import { parseGollmProvider } from "~/server/agents/gollm-catalog";
 import { listOpenaiModels as fetchOpenaiModels } from "~/server/agents/openai";
 import {
-  type ProviderName,
+  type RunProviderName,
   resolveModelCredentials,
 } from "~/server/agents/resolve-credentials";
 import type { db } from "~/server/db";
 
 /** Which provider a model is served by — used to label it and to route the
- * deploy to the right credentials. Aliases the provider registry's `ProviderName`
- * so the provider union is defined in exactly one place. */
-export type ModelProvider = ProviderName;
+ * deploy to the right credentials. Aliases the provider registry's
+ * `RunProviderName` (the four first-class providers plus `gollm:<id>` for the
+ * proxied ones) so the union is defined in exactly one place. */
+export type ModelProvider = RunProviderName;
 
 export interface ModelOption {
   /** The id passed to the harness as CLAUDE_MODEL. */
@@ -90,10 +96,11 @@ const SUBSCRIPTION_ANTHROPIC_MODELS: ModelOption[] = (
 }));
 
 /**
- * The models the Codex CLI offers with ChatGPT-subscription auth. A pasted
- * auth.json holds OAuth session tokens that can't call GET /v1/models, so the
- * picker uses this static list. Keep in sync with the Codex CLI's ChatGPT
- * model set (https://developers.openai.com/codex/models).
+ * The models a ChatGPT subscription serves through the Codex backend (which
+ * the harness's embedded model proxy speaks). A pasted auth.json holds OAuth
+ * session tokens that can't call GET /v1/models, so the picker uses this
+ * static list. Keep in sync with the ChatGPT/Codex model set
+ * (https://developers.openai.com/codex/models).
  */
 const SUBSCRIPTION_CODEX_MODELS: ModelOption[] = (
   [
@@ -237,6 +244,19 @@ export async function listModelsForUser(
       provider: "gemini",
       run: listGeminiModels(creds.geminiApiKey),
     });
+  // gollm-proxied providers: an OpenAI-compatible GET /models where the
+  // catalog knows one, else (or on failure) the user-supplied model list.
+  for (const custom of creds.customProviders ?? []) {
+    tasks.push({
+      provider: gollmProviderName(custom.provider),
+      run: listCustomProviderModels(custom).then((models) =>
+        models.map((m) => ({
+          ...m,
+          provider: gollmProviderName(custom.provider),
+        })),
+      ),
+    });
+  }
 
   // Providers are independent: one provider's API failing (e.g. an expired key or
   // a transient outage) must not blank out the others, so settle each on its own
@@ -361,6 +381,9 @@ export function pickPrWriterModel(
       m.provider === selected.provider &&
       (m.auth === undefined || m.auth === selected.auth),
   );
+  // gollm-proxied providers have no cheap-model heuristic; the harness falls
+  // back to writing PR copy with the task model itself.
+  if (parseGollmProvider(selected.provider)) return undefined;
   switch (selected.provider) {
     case "openai":
       return pickLatestGptMini(candidates);

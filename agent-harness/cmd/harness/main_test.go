@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log"
 	"net/http"
 	"net/http/httptest"
@@ -330,201 +331,114 @@ func TestSetEnvIfMissing(t *testing.T) {
 	})
 }
 
-func TestProjectIDFromCredentials(t *testing.T) {
-	t.Run("reads project_id from a service-account key", func(t *testing.T) {
-		got := projectIDFromCredentials(`{"type":"service_account","project_id":"my-proj"}`)
-		if got != "my-proj" {
-			t.Errorf("project_id = %q, want my-proj", got)
-		}
-	})
-
-	t.Run("falls back to quota_project_id", func(t *testing.T) {
-		got := projectIDFromCredentials(`{"quota_project_id":"quota-proj"}`)
-		if got != "quota-proj" {
-			t.Errorf("quota fallback = %q, want quota-proj", got)
-		}
-	})
-
-	t.Run("prefers project_id over quota_project_id", func(t *testing.T) {
-		got := projectIDFromCredentials(`{"project_id":"p","quota_project_id":"q"}`)
-		if got != "p" {
-			t.Errorf("= %q, want p", got)
-		}
-	})
-
-	t.Run("returns empty for invalid JSON", func(t *testing.T) {
-		if got := projectIDFromCredentials("not json"); got != "" {
-			t.Errorf("invalid JSON = %q, want empty", got)
-		}
-	})
-
-	t.Run("returns empty when neither field is present", func(t *testing.T) {
-		if got := projectIDFromCredentials(`{"type":"service_account"}`); got != "" {
-			t.Errorf("= %q, want empty", got)
-		}
-	})
-}
-
-func TestBuildEnvOpenAI(t *testing.T) {
-	t.Setenv("OPENAI_API_KEY", "sk-openai")
-	// CODEX_API_KEY is absent in the pod, mirroring the real environment. (Setting
-	// it to "" via t.Setenv would count as present and skip the mirror.)
-	t.Setenv("CODEX_API_KEY", "placeholder")
-	_ = os.Unsetenv("CODEX_API_KEY")
-	env := buildEnv(providerOpenAI)
-	if !containsEnv(env, "CODEX_API_KEY=sk-openai") {
-		t.Errorf("buildEnv(openai) should mirror OPENAI_API_KEY to CODEX_API_KEY: %v", env)
+func TestBackendPrefixGollm(t *testing.T) {
+	// Every proxied provider is named by BANDOLIER_LLM_PROVIDER; the backend
+	// prefix is that id verbatim, and the harness materializes nothing — the
+	// server injects each backend's credential env vars (a bare key here, an
+	// inline auth.json for chatgpt, inline service-account JSON for vertex).
+	cases := []string{"openai", "chatgpt", "gemini", "vertex", "openrouter"}
+	for _, backend := range cases {
+		t.Run(backend, func(t *testing.T) {
+			t.Setenv("BANDOLIER_LLM_PROVIDER", backend)
+			got, err := backendPrefix(config{provider: providerGollm})
+			if err != nil || got != backend {
+				t.Fatalf("backendPrefix = %q, %v, want %q", got, err, backend)
+			}
+			if want := "gollm:" + backend; providerGollm.String() != want {
+				t.Errorf("providerGollm.String() = %q, want %q", providerGollm.String(), want)
+			}
+		})
 	}
 }
 
-func TestBuildEnvCodexAuthJson(t *testing.T) {
-	// With ChatGPT-subscription auth injected (and no API key), buildEnv writes
-	// the auth.json to ~/.codex/auth.json where the Codex CLI expects it.
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("OPENAI_API_KEY", "")
-	authJSON := `{"OPENAI_API_KEY":null,"tokens":{"access_token":"at","refresh_token":"rt","account_id":"acc"}}`
-	t.Setenv("CODEX_AUTH_JSON", authJSON)
+func TestBackendPrefixRejectsNonGollm(t *testing.T) {
+	if _, err := backendPrefix(config{provider: providerAnthropic}); err == nil {
+		t.Error("backendPrefix should error for a native (non-proxied) provider")
+	}
+}
 
-	buildEnv(providerOpenAI)
+func TestModelList(t *testing.T) {
+	// Task + writer models get their own aliases; the claude-* wildcard catches
+	// the claude CLI's internal background calls and lands on the cheap model.
+	list := modelList(config{model: "gpt-5.5", prWriter: "gpt-5.4-mini"}, "openai")
+	byAlias := map[string]string{}
+	for _, e := range list {
+		byAlias[e.ModelName] = e.Params.Model
+	}
+	want := map[string]string{
+		"gpt-5.5":      "openai/gpt-5.5",
+		"gpt-5.4-mini": "openai/gpt-5.4-mini",
+		"claude-*":     "openai/gpt-5.4-mini",
+	}
+	if len(byAlias) != len(want) {
+		t.Fatalf("model list = %v, want %v", byAlias, want)
+	}
+	for alias, model := range want {
+		if byAlias[alias] != model {
+			t.Errorf("alias %s = %q, want %q", alias, byAlias[alias], model)
+		}
+	}
 
-	data, err := os.ReadFile(filepath.Join(home, ".codex", "auth.json"))
+	// Without a distinct writer, the task model serves everything.
+	list = modelList(config{model: "gpt-5.5"}, "openai")
+	if len(list) != 2 || list[1].ModelName != "claude-*" || list[1].Params.Model != "openai/gpt-5.5" {
+		t.Errorf("writerless model list = %+v", list)
+	}
+}
+
+func TestStartModelProxyServesAnthropicSurface(t *testing.T) {
+	// Full integration: start the embedded proxy for a proxied (OpenAI) run and
+	// check it exports the claude CLI's env and serves the authenticated
+	// Anthropic-format surface on localhost.
+	t.Setenv("BANDOLIER_LLM_PROVIDER", "openai")
+	t.Setenv("OPENAI_API_KEY", "sk-test")
+	t.Setenv("ANTHROPIC_BASE_URL", "")
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
+	t.Setenv("ANTHROPIC_SMALL_FAST_MODEL", "")
+
+	stop, err := startModelProxy(config{provider: providerGollm, model: "gpt-5.5", prWriter: "gpt-5.4-mini"})
 	if err != nil {
-		t.Fatalf("auth.json not written: %v", err)
+		t.Fatalf("startModelProxy: %v", err)
 	}
-	if string(data) != authJSON {
-		t.Errorf("auth.json should contain the injected JSON verbatim, got: %s", data)
-	}
-}
+	defer stop()
 
-func TestCodexArgs(t *testing.T) {
-	cfg := config{model: "gpt-5"}
-
-	// One-shot: no resume, ephemeral session, model + json + prompt present.
-	oneShot := codexArgs(cfg, "do the thing", false, true)
-	if oneShot[0] != "exec" {
-		t.Errorf("first arg = %q, want exec", oneShot[0])
+	base := os.Getenv("ANTHROPIC_BASE_URL")
+	token := os.Getenv("ANTHROPIC_AUTH_TOKEN")
+	if !strings.HasPrefix(base, "http://127.0.0.1:") {
+		t.Fatalf("ANTHROPIC_BASE_URL = %q, want a localhost URL", base)
 	}
-	joined := strings.Join(oneShot, " ")
-	if !strings.Contains(joined, "--ephemeral") {
-		t.Errorf("one-shot should be --ephemeral: %v", oneShot)
+	if token == "" {
+		t.Fatal("ANTHROPIC_AUTH_TOKEN not exported")
 	}
-	if strings.Contains(joined, "resume") {
-		t.Errorf("one-shot should not resume: %v", oneShot)
-	}
-	if oneShot[len(oneShot)-1] != "do the thing" {
-		t.Errorf("prompt should be the last arg: %v", oneShot)
-	}
-	if !strings.Contains(joined, "--model gpt-5") {
-		t.Errorf("model flag missing: %v", oneShot)
+	if got := os.Getenv("ANTHROPIC_SMALL_FAST_MODEL"); got != "gpt-5.4-mini" {
+		t.Errorf("ANTHROPIC_SMALL_FAST_MODEL = %q, want the writer model", got)
 	}
 
-	// Resume turn: `exec resume --last`, persisted (no --ephemeral).
-	resume := codexArgs(cfg, "next message", true, false)
-	rjoined := strings.Join(resume, " ")
-	if !strings.Contains(rjoined, "exec resume --last") {
-		t.Errorf("resume should use `exec resume --last`: %v", resume)
-	}
-	if strings.Contains(rjoined, "--ephemeral") {
-		t.Errorf("resume turn must persist (no --ephemeral): %v", resume)
-	}
-	if resume[len(resume)-1] != "next message" {
-		t.Errorf("prompt should be the last arg: %v", resume)
-	}
-}
-
-func TestFoldSystemPrompt(t *testing.T) {
-	if got := foldSystemPrompt("", "just a task"); got != "just a task" {
-		t.Errorf("no system prompt should pass the task through: %q", got)
-	}
-	got := foldSystemPrompt("FRAMING", "TASK")
-	if !strings.HasPrefix(got, "FRAMING") || !strings.HasSuffix(got, "TASK") {
-		t.Errorf("system prompt should be prepended to the task: %q", got)
-	}
-}
-
-func TestBuildEnvGemini(t *testing.T) {
-	// With no project credentials and no ANTIGRAVITY_API_KEY, a legacy
-	// GEMINI_API_KEY is mirrored so agy still finds a credential.
-	_ = os.Unsetenv("GOOGLE_PROJECT_CREDENTIALS")
-	_ = os.Unsetenv("ANTIGRAVITY_API_KEY")
-	t.Setenv("GEMINI_API_KEY", "AIza-gemini")
-	env := buildEnv(providerGemini)
-	if !containsEnv(env, "ANTIGRAVITY_API_KEY=AIza-gemini") {
-		t.Errorf("buildEnv(gemini) should mirror GEMINI_API_KEY to ANTIGRAVITY_API_KEY: %v", env)
-	}
-}
-
-func TestBuildEnvGeminiProjectCredentials(t *testing.T) {
-	// With project credentials JSON injected, buildEnv writes it to
-	// ~/.gemini/credentials.json and sets the ADC / Vertex / project env.
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("GEMINI_API_KEY", "")
-	t.Setenv("ANTIGRAVITY_API_KEY", "")
-	t.Setenv("GOOGLE_PROJECT_CREDENTIALS", `{"type":"service_account","project_id":"my-proj"}`)
-
-	env := buildEnv(providerGemini)
-
-	credPath := filepath.Join(home, ".gemini", "credentials.json")
-	if !containsEnv(env, "GOOGLE_APPLICATION_CREDENTIALS="+credPath) {
-		t.Errorf("buildEnv(gemini) should point GOOGLE_APPLICATION_CREDENTIALS at the written file: %v", env)
-	}
-	if !containsEnv(env, "GOOGLE_GENAI_USE_VERTEXAI=true") {
-		t.Errorf("buildEnv(gemini) should enable Vertex mode: %v", env)
-	}
-	if !containsEnv(env, "GOOGLE_CLOUD_PROJECT=my-proj") {
-		t.Errorf("buildEnv(gemini) should derive GOOGLE_CLOUD_PROJECT from project_id: %v", env)
-	}
-	data, err := os.ReadFile(credPath)
+	// Without the key the proxy must refuse; with it, the aliases are served.
+	unauth, err := http.Get(base + "/v1/models")
 	if err != nil {
-		t.Fatalf("credentials file not written: %v", err)
+		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), "my-proj") {
-		t.Errorf("credentials file should contain the injected JSON, got: %s", data)
-	}
-}
-
-func TestAgyArgs(t *testing.T) {
-	args := agyArgs(config{model: "gemini-2.5-pro"}, "do the thing")
-	joined := strings.Join(args, " ")
-	// -p must be immediately followed by the prompt as its own argument (no shell).
-	if len(args) < 2 || args[0] != "-p" || args[1] != "do the thing" {
-		t.Errorf("agy args should pass the prompt as the -p value: %v", args)
-	}
-	if !strings.Contains(joined, "--model gemini-2.5-pro") {
-		t.Errorf("agy args should set the model: %v", args)
-	}
-	if !strings.Contains(joined, "--dangerously-skip-permissions") {
-		t.Errorf("agy args should auto-approve tool actions: %v", args)
-	}
-}
-
-func TestHandleCodexEvent(t *testing.T) {
-	// Redirect the assistant-text sink to a buffer for the duration of the test.
-	var buf bytes.Buffer
-	orig := stdoutTee
-	stdoutTee = &buf
-	defer func() { stdoutTee = orig }()
-
-	// An agent_message item renders its text to stdout (assistant output).
-	handleCodexEvent([]byte(`{"type":"item.completed","item":{"type":"agent_message","text":"Hello world"}}`))
-	if got := strings.TrimSpace(buf.String()); got != "Hello world" {
-		t.Errorf("agent_message text = %q, want %q", got, "Hello world")
+	unauth.Body.Close()
+	if unauth.StatusCode != http.StatusUnauthorized {
+		t.Errorf("unauthenticated /v1/models = %d, want 401", unauth.StatusCode)
 	}
 
-	// A command_execution item is not assistant text — nothing on stdout.
-	buf.Reset()
-	handleCodexEvent([]byte(`{"type":"item.completed","item":{"type":"command_execution","command":"ls -la"}}`))
-	if buf.Len() != 0 {
-		t.Errorf("command_execution should not write to stdout, got %q", buf.String())
+	req, _ := http.NewRequest(http.MethodGet, base+"/v1/models", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	// Invalid JSON is ignored without panicking or writing.
-	buf.Reset()
-	handleCodexEvent([]byte(`not json`))
-	if buf.Len() != 0 {
-		t.Errorf("invalid JSON should be ignored, got %q", buf.String())
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("authenticated /v1/models = %d: %s", resp.StatusCode, body)
+	}
+	for _, alias := range []string{"gpt-5.5", "gpt-5.4-mini", "claude-*"} {
+		if !strings.Contains(string(body), alias) {
+			t.Errorf("/v1/models missing alias %s: %s", alias, body)
+		}
 	}
 }
 
@@ -763,47 +677,28 @@ func TestToolSummaryUnknownShape(t *testing.T) {
 }
 
 func TestDetectProvider(t *testing.T) {
-	// Clear all provider-selecting vars, then assert each selection path.
-	for _, k := range []string{"CLAUDE_CODE_USE_BEDROCK", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "OPENAI_API_KEY", "CODEX_AUTH_JSON", "GOOGLE_PROJECT_CREDENTIALS", "GOOGLE_APPLICATION_CREDENTIALS", "ANTIGRAVITY_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"} {
+	// Clear the vars detectProvider inspects, then assert each selection path.
+	for _, k := range []string{"CLAUDE_CODE_USE_BEDROCK", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "BANDOLIER_LLM_PROVIDER"} {
 		t.Setenv(k, "")
 	}
 	if got := detectProvider(); got != providerNone {
 		t.Errorf("no env → %v, want providerNone", got)
 	}
 
-	t.Setenv("CODEX_AUTH_JSON", `{"tokens":{"access_token":"x"}}`)
-	if got := detectProvider(); got != providerOpenAI {
-		t.Errorf("CODEX_AUTH_JSON set → %v, want providerOpenAI", got)
+	// Every proxied provider is selected by BANDOLIER_LLM_PROVIDER, regardless
+	// of which backend it names (openai, chatgpt, gemini, vertex, groq, …).
+	t.Setenv("BANDOLIER_LLM_PROVIDER", "groq")
+	if got := detectProvider(); got != providerGollm {
+		t.Errorf("BANDOLIER_LLM_PROVIDER set → %v, want providerGollm", got)
 	}
-	t.Setenv("CODEX_AUTH_JSON", "")
 
+	// A native credential takes its own path even when BANDOLIER_LLM_PROVIDER
+	// is also set (the server never sets both, but native must win).
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-x")
 	if got := detectProvider(); got != providerAnthropic {
 		t.Errorf("CLAUDE_CODE_OAUTH_TOKEN set → %v, want providerAnthropic", got)
 	}
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
-
-	t.Setenv("GOOGLE_PROJECT_CREDENTIALS", `{"project_id":"p"}`)
-	if got := detectProvider(); got != providerGemini {
-		t.Errorf("GOOGLE_PROJECT_CREDENTIALS set → %v, want providerGemini", got)
-	}
-	t.Setenv("GOOGLE_PROJECT_CREDENTIALS", "")
-
-	t.Setenv("ANTIGRAVITY_API_KEY", "AIza-antigravity")
-	if got := detectProvider(); got != providerGemini {
-		t.Errorf("ANTIGRAVITY_API_KEY set → %v, want providerGemini", got)
-	}
-
-	t.Setenv("ANTIGRAVITY_API_KEY", "")
-	t.Setenv("GEMINI_API_KEY", "AIza-gemini")
-	if got := detectProvider(); got != providerGemini {
-		t.Errorf("legacy GEMINI_API_KEY set → %v, want providerGemini", got)
-	}
-
-	t.Setenv("OPENAI_API_KEY", "sk-openai")
-	if got := detectProvider(); got != providerOpenAI {
-		t.Errorf("OPENAI_API_KEY beats Gemini → %v, want providerOpenAI", got)
-	}
 
 	t.Setenv("CLAUDE_CODE_USE_BEDROCK", "1")
 	if got := detectProvider(); got != providerBedrock {
@@ -813,7 +708,7 @@ func TestDetectProvider(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_USE_BEDROCK", "")
 	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-x")
 	if got := detectProvider(); got != providerAnthropic {
-		t.Errorf("ANTHROPIC_API_KEY beats OpenAI → %v, want providerAnthropic", got)
+		t.Errorf("ANTHROPIC_API_KEY → %v, want providerAnthropic", got)
 	}
 
 	t.Setenv("AWS_ACCESS_KEY_ID", "AKIA")
@@ -1074,7 +969,7 @@ func TestWithRepoPrompt(t *testing.T) {
 	if got := c.withRepoPrompt("frame"); got != "frame" {
 		t.Errorf("below-highest withRepoPrompt() = %q, want no ultracode", got)
 	}
-	c = config{provider: providerOpenAI, effort: highestEffort}
+	c = config{provider: providerGollm, effort: highestEffort}
 	if got := c.withRepoPrompt("frame"); got != "frame" {
 		t.Errorf("non-Claude highest-effort withRepoPrompt() = %q, want no ultracode", got)
 	}
@@ -1091,70 +986,10 @@ func TestUltracode(t *testing.T) {
 		}
 	}
 	// Non-Claude providers never enter ultracode, even at the highest effort.
-	for _, p := range []providerKind{providerNone, providerOpenAI, providerGemini} {
+	for _, p := range []providerKind{providerNone, providerGollm} {
 		if (config{provider: p, effort: highestEffort}).ultracode() {
 			t.Errorf("ultracode() = true for non-Claude provider %d, want false", p)
 		}
-	}
-}
-
-func TestClaudeProvider(t *testing.T) {
-	for _, p := range []providerKind{providerAnthropic, providerBedrock} {
-		if !(config{provider: p}).claudeProvider() {
-			t.Errorf("claudeProvider() = false for provider %d, want true", p)
-		}
-	}
-	for _, p := range []providerKind{providerNone, providerOpenAI, providerGemini} {
-		if (config{provider: p}).claudeProvider() {
-			t.Errorf("claudeProvider() = true for provider %d, want false", p)
-		}
-	}
-}
-
-func TestSetupSerenaAntigravity(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	path := antigravityMCPConfigPath()
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	// Pre-existing config with an unrelated server must be preserved.
-	if err := os.WriteFile(path, []byte(`{"mcpServers":{"other":{"command":"other"}},"userSetting":true}`), 0o600); err != nil {
-		t.Fatalf("seed config: %v", err)
-	}
-
-	setupSerenaAntigravity(&config{workDir: "/repo"})
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read config: %v", err)
-	}
-	var parsed struct {
-		MCPServers map[string]struct {
-			Command string   `json:"command"`
-			Args    []string `json:"args"`
-		} `json:"mcpServers"`
-		UserSetting bool `json:"userSetting"`
-	}
-	if err := json.Unmarshal(data, &parsed); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if !parsed.UserSetting {
-		t.Error("unrelated top-level key was dropped")
-	}
-	if _, ok := parsed.MCPServers["other"]; !ok {
-		t.Error("unrelated MCP server was dropped")
-	}
-	serena, ok := parsed.MCPServers["serena"]
-	if !ok {
-		t.Fatal("serena MCP server not written")
-	}
-	if serena.Command != "serena" {
-		t.Errorf("serena command = %q, want %q", serena.Command, "serena")
-	}
-	want := []string{"start-mcp-server", "--context", "antigravity", "--project", "/repo"}
-	if strings.Join(serena.Args, " ") != strings.Join(want, " ") {
-		t.Errorf("serena args = %v, want %v", serena.Args, want)
 	}
 }
 

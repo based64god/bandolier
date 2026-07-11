@@ -22,14 +22,11 @@ describe("isEffortLevel", () => {
 });
 
 describe("providerSupportsEffort", () => {
-  it("is true for the Claude providers", () => {
+  it("is true for every provider — all runs go through the claude CLI", () => {
     expect(providerSupportsEffort("anthropic")).toBe(true);
     expect(providerSupportsEffort("bedrock")).toBe(true);
-  });
-
-  it("is false for OpenAI and Gemini", () => {
-    expect(providerSupportsEffort("openai")).toBe(false);
-    expect(providerSupportsEffort("gemini")).toBe(false);
+    expect(providerSupportsEffort("openai")).toBe(true);
+    expect(providerSupportsEffort("gemini")).toBe(true);
   });
 });
 

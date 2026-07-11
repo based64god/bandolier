@@ -61,7 +61,9 @@ check(
   await deployBtn().isEnabled(),
 );
 
-// ── Switching to an OpenAI model hides the effort picker ─────────────────────
+// ── The effort picker stays for every provider ───────────────────────────────
+// Reasoning effort applies to every provider (providerSupportsEffort is
+// universal), so switching to a non-Claude model keeps the picker visible.
 // Anchor the model picker to its "Model" label — its shown value changes as we
 // switch models, so the label is the only stable handle.
 const modelTrigger = dialog
@@ -74,17 +76,17 @@ await modelSearch.waitFor({ state: "visible", timeout: 5000 });
 await modelSearch.fill("GPT");
 await page.getByText("GPT-5.5").click();
 check(
-  "picking an OpenAI model hides the effort picker",
-  !(await dialog.innerText()).includes("Reasoning effort"),
+  "effort picker stays for an OpenAI model (effort applies to every provider)",
+  (await dialog.innerText()).includes("Reasoning effort"),
 );
 
-// Back to a Claude model so the deploy sends a provider that supports effort.
+// Switch back to a Claude model so the deploy sends the provider asserted below.
 await modelTrigger.click();
 await modelSearch.waitFor({ state: "visible", timeout: 5000 });
 await modelSearch.fill("Opus");
 await page.getByText("Claude Opus 4.8").click();
 check(
-  "picking a Claude model restores the effort picker",
+  "effort picker stays for a Claude model",
   (await dialog.innerText()).includes("Reasoning effort"),
 );
 

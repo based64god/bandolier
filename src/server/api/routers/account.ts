@@ -1,5 +1,5 @@
 import { TRPCError } from "@trpc/server";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 
 import {
@@ -10,6 +10,16 @@ import {
 import { cleanSessionToken, validateAwsCredentials } from "~/server/agents/aws";
 import { getUserCompute, parseComputeInput } from "~/server/agents/compute";
 import { maskKey, stripWhitespace } from "~/server/api/credentials";
+import {
+  getUserCustomProviders,
+  normalizeCustomProviderInput,
+  validateCustomProviderInput,
+} from "~/server/agents/custom-providers";
+import {
+  GOLLM_PROVIDERS,
+  gollmProviderInfo,
+  providerFields,
+} from "~/server/agents/gollm-catalog";
 import {
   getUserKubeconfig,
   resolveKubeconfig,
@@ -33,6 +43,7 @@ import {
   userAnthropicCredentials,
   userAwsCredentials,
   userCompute,
+  userCustomProviderCredentials,
   userGeminiCredentials,
   userKubeconfig,
   userOpenaiCredentials,
@@ -409,6 +420,79 @@ export const accountRouter = createTRPCRouter({
       .where(eq(userGeminiCredentials.userId, userId))
       .then(() => undefined),
   ),
+
+  // ── gollm-proxied providers (Groq, OpenRouter, vLLM, … — see the catalog) ──
+
+  // The provider catalog for the settings directory: each provider's resolved
+  // credential fields (the bespoke form shape), listability, and note.
+  customProviderCatalog: protectedProcedure.query(() =>
+    GOLLM_PROVIDERS.map((info) => ({
+      id: info.id,
+      label: info.label,
+      listable: info.listable ?? false,
+      hint: info.hint ?? null,
+      fields: providerFields(info).map((f) => ({
+        env: f.env,
+        label: f.label,
+        placeholder: f.placeholder ?? null,
+        kind: f.kind ?? ("secret" as const),
+        optional: f.optional ?? false,
+        hint: f.hint ?? null,
+      })),
+    })),
+  ),
+
+  // The user's configured custom providers, with the key masked.
+  customProviderStatus: protectedProcedure.query(async ({ ctx }) => {
+    const rows = await getUserCustomProviders(ctx.db, ctx.session.user.id);
+    return rows.map((row) => ({
+      provider: row.provider,
+      label: gollmProviderInfo(row.provider)?.label ?? row.provider,
+      apiKeyMasked: row.apiKey ? maskKey(row.apiKey) : null,
+      apiBase: row.apiBase,
+      extraEnvKeys: Object.keys(row.extraEnv ?? {}),
+      models: row.models ?? [],
+    }));
+  }),
+
+  setCustomProvider: userCredentialSetter({
+    inputSchema: z.object({
+      provider: z.string().min(1),
+      /** The provider's declared field env vars → entered values. */
+      fields: z.record(z.string(), z.string()),
+      /** Comma/newline-separated model ids for non-listable providers. */
+      models: z.string().optional(),
+    }),
+    validate: (input) => validateCustomProviderInput(input),
+    store: async (database, userId, input) => {
+      const normalized = normalizeCustomProviderInput(input);
+      await database
+        .insert(userCustomProviderCredentials)
+        .values({ userId, ...normalized })
+        .onConflictDoUpdate({
+          target: [
+            userCustomProviderCredentials.userId,
+            userCustomProviderCredentials.provider,
+          ],
+          set: { ...normalized, updatedAt: new Date() },
+        });
+    },
+    invalidMessage: "Invalid provider credential.",
+  }),
+
+  deleteCustomProvider: protectedProcedure
+    .input(z.object({ provider: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      await ctx.db
+        .delete(userCustomProviderCredentials)
+        .where(
+          and(
+            eq(userCustomProviderCredentials.userId, ctx.session.user.id),
+            eq(userCustomProviderCredentials.provider, input.provider),
+          ),
+        );
+      return { success: true };
+    }),
 
   // ── Kubeconfig ────────────────────────────────────────────────────────────
 

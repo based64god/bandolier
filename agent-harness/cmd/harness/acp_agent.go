@@ -16,11 +16,13 @@ import (
 // ── ACP agent server ──────────────────────────────────────────────────────────
 //
 // `harness acp-agent` runs the agent (server) side of the Agent Client Protocol:
-// it reads ACP JSON-RPC from stdin and writes it to stdout, wrapping the
-// underlying coding CLI (claude or codex) so any ACP client can drive it. The
-// harness's proxy mode spawns this and relays the frontend's frames to it; the
-// underlying CLI does its own filesystem I/O (run with skip-permissions), so the
-// client never needs to serve fs/* or terminal/* requests.
+// it reads ACP JSON-RPC from stdin and writes it to stdout, wrapping the claude
+// CLI so any ACP client can drive it. The harness's proxy mode spawns this and
+// relays the frontend's frames to it; the underlying CLI does its own
+// filesystem I/O (run with skip-permissions), so the client never needs to
+// serve fs/* or terminal/* requests. Non-Anthropic providers are already
+// rewritten by the parent process's model proxy (inherited via
+// ANTHROPIC_BASE_URL), so the claude CLI serves every provider here.
 //
 // stdout is reserved for the JSON-RPC channel; all diagnostics go to stderr.
 
@@ -35,8 +37,7 @@ type acpAgent struct {
 
 	mu         sync.Mutex
 	sessionID  string
-	claude     *claudeDriver // long-lived process for the claude providers
-	codexBegun bool          // codex runs one process per turn; resume after the first
+	claude     *claudeDriver // long-lived claude process driving the session
 	curMsgID   string        // message id for the in-flight turn's chunks
 	cancelTurn context.CancelFunc
 	// tokens is the session-wide running total: a long-lived interactive process
@@ -102,16 +103,14 @@ func (a *acpAgent) newSession(_ context.Context, params json.RawMessage) (any, e
 		a.workDir = p.Cwd
 	}
 	a.sessionID = "sess-" + shortUnique()
-	// The claude providers keep one long-lived process so conversation context
-	// persists across turns; codex resumes a persisted session per turn instead.
-	if a.provider != providerOpenAI && a.provider != providerGemini {
-		d, err := startClaudeDriver(a)
-		if err != nil {
-			a.sessionID = ""
-			return nil, &acp.RPCError{Code: acp.CodeInternalError, Message: "start claude: " + err.Error()}
-		}
-		a.claude = d
+	// One long-lived claude process so conversation context persists across
+	// turns.
+	d, err := startClaudeDriver(a)
+	if err != nil {
+		a.sessionID = ""
+		return nil, &acp.RPCError{Code: acp.CodeInternalError, Message: "start claude: " + err.Error()}
 	}
+	a.claude = d
 	return acp.NewSessionResult{SessionID: a.sessionID}, nil
 }
 
@@ -142,11 +141,7 @@ func (a *acpAgent) prompt(_ context.Context, params json.RawMessage) (any, error
 		cancel()
 	}()
 
-	text := promptText(p.Prompt)
-	if a.provider == providerOpenAI {
-		return a.promptCodex(ctx, text)
-	}
-	return a.promptClaude(ctx, text)
+	return a.promptClaude(ctx, promptText(p.Prompt))
 }
 
 // cancel handles a session/cancel notification by cancelling the in-flight turn.
@@ -340,68 +335,6 @@ func (a *acpAgent) promptClaude(ctx context.Context, text string) (any, error) {
 	}
 }
 
-// ── Codex driver (one process per turn) ───────────────────────────────────────
-
-func (a *acpAgent) promptCodex(ctx context.Context, text string) (any, error) {
-	resume := a.codexBegun
-	prompt := text
-	if !resume {
-		prompt = foldSystemPrompt(a.sysPrompt, text)
-	}
-	args := codexArgs(config{model: a.model}, prompt, resume, false)
-	cmd := exec.CommandContext(ctx, "codex", args...)
-	cmd.Dir = a.workDir
-	cmd.Env = buildEnv(a.provider)
-	cmd.Stderr = os.Stderr
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, &acp.RPCError{Code: acp.CodeInternalError, Message: err.Error()}
-	}
-	if err := cmd.Start(); err != nil {
-		return nil, &acp.RPCError{Code: acp.CodeInternalError, Message: err.Error()}
-	}
-	forEachLine(stdout, func(line []byte) { dispatchCodexEvent(line, a) })
-	waitErr := cmd.Wait()
-	a.codexBegun = true
-	if ctx.Err() != nil {
-		return acp.PromptResult{StopReason: acp.StopCancelled}, nil
-	}
-	if waitErr != nil {
-		return acp.PromptResult{StopReason: acp.StopRefusal}, nil
-	}
-	return acp.PromptResult{StopReason: acp.StopEndTurn}, nil
-}
-
-// handleCodexEvent parses one Codex NDJSON line and drives the agent as the ACP
-// sink — the same dispatchCodexEvent the one-shot log path uses.
-func (a *acpAgent) handleCodexEvent(raw []byte) { dispatchCodexEvent(raw, a) }
-
-// acpAgent implements codexEventSink, forwarding each normalized Codex event to
-// the ACP client. Lifecycle events (turn.failed/completed) drive the prompt
-// result rather than the transcript, so they're no-ops here.
-
-func (a *acpAgent) onMessage(text string) {
-	a.emit(acp.AgentMessageChunk{SessionUpdate: acp.UpdateAgentMessageChunk, MessageID: a.curMsgID, Content: acp.TextBlock(text)})
-}
-
-func (a *acpAgent) onCommand(command string) {
-	a.emitToolCall("exec", acp.ToolKindExecute, "exec: "+strings.SplitN(command, "\n", 2)[0])
-}
-
-func (a *acpAgent) onFileChange() { a.emitToolCall("edit", acp.ToolKindEdit, "file change") }
-
-func (a *acpAgent) onWebSearch(query string) {
-	a.emitToolCall("search", acp.ToolKindFetch, "search: "+query)
-}
-
-func (a *acpAgent) onMCPToolCall(name string) {
-	a.emitToolCall("tool", acp.ToolKindOther, "tool: "+name)
-}
-
-func (a *acpAgent) onTurnFailed(string) {}
-
-func (a *acpAgent) onTurnCompleted() {}
-
 // emitAvailableCommands forwards the session's slash-command names to the client
 // as an available_commands_update. The claude CLI reports only names (no
 // descriptions), so the description is left empty for the client to fill.
@@ -418,16 +351,6 @@ func (a *acpAgent) emitAvailableCommands(names []string) {
 	a.emit(acp.AvailableCommandsUpdate{
 		SessionUpdate:     acp.UpdateAvailableCommands,
 		AvailableCommands: cmds,
-	})
-}
-
-func (a *acpAgent) emitToolCall(idPrefix, kind, title string) {
-	a.emit(acp.ToolCall{
-		SessionUpdate: acp.UpdateToolCall,
-		ToolCallID:    idPrefix + "-" + shortUnique(),
-		Title:         title,
-		Kind:          kind,
-		Status:        acp.ToolStatusPending,
 	})
 }
 

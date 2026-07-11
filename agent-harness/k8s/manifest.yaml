@@ -109,34 +109,35 @@ spec:
                   name: bandolier-agent-example-creds
                   key: CLAUDE_CODE_OAUTH_TOKEN
                   optional: true
-            # OpenAI models run via the Codex CLI instead of claude; the server
-            # injects this when an OpenAI model is selected (and CLAUDE_MODEL then
-            # holds the OpenAI model id, e.g. "gpt-5").
+            # Every non-native provider — OpenAI, Gemini, ChatGPT/Codex
+            # subscription, Groq, OpenRouter, a self-hosted vLLM, GitHub
+            # Copilot, and the rest of gollm's roster — runs the same way: the
+            # server sets BANDOLIER_LLM_PROVIDER to the gollm backend id
+            # (openai, chatgpt, vertex, gemini, groq, …) and injects that
+            # backend's conventional credential env vars alongside it (e.g.
+            # OPENAI_API_KEY, CODEX_AUTH_JSON, GOOGLE_APPLICATION_CREDENTIALS_JSON,
+            # OPENROUTER_API_KEY). The harness's embedded gollm proxy routes by
+            # the id and drives the run with Claude Code; it materializes
+            # nothing — gollm reads each credential inline from the env.
+            - name: BANDOLIER_LLM_PROVIDER
+              value: ""
             - name: OPENAI_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: bandolier-agent-example-creds
                   key: OPENAI_API_KEY
                   optional: true
-            # ChatGPT-subscription auth for Codex: the contents of `codex login`'s
-            # ~/.codex/auth.json. The server injects exactly one of this or
-            # OPENAI_API_KEY; the harness writes it to ~/.codex/auth.json.
             - name: CODEX_AUTH_JSON
               valueFrom:
                 secretKeyRef:
                   name: bandolier-agent-example-creds
                   key: CODEX_AUTH_JSON
                   optional: true
-            # Gemini models run via the Antigravity CLI (agy), which authenticates
-            # against a Google Cloud project via Application Default Credentials.
-            # The server injects the project credentials JSON when a Gemini model
-            # is selected (CLAUDE_MODEL then holds the id, e.g. "gemini-2.5-pro");
-            # the harness writes it to ~/.gemini/credentials.json.
-            - name: GOOGLE_PROJECT_CREDENTIALS
+            - name: GOOGLE_APPLICATION_CREDENTIALS_JSON
               valueFrom:
                 secretKeyRef:
                   name: bandolier-agent-example-creds
-                  key: GOOGLE_PROJECT_CREDENTIALS
+                  key: GOOGLE_APPLICATION_CREDENTIALS_JSON
                   optional: true
             - name: GITHUB_TOKEN
               valueFrom:

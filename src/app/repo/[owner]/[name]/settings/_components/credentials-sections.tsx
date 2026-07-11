@@ -10,7 +10,13 @@ import {
   SecretForm,
   useCredentialMutations,
 } from "~/app/dashboard/_components/credential-ui";
+import { GenericProviderForm } from "~/app/dashboard/_components/generic-provider-form";
+import {
+  ProviderDirectory,
+  type ProviderEntry,
+} from "~/app/dashboard/_components/provider-directory";
 import { parseAwsCredentials } from "~/app/dashboard/_components/parse-aws";
+import type { RouterOutputs } from "~/trpc/react";
 
 type Accent = "purple" | "teal" | "blue" | "orange" | "sky" | "emerald";
 
@@ -36,6 +42,7 @@ function RepoApiKeySection({
   label,
   accent,
   placeholder,
+  hideHeading,
   save: saveMutation,
   remove: removeMutation,
 }: {
@@ -44,6 +51,7 @@ function RepoApiKeySection({
   label: string;
   accent: Accent;
   placeholder: string;
+  hideHeading?: boolean;
   save: typeof api.webhooks.setAnthropic.useMutation;
   remove: typeof api.webhooks.deleteAnthropic.useMutation;
 }) {
@@ -60,9 +68,11 @@ function RepoApiKeySection({
 
   return (
     <div className="space-y-2">
-      <h3 className={`text-sm font-semibold ${ACCENT_TEXT[accent]}`}>
-        {label}
-      </h3>
+      {!hideHeading && (
+        <h3 className={`text-sm font-semibold ${ACCENT_TEXT[accent]}`}>
+          {label}
+        </h3>
+      )}
       {status?.configured ? (
         <MaskedCredentialRow
           onRemove={() => remove.mutate({ repoFullName })}
@@ -95,9 +105,11 @@ function RepoApiKeySection({
 function RepoAnthropicSection({
   repoFullName,
   status,
+  hideHeading,
 }: {
   repoFullName: string;
   status?: { configured: boolean; apiKeyMasked?: string };
+  hideHeading?: boolean;
 }) {
   return (
     <RepoApiKeySection
@@ -106,20 +118,24 @@ function RepoAnthropicSection({
       label="Anthropic API key"
       accent="purple"
       placeholder="sk-ant-…"
+      hideHeading={hideHeading}
       save={api.webhooks.setAnthropic.useMutation}
       remove={api.webhooks.deleteAnthropic.useMutation}
     />
   );
 }
 
-// OpenAI key shared by everyone working on this repo (used via the Codex CLI).
-// Admin-only, like the other shared credentials.
+// OpenAI key shared by everyone working on this repo (served to Claude Code
+// through the harness's embedded model proxy). Admin-only, like the other
+// shared credentials.
 function RepoOpenAISection({
   repoFullName,
   status,
+  hideHeading,
 }: {
   repoFullName: string;
   status?: { configured: boolean; apiKeyMasked?: string };
+  hideHeading?: boolean;
 }) {
   return (
     <RepoApiKeySection
@@ -128,6 +144,7 @@ function RepoOpenAISection({
       label="OpenAI API key"
       accent="teal"
       placeholder="sk-…"
+      hideHeading={hideHeading}
       save={api.webhooks.setOpenai.useMutation}
       remove={api.webhooks.deleteOpenai.useMutation}
     />
@@ -135,11 +152,12 @@ function RepoOpenAISection({
 }
 
 // Gemini project credentials shared by everyone working on this repo (a Google
-// Cloud service-account key, used via the Antigravity CLI). Admin-only, like the
-// other shared credentials.
+// Cloud service-account key, used against Vertex AI through the harness's
+// embedded model proxy). Admin-only, like the other shared credentials.
 function RepoGeminiSection({
   repoFullName,
   status,
+  hideHeading,
 }: {
   repoFullName: string;
   status?: {
@@ -147,6 +165,7 @@ function RepoGeminiSection({
     projectId?: string | null;
     clientEmail?: string | null;
   };
+  hideHeading?: boolean;
 }) {
   const utils = api.useUtils();
   const [credentials, setCredentials] = useState("");
@@ -161,9 +180,11 @@ function RepoGeminiSection({
 
   return (
     <div className="space-y-2">
-      <h3 className="text-sm font-semibold text-blue-300">
-        Gemini (Google Cloud project credentials)
-      </h3>
+      {!hideHeading && (
+        <h3 className="text-sm font-semibold text-blue-300">
+          Gemini (Google Cloud project credentials)
+        </h3>
+      )}
       {status?.configured ? (
         <MaskedCredentialRow
           onRemove={() => remove.mutate({ repoFullName })}
@@ -210,6 +231,7 @@ function RepoGeminiSection({
 function RepoAwsSection({
   repoFullName,
   status,
+  hideHeading,
 }: {
   repoFullName: string;
   status?: {
@@ -218,6 +240,7 @@ function RepoAwsSection({
     region?: string;
     isTemporary?: boolean;
   };
+  hideHeading?: boolean;
 }) {
   const utils = api.useUtils();
   const [accessKeyId, setAccessKeyId] = useState("");
@@ -250,9 +273,11 @@ function RepoAwsSection({
 
   return (
     <div className="space-y-2">
-      <h3 className="text-sm font-semibold text-orange-300">
-        AWS Bedrock credentials
-      </h3>
+      {!hideHeading && (
+        <h3 className="text-sm font-semibold text-orange-300">
+          AWS Bedrock credentials
+        </h3>
+      )}
       {status?.configured ? (
         <MaskedCredentialRow
           onRemove={() => remove.mutate({ repoFullName })}
@@ -540,7 +565,146 @@ function RepoKubeconfigSection({
   );
 }
 
-// Repo-scoped shared infrastructure: kubeconfig + model credentials, plus the
+// The repo's shared model-provider directory: the same tier-free card system as
+// the user settings page, but scoped to the repo and wired to the webhooks
+// router (admin-gated). The four rich providers reuse the repo sections above
+// (as headingless card bodies); the ~90 gollm-proxied ones use the generic
+// catalog form. `creds` is the already-loaded repo credential status.
+function RepoProviderDirectory({
+  repoFullName,
+  creds,
+}: {
+  repoFullName: string;
+  creds: RouterOutputs["webhooks"]["getCredentials"] | undefined;
+}) {
+  const utils = api.useUtils();
+  const { data: catalog } = api.account.customProviderCatalog.useQuery();
+  const { data: configured } = api.webhooks.getCustomProviders.useQuery({
+    repoFullName,
+  });
+
+  const { result, onSave, onRemove } = useCredentialMutations(() =>
+    utils.webhooks.getCustomProviders.invalidate({ repoFullName }),
+  );
+  const setCustom = api.webhooks.setCustomProvider.useMutation({
+    onSuccess: () => onSave(),
+  });
+  const deleteCustom = api.webhooks.deleteCustomProvider.useMutation({
+    onSuccess: onRemove,
+  });
+
+  const configuredById = new Map(
+    (configured ?? []).map((c) => [c.provider, c]),
+  );
+
+  const entries: ProviderEntry[] = [
+    {
+      id: "anthropic",
+      label: "Anthropic",
+      accent: "purple",
+      configured: !!creds?.anthropic.configured,
+      keywords: "claude",
+      priority: 100,
+      body: (
+        <RepoAnthropicSection
+          repoFullName={repoFullName}
+          status={creds?.anthropic}
+          hideHeading
+        />
+      ),
+    },
+    {
+      id: "openai",
+      label: "OpenAI",
+      accent: "teal",
+      configured: !!creds?.openai.configured,
+      keywords: "gpt chatgpt",
+      priority: 90,
+      body: (
+        <RepoOpenAISection
+          repoFullName={repoFullName}
+          status={creds?.openai}
+          hideHeading
+        />
+      ),
+    },
+    {
+      id: "gemini",
+      label: "Gemini",
+      accent: "blue",
+      configured: !!creds?.gemini.configured,
+      keywords: "google vertex",
+      priority: 80,
+      body: (
+        <RepoGeminiSection
+          repoFullName={repoFullName}
+          status={creds?.gemini}
+          hideHeading
+        />
+      ),
+    },
+    {
+      id: "bedrock",
+      label: "AWS Bedrock",
+      accent: "orange",
+      configured: !!creds?.aws.configured,
+      keywords: "aws amazon claude",
+      priority: 70,
+      body: (
+        <RepoAwsSection
+          repoFullName={repoFullName}
+          status={creds?.aws}
+          hideHeading
+        />
+      ),
+    },
+    ...(catalog ?? []).map(
+      (c): ProviderEntry => ({
+        id: c.id,
+        label: c.label,
+        accent: "sky",
+        configured: configuredById.has(c.id),
+        keywords: c.id,
+        body: (
+          <GenericProviderForm
+            entry={c}
+            configured={configuredById.get(c.id)}
+            onSubmit={async (v) => {
+              await setCustom.mutateAsync({
+                repoFullName,
+                provider: c.id,
+                fields: v.fields,
+                models: v.models,
+              });
+            }}
+            savePending={setCustom.isPending}
+            saveError={setCustom.error?.message}
+            result={result}
+            onRemove={() =>
+              deleteCustom.mutate({ repoFullName, provider: c.id })
+            }
+            removePending={deleteCustom.isPending}
+          />
+        ),
+      }),
+    ),
+  ];
+
+  return (
+    <ProviderDirectory
+      entries={entries}
+      intro={
+        <p className="text-xs text-white/40">
+          Model credentials shared across everyone who runs agents for this
+          repo. Every provider Bandolier supports is here; configured ones
+          appear in the deploy picker for collaborators (per the credential
+          preference below).
+        </p>
+      }
+    />
+  );
+}
+
 // user-vs-repo preference toggle and a prominent security warning. Renders the
 // whole "Shared credentials" settings panel — intro, warning, then one card
 // per credential (the cards mount only once the status query resolves, so the
@@ -599,26 +763,8 @@ export function RepoCredentialsPanel({
               configured={creds?.hasKubeconfig ?? false}
             />
           </SettingsCard>
-          <SettingsCard id="anthropic">
-            <RepoAnthropicSection
-              repoFullName={repoFullName}
-              status={creds?.anthropic}
-            />
-          </SettingsCard>
-          <SettingsCard id="openai">
-            <RepoOpenAISection
-              repoFullName={repoFullName}
-              status={creds?.openai}
-            />
-          </SettingsCard>
-          <SettingsCard id="gemini">
-            <RepoGeminiSection
-              repoFullName={repoFullName}
-              status={creds?.gemini}
-            />
-          </SettingsCard>
-          <SettingsCard id="aws">
-            <RepoAwsSection repoFullName={repoFullName} status={creds?.aws} />
+          <SettingsCard id="providers">
+            <RepoProviderDirectory repoFullName={repoFullName} creds={creds} />
           </SettingsCard>
           <SettingsCard id="artifacts">
             <RepoArtifactsSection

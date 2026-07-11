@@ -360,24 +360,6 @@ func TestClaudeDriverAvailableCommands(t *testing.T) {
 	}
 }
 
-func TestCodexEventToolCallTranslation(t *testing.T) {
-	var buf bytes.Buffer
-	a := captureEmits(&buf)
-	a.handleCodexEvent([]byte(`{"type":"item.completed","item":{"type":"command_execution","command":"go test ./..."}}`))
-	a.handleCodexEvent([]byte(`{"type":"item.completed","item":{"type":"web_search","query":"acp spec"}}`))
-
-	calls := collectUpdates(t, &buf)
-	if len(calls) != 2 {
-		t.Fatalf("got %d tool calls, want 2", len(calls))
-	}
-	if calls[0].Kind != acp.ToolKindExecute || calls[0].Title != "exec: go test ./..." {
-		t.Errorf("exec call = %+v", calls[0])
-	}
-	if calls[1].Kind != acp.ToolKindFetch || calls[1].Title != "search: acp spec" {
-		t.Errorf("search call = %+v", calls[1])
-	}
-}
-
 func TestACPAgentClaudeTurn(t *testing.T) {
 	binDir := buildFakeClaude(t)
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))

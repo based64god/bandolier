@@ -1,5 +1,12 @@
 import { getUserAnthropicCredentials } from "~/server/agents/anthropic";
 import type { AwsCredentials } from "~/server/agents/aws";
+import {
+  getRepoCustomProviders,
+  getUserCustomProviders,
+  mergeCustomProviders,
+  type CustomProviderCredential,
+} from "~/server/agents/custom-providers";
+import { parseGollmProvider } from "~/server/agents/gollm-catalog";
 import { getUserGeminiKey } from "~/server/agents/gemini";
 import { getUserOpenaiCredentials } from "~/server/agents/openai";
 import { getUserAwsCredentials } from "~/server/agents/user-aws";
@@ -11,6 +18,14 @@ import type { db } from "~/server/db";
  * to it rather than restate the union. Ordered most- to least-preferred in
  * `PROVIDERS` below. */
 export type ProviderName = "bedrock" | "anthropic" | "openai" | "gemini";
+
+/**
+ * A provider a run can route to: the four first-class providers, or a
+ * gollm-proxied one as `gollm:<id>` (see ~/server/agents/gollm-catalog). The
+ * template form keeps the four-way switches exhaustive while letting model
+ * options and deploy inputs carry any catalog provider.
+ */
+export type RunProviderName = ProviderName | `gollm:${string}`;
 
 /** Optional credential kind, for providers that support both a metered API key
  * and a subscription login (Anthropic / OpenAI). */
@@ -46,6 +61,14 @@ export interface ModelCredentials extends ProviderCredentials {
   anthropicOauthToken: string | null;
   /** ChatGPT-subscription auth.json (`codex login`) — user-scoped only. */
   codexAuthJson: string | null;
+  /**
+   * The gollm-proxied provider credentials (Groq, OpenRouter, vLLM, …) —
+   * distinct providers from the four above. The user's own attach to
+   * whichever set wins; a repo's shared ones merge into the repo set (repo
+   * wins per provider id). Optional so hand-built test sets (and older
+   * callers) stay valid; absent means none.
+   */
+  customProviders?: CustomProviderCredential[];
   /** Where the credentials came from — useful for logging / UI. */
   source: "user" | "repo" | "none";
 }
@@ -113,9 +136,14 @@ export function providerForCredentials(
 
 /** Whether a set carries any model credential at all. */
 export function hasModelCredentials(
-  creds: Partial<ProviderCredentials>,
+  creds: Partial<ProviderCredentials> & {
+    customProviders?: CustomProviderCredential[];
+  },
 ): boolean {
-  return providerForCredentials(creds) !== null;
+  return (
+    providerForCredentials(creds) !== null ||
+    (creds.customProviders?.length ?? 0) > 0
+  );
 }
 
 /**
@@ -137,6 +165,11 @@ export async function resolveModelCredentials(
   const userAnthropic = await getUserAnthropicCredentials(database, userId);
   const userOpenai = await getUserOpenaiCredentials(database, userId);
   const userGemini = await getUserGeminiKey(database, userId);
+  // gollm-proxied providers are distinct from the four first-class ones. The
+  // user's own attach to whichever set wins; the repo's shared ones merge into
+  // the repo set (repo wins per provider id, user fills the gaps — mirroring
+  // how the repo's Gemini key falls back to the user's).
+  const userCustom = await getUserCustomProviders(database, userId);
   const userHas =
     !!userAws ||
     !!userAnthropic.apiKey ||
@@ -148,11 +181,19 @@ export async function resolveModelCredentials(
   const repo = repoFullName
     ? await getRepoCredentials(database, repoFullName)
     : null;
+  const repoCustom = repoFullName
+    ? await getRepoCustomProviders(database, repoFullName)
+    : [];
   const repoAws = repo?.aws ?? null;
   const repoAnthropic = repo?.anthropicApiKey ?? null;
   const repoOpenai = repo?.openaiApiKey ?? null;
   const repoGemini = repo?.geminiApiKey ?? null;
-  const repoHas = !!repoAws || !!repoAnthropic || !!repoOpenai || !!repoGemini;
+  const repoHas =
+    !!repoAws ||
+    !!repoAnthropic ||
+    !!repoOpenai ||
+    !!repoGemini ||
+    repoCustom.length > 0;
 
   // AWS Bedrock, an Anthropic key, and a Claude subscription OAuth token are
   // all routes to the same (Claude) models with a precedence between them, so
@@ -171,7 +212,8 @@ export async function resolveModelCredentials(
     openaiApiKey: userOpenai.apiKey,
     codexAuthJson: userOpenai.codexAuthJson,
     geminiApiKey: userGemini,
-    source: userHas ? "user" : "none",
+    customProviders: userCustom,
+    source: userHas || userCustom.length > 0 ? "user" : "none",
   };
   const repoSet: ModelCredentials = {
     // Claude side as one coherent unit: the repo's Claude set when it has one,
@@ -184,6 +226,7 @@ export async function resolveModelCredentials(
     openaiApiKey: repoHasOpenai ? repoOpenai : userOpenai.apiKey,
     codexAuthJson: repoHasOpenai ? null : userOpenai.codexAuthJson,
     geminiApiKey: repoGemini ?? userGemini,
+    customProviders: mergeCustomProviders(repoCustom, userCustom),
     source: repoHas ? "repo" : "none",
   };
 
@@ -221,16 +264,55 @@ export function pickProvider(creds: ModelCredentials): ProviderCredentials {
  */
 export function selectRunCredentials(
   resolved: ModelCredentials,
-  opts: { modelProvider?: ProviderName; modelAuth?: AuthKind } = {},
+  opts: { modelProvider?: RunProviderName; modelAuth?: AuthKind } = {},
 ): ProviderCredentials & {
-  provider: ProviderName | null;
+  provider: RunProviderName | null;
   authKind: AuthKind | null;
+  /** The gollm-proxied credential the run uses, when routed to one. */
+  customProvider: CustomProviderCredential | null;
 } {
+  // A gollm-proxied model routes to its stored credential and nothing else —
+  // the four first-class fields stay empty so the pod gets exactly one
+  // provider's secrets.
+  const gollmId = opts.modelProvider
+    ? parseGollmProvider(opts.modelProvider)
+    : null;
+  if (gollmId) {
+    const customProvider =
+      (resolved.customProviders ?? []).find((c) => c.provider === gollmId) ??
+      null;
+    return {
+      ...NO_CREDENTIALS,
+      provider: customProvider ? opts.modelProvider! : null,
+      authKind: null,
+      customProvider,
+    };
+  }
+
   // A picked provider wins; otherwise fall back to the primary-provider
   // precedence. `pickProvider` already zeroes the non-primary fields, so the
   // fallback also supplies the credentials for that provider.
   const primary = pickProvider(resolved);
-  const provider = opts.modelProvider ?? providerForCredentials(resolved);
+  const provider =
+    (opts.modelProvider as ProviderName | undefined) ??
+    providerForCredentials(resolved) ??
+    // A set holding only gollm-proxied credentials routes to the first one
+    // (mirrors the primary-provider precedence for programmatic clients).
+    (resolved.customProviders?.[0]
+      ? (`gollm:${resolved.customProviders[0].provider}` as const)
+      : null);
+  if (typeof provider === "string" && provider.startsWith("gollm:")) {
+    const gollmFallback =
+      (resolved.customProviders ?? []).find(
+        (c) => c.provider === parseGollmProvider(provider),
+      ) ?? null;
+    return {
+      ...NO_CREDENTIALS,
+      provider: gollmFallback ? provider : null,
+      authKind: null,
+      customProvider: gollmFallback,
+    };
+  }
 
   const wantSubscription = opts.modelAuth === "subscription";
   const wantApiKey = opts.modelAuth === "api_key";
@@ -283,5 +365,6 @@ export function selectRunCredentials(
     openaiApiKey,
     codexAuthJson,
     geminiApiKey,
+    customProvider: null,
   };
 }

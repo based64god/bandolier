@@ -12,11 +12,16 @@ import { parseAwsCredentials } from "~/app/dashboard/_components/parse-aws";
 import { api } from "~/trpc/react";
 
 // The user-scoped model-provider credential sections (Anthropic, OpenAI,
-// Gemini, AWS Bedrock), one card each on the settings page's "Model providers"
-// panel. Repo-scoped overrides live on the repo settings page and share the
-// same credential-ui primitives.
+// Gemini, AWS Bedrock). Each is a card body in the settings page's provider
+// directory; the directory's card header renders the provider name, so the
+// sections omit their own heading via `hideHeading`. Repo-scoped overrides live
+// on the repo settings page and share the same credential-ui primitives.
 
-export function AnthropicSection() {
+/** Shared props: the provider directory owns the card header, so the section
+ * suppresses its own heading. */
+type SectionProps = { hideHeading?: boolean };
+
+export function AnthropicSection({ hideHeading }: SectionProps = {}) {
   const utils = api.useUtils();
   const { data: status } = api.account.anthropicStatus.useQuery();
   const [apiKey, setApiKey] = useState("");
@@ -44,7 +49,9 @@ export function AnthropicSection() {
 
   return (
     <div className="space-y-3">
-      <h3 className="text-sm font-semibold text-purple-300">Anthropic</h3>
+      {!hideHeading && (
+        <h3 className="text-sm font-semibold text-purple-300">Anthropic</h3>
+      )}
 
       {/* API key */}
       <p className="text-xs text-white/50">API key</p>
@@ -126,7 +133,7 @@ export function AnthropicSection() {
   );
 }
 
-export function OpenAISection() {
+export function OpenAISection({ hideHeading }: SectionProps = {}) {
   const utils = api.useUtils();
   const { data: status } = api.account.openaiStatus.useQuery();
   const [apiKey, setApiKey] = useState("");
@@ -153,7 +160,9 @@ export function OpenAISection() {
 
   return (
     <div className="space-y-3">
-      <h3 className="text-sm font-semibold text-teal-300">OpenAI</h3>
+      {!hideHeading && (
+        <h3 className="text-sm font-semibold text-teal-300">OpenAI</h3>
+      )}
 
       {/* API key */}
       <p className="text-xs text-white/50">API key</p>
@@ -237,7 +246,7 @@ export function OpenAISection() {
   );
 }
 
-export function GeminiSection() {
+export function GeminiSection({ hideHeading }: SectionProps = {}) {
   const utils = api.useUtils();
   const { data: status } = api.account.geminiStatus.useQuery();
   const [credentials, setCredentials] = useState("");
@@ -257,9 +266,11 @@ export function GeminiSection() {
 
   return (
     <div className="space-y-3">
-      <h3 className="text-sm font-semibold text-blue-300">
-        Gemini (Google Cloud project credentials)
-      </h3>
+      {!hideHeading && (
+        <h3 className="text-sm font-semibold text-blue-300">
+          Gemini (Google Cloud project credentials)
+        </h3>
+      )}
 
       {status?.configured && (
         <MaskedCredentialRow
@@ -319,7 +330,7 @@ export function GeminiSection() {
   );
 }
 
-export function AwsSection() {
+export function AwsSection({ hideHeading }: SectionProps = {}) {
   const utils = api.useUtils();
   const { data: status } = api.account.awsStatus.useQuery();
 
@@ -358,9 +369,11 @@ export function AwsSection() {
 
   return (
     <div className="space-y-3">
-      <h3 className="text-sm font-semibold text-orange-300">
-        AWS Bedrock credentials
-      </h3>
+      {!hideHeading && (
+        <h3 className="text-sm font-semibold text-orange-300">
+          AWS Bedrock credentials
+        </h3>
+      )}
 
       {status?.configured && (
         <MaskedCredentialRow

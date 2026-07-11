@@ -176,10 +176,10 @@ export interface JobSpec {
   branch: string;
   model: string;
   /**
-   * Reasoning-effort level for the run (low|medium|high|xhigh|max), passed to the
-   * `claude` CLI as --effort. Only applies to the Claude providers (Anthropic /
-   * Bedrock); callers must not set it for OpenAI/Gemini runs, whose CLIs ignore
-   * it. Unset = the harness/CLI default.
+   * Reasoning-effort level for the run (low|medium|high|xhigh|max), passed to
+   * the `claude` CLI as --effort. Applies to every provider — non-Anthropic
+   * backends get the thinking budget mapped by the harness's embedded proxy.
+   * Unset = the harness/CLI default.
    */
   effort?: string;
   maxTurns?: number;
@@ -268,24 +268,35 @@ export interface JobSpec {
    */
   anthropicOauthToken?: string;
   /**
-   * The acting user's OpenAI API key. Used when an OpenAI model is selected; the
-   * harness runs these through the OpenAI Codex CLI.
+   * The acting user's OpenAI API key. Used when an OpenAI model is selected;
+   * routed through the embedded gollm proxy's `openai` backend (injected as
+   * OPENAI_API_KEY).
    */
   openaiApiKey?: string;
   /**
    * The acting user's ChatGPT-subscription auth (contents of `codex login`'s
-   * ~/.codex/auth.json). An alternative to `openaiApiKey`; injected as
-   * CODEX_AUTH_JSON and materialized by the harness at ~/.codex/auth.json.
+   * ~/.codex/auth.json). An alternative to `openaiApiKey`; routed through the
+   * proxy's `chatgpt` backend, which reads it inline (injected as
+   * CODEX_AUTH_JSON — no file is written in the pod).
    */
   codexAuthJson?: string;
   /**
-   * The acting user's Google Cloud project credentials JSON (service-account key
-   * or ADC). Used when a Gemini model is selected; the harness runs these through
-   * the Antigravity CLI (agy), which authenticates against the project via
-   * Application Default Credentials. Injected as GOOGLE_PROJECT_CREDENTIALS and
-   * written to ~/.gemini/credentials.json in the harness.
+   * The acting user's Google Cloud project credentials JSON (service-account
+   * key). Used when a Gemini model is selected; routed through the proxy's
+   * `vertex` backend, which reads the key inline (injected as
+   * GOOGLE_APPLICATION_CREDENTIALS_JSON) and derives the project id from it.
    */
   geminiApiKey?: string;
+  /**
+   * A gollm-proxied provider credential (Groq, OpenRouter, vLLM, … — see
+   * ~/server/agents/gollm-catalog): the provider id plus the env vars the pod
+   * needs, already mapped from the stored credential. The harness routes the
+   * run through its embedded proxy with this provider as the backend.
+   */
+  customProvider?: {
+    provider: string;
+    env: Record<string, string>;
+  };
   /** The acting user's kubeconfig — the cluster the agent is deployed into. Required. */
   kubeconfig: string;
   /**
@@ -387,10 +398,8 @@ function pdbName(jobName: string): string {
  * out of sync the way the two hand-kept copies used to.
  */
 export interface ProviderDescriptor {
-  type: "bedrock" | "anthropic" | "openai" | "gemini";
+  type: "bedrock" | "anthropic" | "openai" | "gemini" | "custom";
   model: string;
-  /** Whether this is a Claude provider (Bedrock / Anthropic) — gates --effort. */
-  isClaude: boolean;
   /** Non-secret provider env vars (e.g. CLAUDE_CODE_USE_BEDROCK, AWS_REGION). */
   plainEnv: EnvVar[];
   /**
@@ -412,6 +421,16 @@ export interface ProviderDescriptor {
  */
 export function resolveProvider(spec: JobSpec): ProviderDescriptor {
   const model = spec.model;
+
+  // A catalog custom provider carries its own env mapping and gollm backend id.
+  if (spec.customProvider) {
+    return proxiedProvider(
+      "custom",
+      model,
+      spec.customProvider.provider,
+      spec.customProvider.env,
+    );
+  }
 
   // Route by the single provider precedence the registry defines, so this
   // path can't drift from the resolver. The spec spells the Bedrock field
@@ -437,7 +456,6 @@ export function resolveProvider(spec: JobSpec): ProviderDescriptor {
     return {
       type: "bedrock",
       model,
-      isClaude: true,
       plainEnv: [
         { name: "CLAUDE_CODE_USE_BEDROCK", value: "1" },
         { name: "AWS_REGION", value: aws.region },
@@ -463,7 +481,6 @@ export function resolveProvider(spec: JobSpec): ProviderDescriptor {
     return {
       type: "anthropic",
       model,
-      isClaude: true,
       plainEnv: [],
       secretRefs: [{ key }],
       secretData: { [key]: value },
@@ -471,39 +488,53 @@ export function resolveProvider(spec: JobSpec): ProviderDescriptor {
   }
 
   if (provider === "openai") {
-    // The harness writes CODEX_AUTH_JSON to ~/.codex/auth.json for
-    // ChatGPT-subscription auth; the API key takes precedence over it.
-    const [key, value] = spec.openaiApiKey
-      ? (["OPENAI_API_KEY", spec.openaiApiKey] as const)
-      : (["CODEX_AUTH_JSON", spec.codexAuthJson!] as const);
-    return {
-      type: "openai",
-      model,
-      isClaude: false,
-      plainEnv: [],
-      secretRefs: [{ key }],
-      secretData: { [key]: value },
-    };
+    // OpenAI is proxied like every non-native provider: the harness routes its
+    // embedded gollm proxy by BANDOLIER_LLM_PROVIDER. An API key uses gollm's
+    // `openai` backend; the ChatGPT-subscription auth.json (from `codex login`)
+    // uses the `chatgpt` backend, which reads CODEX_AUTH_JSON inline. The key
+    // takes precedence.
+    const [backend, key, value] = spec.openaiApiKey
+      ? (["openai", "OPENAI_API_KEY", spec.openaiApiKey] as const)
+      : (["chatgpt", "CODEX_AUTH_JSON", spec.codexAuthJson!] as const);
+    return proxiedProvider("openai", model, backend, { [key]: value });
   }
 
   if (provider === "gemini") {
-    // agy (Antigravity CLI) authenticates via Application Default Credentials;
-    // the harness writes this project credentials JSON to
-    // ~/.gemini/credentials.json.
-    return {
-      type: "gemini",
-      model,
-      isClaude: false,
-      plainEnv: [],
-      secretRefs: [{ key: "GOOGLE_PROJECT_CREDENTIALS" }],
-      secretData: { GOOGLE_PROJECT_CREDENTIALS: spec.geminiApiKey! },
-    };
+    // Gemini runs against Vertex AI through the proxy's `vertex` backend, which
+    // reads the service-account key JSON inline from
+    // GOOGLE_APPLICATION_CREDENTIALS_JSON (the project id is derived from the
+    // key itself). No file is written in the pod.
+    return proxiedProvider("gemini", model, "vertex", {
+      GOOGLE_APPLICATION_CREDENTIALS_JSON: spec.geminiApiKey!,
+    });
   }
 
   // Only user-provided credentials are ever used — there is no server fallback.
   throw new Error(
     "No model credentials available. Configure AWS, Anthropic, OpenAI, or Gemini credentials in account settings.",
   );
+}
+
+/**
+ * Builds a descriptor for a proxied provider: BANDOLIER_LLM_PROVIDER names the
+ * gollm backend the harness routes to, and every credential env var becomes a
+ * per-job secret ref. Shared by the OpenAI/Gemini paths and the generic
+ * custom-provider path (which they now match — the harness treats all three
+ * identically).
+ */
+function proxiedProvider(
+  type: ProviderDescriptor["type"],
+  model: string,
+  backend: string,
+  env: Record<string, string>,
+): ProviderDescriptor {
+  return {
+    type,
+    model,
+    plainEnv: [{ name: "BANDOLIER_LLM_PROVIDER", value: backend }],
+    secretRefs: Object.keys(env).map((key) => ({ key })),
+    secretData: env,
+  };
 }
 
 /**
@@ -547,10 +578,11 @@ export function buildEnvVars(
     name: "MAX_TURNS",
     value: String(spec.maxTurns ?? DEFAULT_MAX_TURNS),
   });
-  // Reasoning effort is Claude-only (the `claude` CLI's --effort). Only forward it
-  // on a Claude provider run; the Codex/Antigravity CLIs don't take it. The
-  // harness validates the value and ignores an unknown one.
-  if (spec.effort && provider.isClaude) {
+  // Reasoning effort (the `claude` CLI's --effort). Every provider runs through
+  // the claude CLI — the harness's embedded proxy maps the thinking budget for
+  // non-Anthropic backends — so the value is forwarded unconditionally. The
+  // harness validates it and ignores an unknown one.
+  if (spec.effort) {
     envVars.push({ name: "CLAUDE_EFFORT", value: spec.effort });
   }
   if (spec.prWriterModel) {

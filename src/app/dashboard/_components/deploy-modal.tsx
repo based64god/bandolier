@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useReducer, useRef, useState } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 
 import {
   buildIssueSystemPrompt,
@@ -171,6 +171,16 @@ export function DeployModal({
   } = api.models.list.useQuery({ repoFullName });
   const models = modelData?.models ?? [];
 
+  // gollm-proxied providers share one badge; their label comes from the
+  // catalog, keyed by the `gollm:<id>` provider name the picker uses.
+  const { data: providerCatalog } =
+    api.account.customProviderCatalog.useQuery();
+  const providerLabels = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const c of providerCatalog ?? []) map[`gollm:${c.id}`] = c.label;
+    return map;
+  }, [providerCatalog]);
+
   // Per-browser preferred model. Used purely as a dashboard default; never sent
   // to the server, so webhook-spawned tasks are unaffected.
   const [preferredModel, setPreferredModel] = usePreferredModel();
@@ -254,8 +264,8 @@ export function DeployModal({
         {/* No-provider warning */}
         {providerInfo?.provider === "none" && (
           <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
-            No provider configured. Add an Anthropic, OpenAI, or Bedrock
-            credential in settings first.
+            No provider configured. Add a model provider credential in settings
+            first.
           </p>
         )}
 
@@ -416,7 +426,11 @@ export function DeployModal({
                   label: (
                     <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
                       <span className="truncate text-white">{m.label}</span>
-                      <ProviderTag provider={m.provider} auth={m.auth} />
+                      <ProviderTag
+                        provider={m.provider}
+                        auth={m.auth}
+                        label={providerLabels?.[m.provider]}
+                      />
                     </span>
                   ),
                 }))}

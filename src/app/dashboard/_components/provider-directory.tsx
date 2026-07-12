@@ -31,6 +31,12 @@ export interface ProviderEntry {
   /** Extra search terms (aliases, backend id) beyond the label. */
   keywords?: string;
   /**
+   * A concise "credential shape" subtitle shown under the label in the
+   * collapsed row (e.g. "Access key + secret + region"), so the kind of
+   * credential a provider expects is legible without expanding the card.
+   */
+  hint?: string;
+  /**
    * Discoverability weight for the unconfigured group only (higher sorts
    * earlier). Keeps the common providers near the top of a fresh list without a
    * separate visual tier — every entry is the same kind of card. Default 0.
@@ -104,8 +110,15 @@ export function ProviderDirectory({
                     entry.configured ? ACCENT_DOT[entry.accent] : "bg-white/15"
                   }`}
                 />
-                <span className="flex-1 truncate text-sm text-white">
-                  {entry.label}
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span className="truncate text-sm text-white">
+                    {entry.label}
+                  </span>
+                  {entry.hint && (
+                    <span className="truncate text-xs text-white/40">
+                      {entry.hint}
+                    </span>
+                  )}
                 </span>
                 {entry.configured && (
                   <span className="shrink-0 rounded border border-green-500/30 bg-green-500/10 px-1.5 py-0.5 text-[10px] text-green-300">

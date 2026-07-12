@@ -40,16 +40,12 @@ on:
       - ".npmrc"
       - "patches/**"
       - ".github/workflows/self-host-image.yml"
+  # No path filter on PRs: this build is a required merge-gate check, and a
+  # path-filtered required check would deadlock PRs that don't touch these paths.
+  # The build is cache-accelerated (type=gha) and layers on the published
+  # agent-harness:latest; the push filter above keeps main-branch publishing
+  # change-scoped.
   pull_request:
-    paths:
-      - "self-host/**"
-      - "agent-harness/**"
-      - "package.json"
-      - "pnpm-lock.yaml"
-      - "pnpm-workspace.yaml"
-      - ".npmrc"
-      - "patches/**"
-      - ".github/workflows/self-host-image.yml"
 
 # Serialize main builds so a workflow_run build (fresh harness) supersedes an
 # in-flight push build of the same ref. Without this, a single commit touching
@@ -66,6 +62,7 @@ env:
 
 jobs:
   build-and-push:
+    name: Self-host image
     # Don't rebuild on a failed/cancelled harness run.
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest

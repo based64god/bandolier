@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import {
   collectSubagentNarration,
@@ -18,7 +18,10 @@ import { Modal } from "./modal";
 // their results live on in the conversation's tool tree. Renders nothing until a
 // subagent actually narrates, so ordinary sessions are unaffected.
 export function SubagentPanel({ items }: { items: TimelineItem[] }) {
-  const narration = collectSubagentNarration(items);
+  // Recompute only when the timeline changes, not on every parent poll re-render
+  // (the interactive row re-renders on each 1.5s frame pull and on scroll/focus
+  // bumps); collecting narration is O(n) over the whole timeline.
+  const narration = useMemo(() => collectSubagentNarration(items), [items]);
   const [open, setOpen] = useState(false);
 
   const running = narration.filter((n) => !isSubagentDone(n.status));

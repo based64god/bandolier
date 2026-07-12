@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   groupTimeline,
@@ -79,6 +79,12 @@ export function Conversation({
     if (scrollSignal) scrollToBottom();
   }, [scrollSignal, scrollToBottom]);
 
+  // Derive the render groups once per timeline change, not on every scroll
+  // event (onScroll flips `pinned`, re-rendering often): grouping + tool-tree
+  // building is O(n) over the whole accumulated timeline, which grows large in
+  // subagent/background sessions.
+  const groups = useMemo(() => groupTimeline(items), [items]);
+
   return (
     // Grow to fill the expanded session's flex column; `min-h-0` overrides the
     // default `min-height: auto` so this can shrink below its content and hand a
@@ -100,7 +106,7 @@ export function Conversation({
             {running ? "Waiting for output…" : "No transcript."}
           </span>
         ) : (
-          groupTimeline(items).map((group) =>
+          groups.map((group) =>
             group.type === "tools" ? (
               <ToolGroup key={group.id} nodes={group.nodes} />
             ) : (

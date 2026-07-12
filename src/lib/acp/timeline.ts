@@ -302,15 +302,26 @@ export type TimelineGroup =
     };
 
 /**
+ * Cap on how deep the tool tree nests. Real subagent nesting is only a few
+ * levels; this bound exists purely so a pathological parent chain (e.g. reused
+ * tool-call ids chaining parent→child) can't build a tree thousands deep whose
+ * recursive render/count walk overflows the call stack. Set far above any
+ * genuine nesting so normal sessions are unaffected.
+ */
+const MAX_TOOL_TREE_DEPTH = 25;
+
+/**
  * Nests a run of tool calls into a forest: a call whose parentToolCallId matches
  * an earlier call's toolCallId becomes that call's child (a subagent's calls
- * under their spawn), at arbitrary depth. Calls with no in-run parent — main
+ * under their spawn), up to MAX_TOOL_TREE_DEPTH. Calls with no in-run parent — main
  * agent calls, and orphans whose parent isn't in this run — stay roots, so
  * nothing is dropped. Grouping by id (not adjacency) is what survives parallel
  * subagents interleaving their calls on one stream.
  */
 export function buildToolTree(items: ToolItem[]): ToolNode[] {
   const byId = new Map<string, ToolNode>();
+  // Each node's depth from its root, so the nesting can be depth-capped below.
+  const depthOf = new Map<ToolNode, number>();
   const roots: ToolNode[] = [];
   for (const item of items) {
     const node: ToolNode = { item, children: [] };
@@ -318,8 +329,20 @@ export function buildToolTree(items: ToolItem[]): ToolNode[] {
     const parent = item.parentToolCallId
       ? byId.get(item.parentToolCallId)
       : undefined;
-    if (parent) parent.children.push(node);
-    else roots.push(node);
+    // Nest under an in-run parent, but never past MAX_TOOL_TREE_DEPTH: reused
+    // tool-call ids that chain parent→child would otherwise build a tree
+    // thousands deep, and the recursive walk that renders it (ToolNodeRow) and
+    // counts it (countNodes) would overflow the stack and crash the whole
+    // conversation. Past the cap the call re-roots so it still renders — just
+    // un-nested — rather than deepening the tree without bound.
+    const parentDepth = parent ? (depthOf.get(parent) ?? 0) : -1;
+    if (parent && parentDepth < MAX_TOOL_TREE_DEPTH) {
+      parent.children.push(node);
+      depthOf.set(node, parentDepth + 1);
+    } else {
+      roots.push(node);
+      depthOf.set(node, 0);
+    }
   }
   return roots;
 }

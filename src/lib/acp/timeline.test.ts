@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyFrames,
   batchAwaitsInput,
+  buildToolTree,
   collectSubagentNarration,
   END_SESSION_FRAME,
   isSubagentDone,
@@ -10,7 +11,32 @@ import {
   promptFrame,
   type RawAcpFrame,
   type TimelineItem,
+  type ToolItem,
+  type ToolNode,
 } from "./timeline";
+
+// Iterative depth/count so these probes never overflow themselves, even if the
+// tree under test were pathologically deep (the very failure they guard against).
+function treeDepth(nodes: ToolNode[]): number {
+  let max = 0;
+  const stack = nodes.map((node) => ({ node, d: 1 }));
+  while (stack.length) {
+    const { node, d } = stack.pop()!;
+    if (d > max) max = d;
+    for (const c of node.children) stack.push({ node: c, d: d + 1 });
+  }
+  return max;
+}
+function treeCount(nodes: ToolNode[]): number {
+  let n = 0;
+  const stack = [...nodes];
+  while (stack.length) {
+    const node = stack.pop()!;
+    n++;
+    for (const c of node.children) stack.push(c);
+  }
+  return n;
+}
 
 function promptResult(id: number, stopReason: string): string {
   return JSON.stringify({ jsonrpc: "2.0", id, result: { stopReason } });
@@ -628,6 +654,67 @@ describe("groupTimeline", () => {
     if (g?.type !== "tools") throw new Error("expected tools group");
     expect(g.nodes).toHaveLength(1);
     expect(g.nodes[0]!.item.toolCallId).toBe("sub1");
+  });
+});
+
+describe("buildToolTree depth cap", () => {
+  it("keeps genuine nesting intact (well under the cap)", () => {
+    const item = (
+      id: string,
+      toolCallId: string,
+      parentToolCallId?: string,
+    ): ToolItem => ({
+      type: "tool",
+      id,
+      toolCallId,
+      parentToolCallId,
+      kind: parentToolCallId ? "read" : "subagent",
+      title: id,
+      status: "pending",
+    });
+    const roots = buildToolTree([
+      item("t1", "a0"),
+      item("t2", "a1", "a0"),
+      item("t3", "leaf", "a1"),
+    ]);
+    expect(treeDepth(roots)).toBe(3);
+    expect(treeCount(roots)).toBe(3);
+  });
+
+  it("bounds depth for a reused-id parent chain so the render walk can't overflow", () => {
+    // A pathological run a background workflow could produce: two tool-call ids
+    // reused forever, each call parented on the previous. Without a cap this
+    // builds a tree thousands deep and the recursive render (ToolNodeRow) /
+    // count (countNodes) walk blows the stack — crashing the whole conversation.
+    const items: ToolItem[] = [
+      {
+        type: "tool",
+        id: "t-0",
+        toolCallId: "A",
+        kind: "execute",
+        title: "root",
+        status: "pending",
+      },
+    ];
+    let prev = "A";
+    for (let i = 1; i < 4000; i++) {
+      const toolCallId = i % 2 === 0 ? "A" : "B";
+      items.push({
+        type: "tool",
+        id: `t-${i}`,
+        toolCallId,
+        parentToolCallId: prev,
+        kind: "execute",
+        title: `step ${i}`,
+        status: "pending",
+      });
+      prev = toolCallId;
+    }
+    const roots = buildToolTree(items);
+    // Depth is bounded (cap + 1); the recursive render/count walk stays shallow.
+    expect(treeDepth(roots)).toBeLessThanOrEqual(26);
+    // Nothing is dropped — every call still appears somewhere in the forest.
+    expect(treeCount(roots)).toBe(4000);
   });
 });
 

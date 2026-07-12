@@ -7,6 +7,7 @@ import type { RouterOutputs } from "~/trpc/react";
 import { expiresAtLocal, taskNameLabel, taskNameTooltip } from "./agent-ui";
 import { Conversation, SessionHeader } from "./conversation";
 import { SubagentPanel } from "./subagent-panel";
+import { SessionErrorBoundary } from "./session-error-boundary";
 import { OutputBadge, SourceBadge } from "./output-badge";
 import { SessionComposer } from "./session-composer";
 import { StatusBadge } from "./status-badge";
@@ -564,14 +565,30 @@ export function InteractiveRow({
               <div className="shrink-0">
                 <SessionHeader podName={agent.name} tokens={agent.tokens} />
               </div>
-              <div className="shrink-0">
-                <SubagentPanel items={session.items} />
-              </div>
-              <Conversation
-                items={session.items}
-                running={running}
-                scrollSignal={scrollBump}
-              />
+              {/* Isolate the live transcript so a malformed frame degrades to
+                  an inline notice instead of unmounting the whole dashboard —
+                  the composer below stays mounted, so messages can still be
+                  sent. Keyed on the item count so a new batch clears a caught
+                  error and re-attempts the render. */}
+              <SessionErrorBoundary
+                resetKey={session.items.length}
+                fallback={
+                  <div className="flex min-h-0 flex-1 items-center justify-center bg-black/30 px-6 text-center text-sm text-white/40">
+                    This session&apos;s transcript couldn&apos;t be rendered.
+                    You can still send messages below; reopen the session to
+                    retry.
+                  </div>
+                }
+              >
+                <div className="shrink-0">
+                  <SubagentPanel items={session.items} />
+                </div>
+                <Conversation
+                  items={session.items}
+                  running={running}
+                  scrollSignal={scrollBump}
+                />
+              </SessionErrorBoundary>
               <div className="shrink-0">
                 <SessionComposer
                   running={running}

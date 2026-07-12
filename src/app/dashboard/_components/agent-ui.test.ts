@@ -5,6 +5,7 @@ import {
   explainFailure,
   isAgentDone,
   isAgentOutputResolved,
+  isAgentResolved,
   SPINNER_STATUSES,
   STATUS_ICON_PATHS,
   STATUS_STYLES,
@@ -284,6 +285,43 @@ describe("isAgentOutputResolved", () => {
         createdIssueState: "open",
       }),
     ).toBe(false);
+  });
+});
+
+describe("isAgentResolved", () => {
+  const base = {
+    status: "Succeeded",
+    expired: false,
+    pullRequestUrl: null,
+    pullRequestState: null,
+    createdIssueUrl: null,
+    createdIssueState: null,
+  };
+
+  it("resolves a succeeded task that has expired, even without GitHub output", () => {
+    expect(isAgentResolved({ ...base, expired: true })).toBe(true);
+  });
+
+  it("does not resolve a succeeded task that is still live", () => {
+    expect(isAgentResolved({ ...base, expired: false })).toBe(false);
+  });
+
+  it("does not resolve a non-succeeded task just because it expired", () => {
+    expect(isAgentResolved({ ...base, status: "Failed", expired: true })).toBe(
+      false,
+    );
+  });
+
+  it("still resolves via terminal GitHub output when not succeeded-and-expired", () => {
+    expect(
+      isAgentResolved({
+        ...base,
+        status: "Running",
+        expired: false,
+        pullRequestUrl: "https://github.com/o/r/pull/1",
+        pullRequestState: "merged",
+      }),
+    ).toBe(true);
   });
 });
 

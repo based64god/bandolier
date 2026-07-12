@@ -86,6 +86,25 @@ export function isAgentOutputResolved(agent: {
 }
 
 /**
+ * Whether a task counts as "resolved" for the "Hide resolved" table filter.
+ * That's either its output having reached a terminal state on GitHub (see
+ * `isAgentOutputResolved`), or a task that succeeded and has since expired: its
+ * pod is gone (Job TTL) and there's nothing left to act on, so it's just as done
+ * as a merged PR even when it produced no GitHub output to resolve.
+ */
+export function isAgentResolved(agent: {
+  status: string;
+  expired: boolean;
+  pullRequestUrl: string | null;
+  pullRequestState: GithubItemState | null;
+  createdIssueUrl: string | null;
+  createdIssueState: GithubItemState | null;
+}): boolean {
+  if (agent.status === "Succeeded" && agent.expired) return true;
+  return isAgentOutputResolved(agent);
+}
+
+/**
  * The text to show in the hover tooltip for a task's name cell. The cell renders
  * `displayName`, which for an ad-hoc task is only a 60-char preview of the prompt
  * (server-truncated with an ellipsis) — so on hover we surface the full prompt

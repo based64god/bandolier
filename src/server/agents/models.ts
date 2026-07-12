@@ -14,7 +14,10 @@ import {
   gollmProviderName,
 } from "~/server/agents/custom-providers";
 import { listGeminiModels as fetchGeminiModels } from "~/server/agents/gemini";
-import { parseGollmProvider } from "~/server/agents/gollm-catalog";
+import {
+  gollmProviderInfo,
+  parseGollmProvider,
+} from "~/server/agents/gollm-catalog";
 import { listOpenaiModels as fetchOpenaiModels } from "~/server/agents/openai";
 import {
   type RunProviderName,
@@ -247,13 +250,16 @@ export async function listModelsForUser(
   // gollm-proxied providers: an OpenAI-compatible GET /models where the
   // catalog knows one, else (or on failure) the user-supplied model list.
   for (const custom of creds.customProviders ?? []) {
+    const provider = gollmProviderName(custom.provider);
+    // Subscription-style backends (GitHub Copilot) badge their models like the
+    // Anthropic/OpenAI subscription options.
+    const auth = gollmProviderInfo(custom.provider)?.subscription
+      ? ("subscription" as const)
+      : undefined;
     tasks.push({
-      provider: gollmProviderName(custom.provider),
+      provider,
       run: listCustomProviderModels(custom).then((models) =>
-        models.map((m) => ({
-          ...m,
-          provider: gollmProviderName(custom.provider),
-        })),
+        models.map((m) => ({ ...m, provider, ...(auth ? { auth } : {}) })),
       ),
     });
   }
@@ -356,6 +362,24 @@ export function pickLatestGeminiFlash(
   );
 }
 
+// Cheap-model name markers used to pick a gollm PR writer — the catalog has no
+// per-provider family heuristic, so fall back to models whose id/label advertises
+// a small/fast variant. Bounded tokens so a general chat model isn't misread.
+const CHEAP_MODEL =
+  /(?:^|[-_/.:])(?:mini|flash|small|lite|nano|tiny|haiku|instant)(?:[-_/.:]|$)/i;
+
+/**
+ * The gollm analogue of the per-family pickers: the latest obviously-cheaper
+ * model in a list (a "mini"/"flash"/"small"/… variant). Used to write PR copy
+ * out-of-band of the task model for gollm-proxied runs. Returns undefined when
+ * the list has no such model (the harness then uses the task model itself).
+ */
+export function pickCheapModel(models: ModelOption[]): string | undefined {
+  return latestByVersion(
+    models.filter((m) => CHEAP_MODEL.test(m.id) || CHEAP_MODEL.test(m.label)),
+  );
+}
+
 /**
  * Picks the out-of-band PR-writer model for a run: the cheap same-provider model
  * that writes the PR title/description from the commits — the latest Sonnet for
@@ -381,9 +405,11 @@ export function pickPrWriterModel(
       m.provider === selected.provider &&
       (m.auth === undefined || m.auth === selected.auth),
   );
-  // gollm-proxied providers have no cheap-model heuristic; the harness falls
-  // back to writing PR copy with the task model itself.
-  if (parseGollmProvider(selected.provider)) return undefined;
+  // gollm-proxied providers: pick a cheaper same-provider model where the
+  // listing advertises one; else undefined and the harness writes PR copy with
+  // the task model itself. Same provider ⇒ same credentials, so any of its
+  // models is invocable.
+  if (parseGollmProvider(selected.provider)) return pickCheapModel(candidates);
   switch (selected.provider) {
     case "openai":
       return pickLatestGptMini(candidates);

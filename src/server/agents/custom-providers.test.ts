@@ -6,6 +6,7 @@ import {
   listCustomProviderModels,
   mergeCustomProviders,
   normalizeCustomProviderInput,
+  testCustomProviderCredential,
   validateCustomProviderInput,
   type CustomProviderCredential,
 } from "~/server/agents/custom-providers";
@@ -362,6 +363,44 @@ describe("listCustomProviderModels", () => {
     ]);
   });
 
+  it("drops non-chat models (embeddings, rerankers, speech) from the listing", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [
+            { id: "llama-3.3-70b-instruct" },
+            { id: "text-embedding-3-large" },
+            { id: "bge-reranker-v2" },
+            { id: "whisper-large-v3" },
+            { id: "mixtral-8x7b" },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+    const models = await listCustomProviderModels(cred("groq", "gsk"));
+    expect(models.map((m) => m.id)).toEqual([
+      "llama-3.3-70b-instruct",
+      "mixtral-8x7b",
+    ]);
+  });
+
+  it("keeps the raw list when filtering would leave nothing (an all-embeddings provider)", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [{ id: "text-embedding-3-large" }, { id: "bge-m3" }],
+        }),
+        { status: 200 },
+      ),
+    );
+    const models = await listCustomProviderModels(cred("groq", "gsk"));
+    expect(models.map((m) => m.id)).toEqual([
+      "text-embedding-3-large",
+      "bge-m3",
+    ]);
+  });
+
   it("falls back to stored models when the endpoint fails", async () => {
     vi.spyOn(global, "fetch").mockResolvedValue(
       new Response("nope", { status: 500 }),
@@ -464,5 +503,46 @@ describe("gollmProviderEnv", () => {
         extraEnv: { A: "", B: "keep" },
       }),
     ).toEqual({ B: "keep" });
+  });
+});
+
+describe("testCustomProviderCredential", () => {
+  beforeEach(() => probeApiKeyFn.mockReset());
+
+  it("probes a listable hosted provider and returns the probe result", async () => {
+    probeApiKeyFn.mockResolvedValue({ valid: true });
+    const r = await testCustomProviderCredential(cred("groq", "gsk"));
+    expect(probeApiKeyFn).toHaveBeenCalledWith(
+      "https://api.groq.com/openai/v1/models",
+      { Authorization: "Bearer gsk" },
+      "Groq",
+    );
+    expect(r).toEqual({ valid: true });
+  });
+
+  it("surfaces a failing probe", async () => {
+    probeApiKeyFn.mockResolvedValue({
+      valid: false,
+      error: "API key is invalid.",
+    });
+    const r = await testCustomProviderCredential(cred("groq", "bad"));
+    expect(r).toEqual({ valid: false, error: "API key is invalid." });
+  });
+
+  it("reports a self-hosted provider as valid without a live probe", async () => {
+    const r = await testCustomProviderCredential({
+      provider: "hosted_vllm",
+      apiKey: "vk",
+      apiBase: "http://box:8000/v1",
+      extraEnv: null,
+      models: null,
+    });
+    expect(probeApiKeyFn).not.toHaveBeenCalled();
+    expect(r).toEqual({ valid: true });
+  });
+
+  it("rejects an unknown provider", async () => {
+    const r = await testCustomProviderCredential(cred("nope", "x"));
+    expect(r.valid).toBe(false);
   });
 });

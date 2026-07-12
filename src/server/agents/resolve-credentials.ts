@@ -63,9 +63,9 @@ export interface ModelCredentials extends ProviderCredentials {
   codexAuthJson: string | null;
   /**
    * The gollm-proxied provider credentials (Groq, OpenRouter, vLLM, …) —
-   * distinct providers from the four above. The user's own attach to
-   * whichever set wins; a repo's shared ones merge into the repo set (repo
-   * wins per provider id). Optional so hand-built test sets (and older
+   * distinct providers from the four above. The user's own and a repo's shared
+   * ones are merged into a union on whichever set wins (the winner per shared
+   * id follows which set wins). Optional so hand-built test sets (and older
    * callers) stay valid; absent means none.
    */
   customProviders?: CustomProviderCredential[];
@@ -165,10 +165,12 @@ export async function resolveModelCredentials(
   const userAnthropic = await getUserAnthropicCredentials(database, userId);
   const userOpenai = await getUserOpenaiCredentials(database, userId);
   const userGemini = await getUserGeminiKey(database, userId);
-  // gollm-proxied providers are distinct from the four first-class ones. The
-  // user's own attach to whichever set wins; the repo's shared ones merge into
-  // the repo set (repo wins per provider id, user fills the gaps — mirroring
-  // how the repo's Gemini key falls back to the user's).
+  // gollm-proxied providers are per-provider-id independent (unlike the four
+  // first-class credentials, which move as a unit), so the repo's shared ones
+  // and the user's own are merged into a union on BOTH sets — the winner per
+  // shared id follows which set wins (user-preferred: user wins; repo-preferred:
+  // repo wins). This keeps a repo's shared Groq key available even when the
+  // user's first-class credentials win the set.
   const userCustom = await getUserCustomProviders(database, userId);
   const userHas =
     !!userAws ||
@@ -212,7 +214,9 @@ export async function resolveModelCredentials(
     openaiApiKey: userOpenai.apiKey,
     codexAuthJson: userOpenai.codexAuthJson,
     geminiApiKey: userGemini,
-    customProviders: userCustom,
+    // User wins per shared provider id; the repo's shared gollm providers fill
+    // the gaps so they stay available when the user's first-class set wins.
+    customProviders: mergeCustomProviders(userCustom, repoCustom),
     source: userHas || userCustom.length > 0 ? "user" : "none",
   };
   const repoSet: ModelCredentials = {

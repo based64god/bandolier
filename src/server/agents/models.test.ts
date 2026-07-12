@@ -5,6 +5,7 @@ import type { CustomProviderCredential } from "~/server/agents/custom-providers"
 import {
   fuzzyPickModel,
   listModelsForUser,
+  pickCheapModel,
   pickDefaultModel,
   pickLatestGeminiFlash,
   pickLatestGptMini,
@@ -240,6 +241,56 @@ describe("pickPrWriterModel", () => {
       provider: "bedrock",
     };
     expect(pickPrWriterModel([profile], profile)).toBe(profile.id);
+  });
+
+  it("picks a cheaper same-provider model for a gollm run", () => {
+    const gm = (id: string): ModelOption => ({
+      id,
+      label: id,
+      provider: "gollm:groq",
+    });
+    const models = [
+      gm("llama-3.3-70b"),
+      gm("llama-3.1-8b-instant"),
+      openai("gpt-5-mini"),
+    ];
+    expect(pickPrWriterModel(models, models[0])).toBe("llama-3.1-8b-instant");
+  });
+
+  it("falls back to the task model (undefined) when a gollm provider has no cheaper model", () => {
+    const gm = (id: string): ModelOption => ({
+      id,
+      label: id,
+      provider: "gollm:together",
+    });
+    const models = [gm("llama-3.3-70b"), gm("qwen-2.5-72b")];
+    expect(pickPrWriterModel(models, models[0])).toBeUndefined();
+  });
+});
+
+describe("pickCheapModel", () => {
+  const gm = (id: string): ModelOption => ({
+    id,
+    label: id,
+    provider: "gollm:x",
+  });
+
+  it("returns undefined when no model advertises a cheap variant", () => {
+    expect(
+      pickCheapModel([gm("llama-3.3-70b"), gm("qwen-2.5-72b")]),
+    ).toBeUndefined();
+  });
+
+  it("picks the latest model carrying a cheap marker", () => {
+    expect(
+      pickCheapModel([gm("gpt-4o-mini"), gm("gpt-5-mini"), gm("gpt-5")]),
+    ).toBe("gpt-5-mini");
+  });
+
+  it("matches cheap markers as bounded tokens, not substrings", () => {
+    expect(pickCheapModel([gm("gemini-2.0-flash")])).toBe("gemini-2.0-flash");
+    // "ministral" is not the "mini" marker.
+    expect(pickCheapModel([gm("ministral-8b")])).toBeUndefined();
   });
 });
 

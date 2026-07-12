@@ -118,6 +118,23 @@ export function mergeCustomProviders(
 // ── Model listing ────────────────────────────────────────────────────────────
 
 /**
+ * Ids of models an OpenAI-compatible `GET /models` reports that aren't usable
+ * as an agent's chat/tool model — embeddings, rerankers, moderation/guard
+ * classifiers, and speech/image models. Matched as bounded tokens so a chat
+ * model id doesn't trip on an incidental substring. Unlike the first-class
+ * providers (which filter to chat/tool-capable models), a raw gollm `/models`
+ * lists everything the backend serves, so the picker would otherwise offer
+ * models a run can never use.
+ */
+const NON_CHAT_MODEL =
+  /(?:^|[-_/.])(?:embed(?:ding)?s?|rerank(?:er|ing)?|moderations?|guard|whisper|tts|stt|speech|transcrib\w*|dall-?e|stable-?diffusion|sdxl|flux|clip|bge|gte|voyage|colbert)(?:[-_/.]|$)/i;
+
+/** Whether a listed model id looks like a usable chat/tool model. */
+function isLikelyChatModel(id: string): boolean {
+  return !NON_CHAT_MODEL.test(id);
+}
+
+/**
  * Lists a custom provider's models for the picker: the OpenAI-compatible
  * GET {base}/models when the catalog says the provider serves one, merged
  * with (and falling back to) the user-supplied model list. Throws only when
@@ -145,10 +162,17 @@ export async function listCustomProviderModels(
     const res = await fetch(`${base.replace(/\/+$/, "")}/models`, { headers });
     if (!res.ok) throw new Error(`${info.label} API ${res.status}`);
     const body = (await res.json()) as { data?: { id?: unknown }[] };
-    const listed = (body.data ?? [])
+    const all = (body.data ?? [])
       .map((m) => m.id)
-      .filter((id): id is string => typeof id === "string")
-      .map((id) => ({ id, label: id }));
+      .filter((id): id is string => typeof id === "string");
+    // Drop non-chat models (embeddings, rerankers, …). If that leaves nothing —
+    // an all-embeddings provider, or a naming scheme the filter misreads — keep
+    // the raw list rather than blank the picker.
+    const chat = all.filter(isLikelyChatModel);
+    const listed = (chat.length > 0 ? chat : all).map((id) => ({
+      id,
+      label: id,
+    }));
     if (listed.length === 0) return stored;
     // Stored ids the listing doesn't know stay available (aliases, previews).
     const seen = new Set(listed.map((m) => m.id));
@@ -263,6 +287,36 @@ export async function validateCustomProviderInput(
   if (info.listable && probeBase && key && !selfHosted) {
     return probeApiKey(
       `${probeBase.replace(/\/+$/, "")}/models`,
+      { Authorization: `Bearer ${key}` },
+      info.label,
+    );
+  }
+  return { valid: true };
+}
+
+/**
+ * Live-tests an already-stored custom-provider credential — the post-save "Test"
+ * action, mirroring `testAws`/`testAnthropic` for the four first-class
+ * providers. Probes the OpenAI-compatible `GET {base}/models` with the stored
+ * key when the provider serves one from a reachable hosted endpoint. Local /
+ * self-hosted (endpoint required) and non-listable providers can't be reached
+ * from the server, so those report the stored credential as present without a
+ * live probe.
+ */
+export async function testCustomProviderCredential(
+  cred: CustomProviderCredential,
+): Promise<Validation> {
+  const info = gollmProviderInfo(cred.provider);
+  if (!info) {
+    return { valid: false, error: `Unknown provider "${cred.provider}".` };
+  }
+  const base = cred.apiBase ?? info.defaultBase;
+  const key = cred.apiKey ?? "";
+  const baseField = baseFieldOf(info);
+  const selfHosted = !!baseField && !baseField.optional;
+  if (info.listable && base && key && !selfHosted) {
+    return probeApiKey(
+      `${base.replace(/\/+$/, "")}/models`,
       { Authorization: `Bearer ${key}` },
       info.label,
     );

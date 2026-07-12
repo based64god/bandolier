@@ -455,6 +455,10 @@ export const repoCustomProviderCredentials = pgTable(
     extraEnv: text("extra_env"),
     /** Optional model ids (JSON string array) shown in the picker. */
     models: text("models"),
+    /** The repo admin who last configured this shared credential. */
+    configuredBy: text("configured_by").references(() => user.id, {
+      onDelete: "set null",
+    }),
     createdAt: timestamp("created_at")
       .$defaultFn(() => /* @__PURE__ */ new Date())
       .notNull(),

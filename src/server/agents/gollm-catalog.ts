@@ -84,6 +84,12 @@ export interface GollmProviderInfo {
   keyPlaceholder?: string;
   keyHint?: string;
   basePlaceholder?: string;
+  /**
+   * Subscription-style backend (a login/session token rather than a metered API
+   * key) — e.g. GitHub Copilot. Tags its models `auth: "subscription"` in the
+   * picker so they badge like the Anthropic/OpenAI subscription options.
+   */
+  subscription?: boolean;
 }
 
 const p = (info: GollmProviderInfo) => info;
@@ -674,6 +680,7 @@ export const GOLLM_PROVIDERS: readonly GollmProviderInfo[] = [
   p({
     id: "github_copilot",
     label: "GitHub Copilot (subscription)",
+    subscription: true,
     fields: [
       secret("GITHUB_COPILOT_ACCESS_TOKEN", "GitHub OAuth token", {
         role: "key",
@@ -816,6 +823,36 @@ const byId = new Map(GOLLM_PROVIDERS.map((info) => [info.id, info]));
 /** Looks up a catalog entry by gollm provider id. */
 export function gollmProviderInfo(id: string): GollmProviderInfo | undefined {
   return byId.get(id);
+}
+
+/**
+ * Discoverability weight for the settings provider directory. The widely-used
+ * providers float to the top of the (otherwise alphabetical) unconfigured list,
+ * the way the four first-class providers do with their 70–100 weights, instead
+ * of being lost among the ~90-entry long tail. Kept well below the first-class
+ * band so they never outrank Anthropic/OpenAI/Gemini/Bedrock. Default 0.
+ */
+const PROVIDER_PRIORITY: Record<string, number> = {
+  groq: 20,
+  openrouter: 20,
+  together: 18,
+  deepseek: 18,
+  xai: 18,
+  mistral: 16,
+  fireworks: 14,
+  perplexity: 14,
+  huggingface: 14,
+  cerebras: 12,
+  moonshot: 12,
+  nvidia: 12,
+  openai_like: 10,
+  hosted_vllm: 10,
+  lm_studio: 10,
+};
+
+/** The directory discoverability weight for a provider (0 when not curated). */
+export function providerPriority(id: string): number {
+  return PROVIDER_PRIORITY[id] ?? 0;
 }
 
 /**

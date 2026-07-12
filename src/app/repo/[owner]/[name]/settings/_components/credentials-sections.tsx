@@ -583,7 +583,7 @@ function RepoProviderDirectory({
     repoFullName,
   });
 
-  const { result, onSave, onRemove } = useCredentialMutations(() =>
+  const { result, setResult, onSave, onRemove } = useCredentialMutations(() =>
     utils.webhooks.getCustomProviders.invalidate({ repoFullName }),
   );
   const setCustom = api.webhooks.setCustomProvider.useMutation({
@@ -591,6 +591,9 @@ function RepoProviderDirectory({
   });
   const deleteCustom = api.webhooks.deleteCustomProvider.useMutation({
     onSuccess: onRemove,
+  });
+  const testCustom = api.webhooks.testCustomProvider.useMutation({
+    onSuccess: (r) => setResult(r.valid ? "Valid ✓" : `Invalid: ${r.error}`),
   });
 
   const configuredById = new Map(
@@ -665,6 +668,7 @@ function RepoProviderDirectory({
         accent: "sky",
         configured: configuredById.has(c.id),
         keywords: c.id,
+        priority: c.priority,
         body: (
           <GenericProviderForm
             entry={c}
@@ -680,6 +684,11 @@ function RepoProviderDirectory({
             savePending={setCustom.isPending}
             saveError={setCustom.error?.message}
             result={result}
+            onTest={() => {
+              setResult("Testing…");
+              testCustom.mutate({ repoFullName, provider: c.id });
+            }}
+            testPending={testCustom.isPending}
             onRemove={() =>
               deleteCustom.mutate({ repoFullName, provider: c.id })
             }

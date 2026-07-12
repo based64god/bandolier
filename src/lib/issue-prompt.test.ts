@@ -58,10 +58,11 @@ describe("makeIssueBranch", () => {
 describe("buildIssueSystemPrompt", () => {
   const issue = { number: 5, title: "Crash on startup", body: "It crashes." };
 
-  it("embeds the branch and the commit subject, but not the issue body", () => {
+  it("embeds the branch and a signed, commit-by-commit instruction, but not the issue body", () => {
     const prompt = buildIssueSystemPrompt(issue, "issue-5-crash");
     expect(prompt).toContain('on branch "issue-5-crash"');
-    expect(prompt).toContain('git commit -s -m "Crash on startup"');
+    expect(prompt).toContain("git commit -s");
+    expect(prompt).toContain("commit-by-commit");
     expect(prompt).toContain("Do NOT push or open a pull request");
     // The issue body belongs in the user message, not the system prompt.
     expect(prompt).not.toContain("It crashes.");

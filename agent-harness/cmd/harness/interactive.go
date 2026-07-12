@@ -62,7 +62,7 @@ func buildInteractiveSystemPrompt(branchName string) string {
 	if branchName == "" {
 		return ""
 	}
-	return fmt.Sprintf(`This is an interactive session: the user will keep sending follow-up messages, so do not assume you must finish everything in one turn. The repository is cloned and you are on branch %q — do not switch branches. Commit changes as we go (git add -A && git commit). When the session ends, the harness pushes the branch and opens a pull request if there are commits.`, branchName)
+	return fmt.Sprintf(`This is an interactive session: the user will keep sending follow-up messages, so do not assume you must finish everything in one turn. The repository is cloned and you are on branch %q — do not switch branches. Commit changes as we go in small, self-contained steps (git add -A && git commit) so the work stays reviewable commit-by-commit. When the session ends, the harness pushes the branch and opens a pull request if there are commits.`, branchName)
 }
 
 // interactiveFraming picks the interactive system prompt for the run: the

@@ -277,3 +277,60 @@ func TestCovGHBuildPRPrompt(t *testing.T) {
 		t.Errorf("PR prompt should include the changed file, got:\n%s", got)
 	}
 }
+
+func TestSummarizeNumstat(t *testing.T) {
+	// Two text files plus a binary file, which reports "-" for its line counts.
+	got := summarizeNumstat("10\t2\tsrc/a.go\n5\t0\tsrc/b.go\n-\t-\tassets/logo.png\n")
+	if got.files != 3 {
+		t.Errorf("files = %d, want 3", got.files)
+	}
+	if got.added != 15 {
+		t.Errorf("added = %d, want 15", got.added)
+	}
+	if got.deleted != 2 {
+		t.Errorf("deleted = %d, want 2", got.deleted)
+	}
+	if got.lines() != 17 {
+		t.Errorf("lines = %d, want 17", got.lines())
+	}
+	if got.large() {
+		t.Error("a 3-file, 17-line change should not count as large")
+	}
+	if empty := summarizeNumstat(""); empty.files != 0 || empty.lines() != 0 {
+		t.Errorf("empty numstat = %+v, want a zero summary", empty)
+	}
+}
+
+func TestDiffSummaryLarge(t *testing.T) {
+	if !(diffSummary{files: largeDiffFiles}).large() {
+		t.Error("hitting the file threshold should be large")
+	}
+	if !(diffSummary{added: largeDiffLines}).large() {
+		t.Error("hitting the line threshold should be large")
+	}
+	if (diffSummary{files: largeDiffFiles - 1, added: largeDiffLines - 1}).large() {
+		t.Error("just under both thresholds should not be large")
+	}
+}
+
+func TestRenderPRPromptReviewOrder(t *testing.T) {
+	// A small change keeps the plain format contract and no review-order ask.
+	small := renderPRPrompt("- did a thing", "a | 1 +", "diff body", diffSummary{files: 1, added: 1})
+	for _, want := range []string{"TITLE:", "BODY:", "=== COMMITS ===", "=== DIFFSTAT ===", "=== DIFF ==="} {
+		if !strings.Contains(small, want) {
+			t.Errorf("PR prompt missing %q section", want)
+		}
+	}
+	if strings.Contains(small, "Suggested review order") {
+		t.Errorf("small change should not request a review order, got:\n%s", small)
+	}
+
+	// A large change asks the writer to lead the body with a review-order walkthrough.
+	large := renderPRPrompt("- did a thing", "stat", "diff body", diffSummary{files: largeDiffFiles, added: 500})
+	if !strings.Contains(large, "Suggested review order") {
+		t.Errorf("large change should request a review order, got:\n%s", large)
+	}
+	if !strings.Contains(large, "files changed") {
+		t.Errorf("large-change guidance should state the size, got:\n%s", large)
+	}
+}

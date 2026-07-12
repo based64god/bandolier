@@ -71,10 +71,11 @@ func buildRepoSystemPrompt(branchName string) string {
 
 The repository has been cloned. You are on branch "%s" — do not switch branches.
 
-When you have completed the task in the user message:
-1. Commit all your changes:
+When you have completed the task in the user message, commit your work:
+1. Split the change into a sequence of small, self-contained commits — one coherent step per commit, ordered so each builds on the last and, where practical, leaves the tree working — so a reviewer can read it commit-by-commit. Prefer several focused commits over one large squashed commit; a genuinely small change can be a single commit.
+2. Leave nothing uncommitted, and sign off every commit:
    git add -A
-   git commit -s -m "<concise summary of what you did>"
+   git commit -s -m "<concise summary of the step>"
 
 Do NOT push or open a pull request — the harness will do that once you finish.
 Do not ask for clarification. Implement the best solution you can.`,

@@ -51,9 +51,9 @@ The repository has been cloned. You are on branch "${branch}" — do not switch 
 Steps:
 1. Explore the codebase to understand the existing patterns
 2. Implement a working solution for the issue
-3. Commit all changes:
+3. Commit your work as a sequence of small, self-contained commits — one coherent step per commit, ordered so each builds on the last and, where practical, leaves the tree working — so a reviewer can read it commit-by-commit. Prefer several focused commits over one large squashed commit; a genuinely small change can be a single commit. Leave nothing uncommitted and sign off every commit:
    git add -A
-   git commit -s -m "${issue.title}"
+   git commit -s -m "<concise summary of the step>"
 
 Do NOT push or open a pull request — the harness will do that once you finish.
 Do not ask for clarification. Implement the best solution you can.`;
@@ -89,9 +89,9 @@ Steps:
 1. Read the parent-run transcript to understand what was already done, and why
 2. Explore the codebase where needed — the code is the source of truth, the transcript is history
 3. Implement the follow-up request
-4. Commit all changes:
+4. Commit your work as a sequence of small, self-contained commits — one coherent step per commit, so the follow-up can be reviewed commit-by-commit. Prefer several focused commits over one large squashed commit; a genuinely small change can be a single commit. Leave nothing uncommitted and sign off every commit:
    git add -A
-   git commit -s -m "<concise summary of the follow-up change>"
+   git commit -s -m "<concise summary of the step>"
 
 ${publishFraming}
 Do not ask for clarification. Implement the best solution you can.`;

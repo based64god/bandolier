@@ -15,14 +15,26 @@ import {
 import { db } from "~/server/db";
 import { env } from "~/env";
 
-import { type IssueCommentPayload } from "./types";
-
 // Approval / decline commands a maintainer can reply with to act on a held run.
 const APPROVE_COMMANDS = ["/bando approve", "/bando-approve"];
 const DECLINE_COMMANDS = ["/bando decline", "/bando-decline", "/bando deny"];
 // Reaction contents that count as an approval when placed on the bot's
 // approval-request comment (a thumbs-up or a rocket).
 const APPROVAL_REACTIONS = new Set(["+1", "rocket", "hooray"]);
+
+/**
+ * The normalized comment fields the approval flow needs, extracted from either
+ * an `issue_comment` or a `pull_request_review_comment` event so both drive the
+ * same maintainer approve/decline handling. `itemNumber` is the issue or PR
+ * number the comment sits on — held runs are keyed by it.
+ */
+export interface ApprovalComment {
+  action: string;
+  repoFullName: string;
+  itemNumber: number;
+  commentBody: string | null;
+  sender: { login: string };
+}
 
 /**
  * Dispatches a held run after a maintainer's approval: atomically claims the row
@@ -68,28 +80,29 @@ async function approveAndDispatch(
 }
 
 /**
- * Handles an `issue_comment` event for the credential-approval flow. A held run
- * (see handleIssueOpened) is dispatched when a maintainer-or-higher user either
- * replies with `/bando approve` or reacts 👍/🚀 to the bot's approval comment.
- * The comment's text is checked first; if it isn't a command, we re-check the
- * approval comment's reactions (GitHub doesn't deliver reaction webhooks, so any
- * later comment activity on the issue is used as a cheap trigger to poll them).
+ * Handles a comment event (`issue_comment` or `pull_request_review_comment`) for
+ * the credential-approval flow. A held run (see handleIssueOpened) is dispatched
+ * when a maintainer-or-higher user either replies with `/bando approve` or
+ * reacts 👍/🚀 to the bot's approval comment. The comment's text is checked
+ * first; if it isn't a command, we re-check the approval comment's reactions
+ * (GitHub doesn't deliver reaction webhooks, so any later comment activity on
+ * the item is used as a cheap trigger to poll them).
  *
- * Returns true when the issue has an unresolved held run — the comment then
+ * Returns true when the item has an unresolved held run — the comment then
  * belongs to the approval flow and must not also resume a run.
  */
 export async function handleApprovalComment(
-  payload: IssueCommentPayload,
+  input: ApprovalComment,
 ): Promise<boolean> {
-  if (payload.action !== "created") return false;
+  if (input.action !== "created") return false;
 
-  const repoFullName = payload.repository.full_name;
-  const issueNumber = payload.issue.number;
+  const repoFullName = input.repoFullName;
+  const issueNumber = input.itemNumber;
   const run = await getUnresolvedPendingRun(db, repoFullName, issueNumber);
   if (!run) return false;
 
   const botToken = await getRepoBotToken(db, repoFullName, Date.now());
-  const text = (payload.comment.body ?? "").toLowerCase();
+  const text = (input.commentBody ?? "").toLowerCase();
   const isApproveCmd = APPROVE_COMMANDS.some((c) => text.includes(c));
   const isDeclineCmd = DECLINE_COMMANDS.some((c) => text.includes(c));
 
@@ -98,36 +111,32 @@ export async function handleApprovalComment(
   if (isApproveCmd || isDeclineCmd) {
     const permToken = botToken ?? null;
     const permission = permToken
-      ? await getUserRepoPermission(
-          permToken,
-          repoFullName,
-          payload.sender.login,
-        )
+      ? await getUserRepoPermission(permToken, repoFullName, input.sender.login)
       : "none";
     if (!isMaintainerOrHigher(permission)) {
       console.log(
         "[bandolier:webhook] approval command ignored — sender not a maintainer",
-        { issue: issueNumber, sender: payload.sender.login, permission },
+        { issue: issueNumber, sender: input.sender.login, permission },
       );
       return true;
     }
     if (isDeclineCmd) {
-      await markResolved(db, run.id, "declined", payload.sender.login);
+      await markResolved(db, run.id, "declined", input.sender.login);
       console.log("[bandolier:webhook] held run declined", {
         issue: issueNumber,
-        by: payload.sender.login,
+        by: input.sender.login,
       });
       if (botToken) {
         await postIssueCommentWithFallback(
           [{ token: botToken, source: "app-installation" }],
           repoFullName,
           issueNumber,
-          `🤖 Declined by @${payload.sender.login}. This run will not be dispatched.`,
+          `🤖 Declined by @${input.sender.login}. This run will not be dispatched.`,
         );
       }
       return true;
     }
-    await approveAndDispatch(run, payload.sender.login, botToken);
+    await approveAndDispatch(run, input.sender.login, botToken);
     return true;
   }
 

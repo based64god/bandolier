@@ -66,6 +66,38 @@ export interface IssueCommentPayload {
   sender: { id: number; login: string };
 }
 
+// `pull_request_review_comment` event: an inline comment left on a specific
+// line of a pull request's diff (the review-comment thread), delivered
+// separately from the `issue_comment` event that carries vanilla PR comments.
+// The `comment` fields beyond `body`/`user` locate the comment in the diff
+// (file path, line range, side, and the surrounding hunk) so the resumed run
+// knows which code the reviewer is pointing at.
+export interface PullRequestReviewCommentPayload {
+  action: string;
+  comment: {
+    id: number;
+    body: string | null;
+    user: { id: number; login: string; type?: string };
+    path: string;
+    // The line the comment targets in the file's new (`RIGHT`) or old (`LEFT`)
+    // side. Null when the comment is on an outdated diff GitHub can't remap.
+    line: number | null;
+    // First line of a multi-line comment range; null for a single line.
+    start_line: number | null;
+    side: string | null;
+    // The unified-diff hunk the comment was left on.
+    diff_hunk: string | null;
+  };
+  pull_request: {
+    number: number;
+    title: string;
+    html_url: string;
+    labels: { name: string }[];
+  };
+  repository: GitHubRepository;
+  sender: { id: number; login: string };
+}
+
 // Payloads for the GitHub App's lifecycle events, which maintain the
 // repo → installation mapping the bot-token broker reads.
 export interface InstallationRef {

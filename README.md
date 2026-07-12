@@ -190,7 +190,7 @@ Encrypt TLS — and installs the chart, in one `tofu apply`.
 
 To have agents launch automatically when issues are opened, install the Bandolier GitHub App:
 
-1. Create a GitHub App (Settings → Developer settings → GitHub Apps). Give it a webhook URL of `https://<your-host>/api/webhooks/github`, a webhook secret, and these repository permissions: **Issues** (read & write), **Pull requests** (read & write), **Contents** (read), **Actions** (read), and **Metadata** (read). Subscribe to the **Issues**, **Issue comment**, and **Workflow run** events. Issue comment powers resuming a run by commenting on its issue or PR, and drives the maintainer-approval flow for runs on shared repo credentials (see [Repository credentials and the maintainer gate](#repository-credentials-and-the-maintainer-gate)); Workflow run (with the Actions read permission) powers auto-resuming a run when a CI pipeline fails on the pull request it produced, for repos that opt into it in the repo config. Generate a private key. (Pulling private custom harness images from GHCR uses the triggering user's OAuth `read:packages` scope, not an App permission — see [The agent harness image](#the-agent-harness-image).)
+1. Create a GitHub App (Settings → Developer settings → GitHub Apps). Give it a webhook URL of `https://<your-host>/api/webhooks/github`, a webhook secret, and these repository permissions: **Issues** (read & write), **Pull requests** (read & write), **Contents** (read), **Actions** (read), and **Metadata** (read). Subscribe to the **Issues**, **Issue comment**, **Pull request review comment**, and **Workflow run** events. Issue comment powers resuming a run by commenting on its issue or PR, and drives the maintainer-approval flow for runs on shared repo credentials (see [Repository credentials and the maintainer gate](#repository-credentials-and-the-maintainer-gate)); Pull request review comment extends both of those to a PR's inline review comments (left on a specific line of the diff); Workflow run (with the Actions read permission) powers auto-resuming a run when a CI pipeline fails on the pull request it produced, for repos that opt into it in the repo config. Generate a private key. (Pulling private custom harness images from GHCR uses the triggering user's OAuth `read:packages` scope, not an App permission — see [The agent harness image](#the-agent-harness-image).)
 2. Set `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY` (PEM, `\n`-escaped), and `GITHUB_WEBHOOK_SECRET` (the App's webhook secret) in the app's environment. Optionally set `NEXT_PUBLIC_GITHUB_APP_SLUG` so the repo-config UI links to the App's install page.
 3. Install the App on the repos you want Bandolier to act on. The App delivers events automatically — there's no per-repo webhook to add.
 
@@ -203,6 +203,8 @@ Optionally, each repo can set a trigger phrase that issue text must contain (set
 ### Resuming a run by commenting
 
 Commenting on an issue or pull request that a run already worked on **resumes** it: Bandolier finds the item's most recent run, spawns a follow-up run under the commenter's credentials, and seeds it with the parent run's persisted transcript (when the repo has [artifact storage](#run-artifacts-optional) configured) so the agent picks up with full context of what was already done. While the parent's PR is still open, the follow-up works directly on its branch and pushes onto the same PR; otherwise it starts a fresh branch. Resumed tasks carry a "↻ resumed" chip in the dashboard naming their parent.
+
+This works for both a pull request's vanilla conversation comments and its inline **review comments** (left on a specific line of the diff). A review-comment resume additionally hands the agent the file, line range, and diff hunk the comment is anchored to, so it knows exactly which code the reviewer is pointing at.
 
 Comments from bots are ignored (including Bando's own acknowledgements), a comment only ever resumes — one with no prior run does nothing — and the repo's trigger phrase, when configured, applies to comments too.
 
@@ -263,13 +265,13 @@ curl -X DELETE -H "Authorization: Bearer bnd_…" \
   https://<your-host>/api/v1/repos/<owner>/<repo>/tasks/<id>
 ```
 
-| Method   | Path                                          | Body                    | Purpose               |
-| -------- | --------------------------------------------- | ----------------------- | --------------------- |
-| `GET`    | `/api/v1/repos/{owner}/{repo}/tasks`          | —                       | List tasks for a repo |
-| `POST`   | `/api/v1/repos/{owner}/{repo}/tasks`          | launch fields (below)   | Launch a task         |
-| `GET`    | `/api/v1/repos/{owner}/{repo}/tasks/{id}`     | —                       | Read one task         |
-| `PATCH`  | `/api/v1/repos/{owner}/{repo}/tasks/{id}`     | `{ "displayName": … }`  | Rename a task         |
-| `DELETE` | `/api/v1/repos/{owner}/{repo}/tasks/{id}`     | —                       | Terminate a task      |
+| Method   | Path                                      | Body                   | Purpose               |
+| -------- | ----------------------------------------- | ---------------------- | --------------------- |
+| `GET`    | `/api/v1/repos/{owner}/{repo}/tasks`      | —                      | List tasks for a repo |
+| `POST`   | `/api/v1/repos/{owner}/{repo}/tasks`      | launch fields (below)  | Launch a task         |
+| `GET`    | `/api/v1/repos/{owner}/{repo}/tasks/{id}` | —                      | Read one task         |
+| `PATCH`  | `/api/v1/repos/{owner}/{repo}/tasks/{id}` | `{ "displayName": … }` | Rename a task         |
+| `DELETE` | `/api/v1/repos/{owner}/{repo}/tasks/{id}` | —                      | Terminate a task      |
 
 The launch endpoint accepts everything the dashboard's deploy dialog can set,
 except interactive sessions (the REST API only starts one-shot runs). The body
@@ -363,10 +365,10 @@ closed. Generate a keypair with `pnpm vapid:generate` and set all three
 variables; leave them unset to disable push (in-tab foreground alerts still
 work regardless). The public and private keys must be from the same pair.
 
-| Variable                       | Description                                                        |
-| ------------------------------ | ------------------------------------------------------------------ |
-| `VAPID_SUBJECT`                | A `mailto:` or `https:` URL identifying the sender to push services. |
-| `VAPID_PRIVATE_KEY`            | The private key from `pnpm vapid:generate`. Server-side only.       |
+| Variable                       | Description                                                                                                     |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------- |
+| `VAPID_SUBJECT`                | A `mailto:` or `https:` URL identifying the sender to push services.                                            |
+| `VAPID_PRIVATE_KEY`            | The private key from `pnpm vapid:generate`. Server-side only.                                                   |
 | `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | The public key from `pnpm vapid:generate`. Exposed to the browser as the subscription's `applicationServerKey`. |
 
 ### Run artifacts (optional)
@@ -413,23 +415,23 @@ deploy/
 
 ## Scripts
 
-| Command                                   | What it does                                                               |
-| ----------------------------------------- | -------------------------------------------------------------------------- |
-| `pnpm dev`                                | Run the app in development (Turbopack).                                    |
-| `pnpm build` / `pnpm start`               | Production build / serve.                                                  |
-| `pnpm db:push`                            | Sync the Drizzle schema straight to the database (local development).      |
-| `pnpm db:generate`                        | Emit a new SQL migration under `drizzle/` from schema changes.             |
-| `pnpm db:migrate`                         | Apply the checked-in `drizzle/` migrations (what self-host deploys run).   |
-| `pnpm db:studio`                          | Open Drizzle Studio.                                                       |
-| `pnpm typecheck`                          | `tsc --noEmit`.                                                            |
-| `pnpm lint` / `pnpm lint:fix`             | ESLint.                                                                    |
-| `pnpm format:write` / `pnpm format:check` | Prettier.                                                                  |
-| `pnpm check`                              | Lint + typecheck together.                                                 |
-| `pnpm test`                               | Run the unit-test suite once (Vitest).                                     |
-| `pnpm test:watch`                         | Run Vitest in watch mode.                                                  |
-| `pnpm test:coverage`                      | Run the suite and emit a coverage report under `coverage/`.                |
+| Command                                   | What it does                                                                |
+| ----------------------------------------- | --------------------------------------------------------------------------- |
+| `pnpm dev`                                | Run the app in development (Turbopack).                                     |
+| `pnpm build` / `pnpm start`               | Production build / serve.                                                   |
+| `pnpm db:push`                            | Sync the Drizzle schema straight to the database (local development).       |
+| `pnpm db:generate`                        | Emit a new SQL migration under `drizzle/` from schema changes.              |
+| `pnpm db:migrate`                         | Apply the checked-in `drizzle/` migrations (what self-host deploys run).    |
+| `pnpm db:studio`                          | Open Drizzle Studio.                                                        |
+| `pnpm typecheck`                          | `tsc --noEmit`.                                                             |
+| `pnpm lint` / `pnpm lint:fix`             | ESLint.                                                                     |
+| `pnpm format:write` / `pnpm format:check` | Prettier.                                                                   |
+| `pnpm check`                              | Lint + typecheck together.                                                  |
+| `pnpm test`                               | Run the unit-test suite once (Vitest).                                      |
+| `pnpm test:watch`                         | Run Vitest in watch mode.                                                   |
+| `pnpm test:coverage`                      | Run the suite and emit a coverage report under `coverage/`.                 |
 | `pnpm test:e2e`                           | Run the Playwright browser smoke tests against the `/dev/*` harness routes. |
-| `pnpm vapid:generate`                     | Generate a Web Push (VAPID) keypair for the push env vars.                 |
+| `pnpm vapid:generate`                     | Generate a Web Push (VAPID) keypair for the push env vars.                  |
 
 ---
 

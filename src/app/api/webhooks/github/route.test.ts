@@ -36,6 +36,12 @@ vi.mock("~/server/webhooks/issue-opened", () => ({
   handleIssueEdited: (...args: unknown[]) => handleIssueEdited(...(args as [])),
 }));
 
+const handlePrReviewComment = vi.fn<() => Promise<void>>();
+vi.mock("~/server/webhooks/pr-review-comment", () => ({
+  handlePrReviewComment: (...args: unknown[]) =>
+    handlePrReviewComment(...(args as [])),
+}));
+
 const handleCiFailure = vi.fn<() => Promise<void>>();
 vi.mock("~/server/webhooks/ci-failure", () => ({
   handleCiFailure: (...args: unknown[]) => handleCiFailure(...(args as [])),
@@ -82,6 +88,20 @@ function makeReq(
 
 const REPO = { full_name: "acme/widgets" };
 
+// A minimal but well-formed pull_request_review_comment payload — enough for the
+// route to normalize an ApprovalComment (repo, PR number, body, sender) and
+// dispatch. The handlers themselves are mocked.
+const reviewCommentPayload = {
+  action: "created",
+  comment: {
+    id: 1,
+    body: "please tweak this",
+    user: { id: 2, login: "alice" },
+  },
+  pull_request: { number: 7 },
+  sender: { id: 2, login: "alice" },
+};
+
 function body(payload: Record<string, unknown>): string {
   return JSON.stringify({ repository: REPO, ...payload });
 }
@@ -101,6 +121,7 @@ beforeEach(() => {
   handleIssueComment.mockResolvedValue(undefined);
   handleIssueOpened.mockResolvedValue(undefined);
   handleIssueEdited.mockResolvedValue(undefined);
+  handlePrReviewComment.mockResolvedValue(undefined);
   handleCiFailure.mockResolvedValue(undefined);
   handleInstallation.mockResolvedValue(undefined);
   getRepoWebhookConfig.mockResolvedValue(null);
@@ -193,6 +214,22 @@ describe("POST /api/webhooks/github event dispatch", () => {
     expect(handleIssueEdited).toHaveBeenCalledTimes(1);
   });
 
+  it("routes a pull_request_review_comment.created event to handlePrReviewComment", async () => {
+    const res = await POST(
+      signedReq("pull_request_review_comment", reviewCommentPayload),
+    );
+    expect(res.status).toBe(200);
+    expect(handlePrReviewComment).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores a pull_request_review_comment.edited event", async () => {
+    const res = await POST(
+      signedReq("pull_request_review_comment", { action: "edited" }),
+    );
+    expect(res.status).toBe(200);
+    expect(handlePrReviewComment).not.toHaveBeenCalled();
+  });
+
   it("returns 500 (not an unhandled rejection) when a handler throws", async () => {
     handleIssueOpened.mockRejectedValue(new Error("boom"));
     const res = await POST(signedReq("issues", { action: "opened" }));
@@ -222,5 +259,43 @@ describe("POST /api/webhooks/github approval short-circuit", () => {
     expect(res.status).toBe(200);
     expect(handleApprovalComment).toHaveBeenCalledTimes(1);
     expect(handleIssueComment).toHaveBeenCalledTimes(1);
+  });
+
+  it("normalizes an issue comment into the approval input", async () => {
+    handleApprovalComment.mockResolvedValue(false);
+    await POST(signedReq("issue_comment", commentPayload));
+    expect(handleApprovalComment).toHaveBeenCalledWith({
+      action: "created",
+      repoFullName: "acme/widgets",
+      itemNumber: undefined,
+      commentBody: "approve",
+      sender: undefined,
+    });
+  });
+
+  it("runs the approval flow on a review comment before resuming", async () => {
+    handleApprovalComment.mockResolvedValue(false);
+    const res = await POST(
+      signedReq("pull_request_review_comment", reviewCommentPayload),
+    );
+    expect(res.status).toBe(200);
+    expect(handleApprovalComment).toHaveBeenCalledWith({
+      action: "created",
+      repoFullName: "acme/widgets",
+      itemNumber: 7,
+      commentBody: "please tweak this",
+      sender: { id: 2, login: "alice" },
+    });
+    expect(handlePrReviewComment).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not resume a review comment consumed as an approval", async () => {
+    handleApprovalComment.mockResolvedValue(true);
+    const res = await POST(
+      signedReq("pull_request_review_comment", reviewCommentPayload),
+    );
+    expect(res.status).toBe(200);
+    expect(handleApprovalComment).toHaveBeenCalledTimes(1);
+    expect(handlePrReviewComment).not.toHaveBeenCalled();
   });
 });

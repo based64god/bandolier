@@ -1,11 +1,12 @@
 import nodeCrypto from "crypto";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { describe, expect, it, vi } from "vitest";
 
 import type { db as Database } from "~/server/db";
 import { apiKey } from "~/server/db/schema";
 import {
   createApiKey,
+  listApiKeys,
   resolveApiKey,
   revokeApiKey,
 } from "~/server/agents/api-keys";
@@ -13,7 +14,8 @@ import {
 // API-key lifecycle over faked drizzle chains: creation must store only the
 // SHA-256 hash (plaintext shown once), resolution must check prefix + hash +
 // expiry before touching lastUsedAt, and revocation must stay scoped to the
-// calling user. `listApiKeys` is a branchless column projection — not tested.
+// calling user. `listApiKeys` is a branchless projection — we pin the exact
+// columns (never keyHash), the user scoping, and the newest-first ordering.
 
 const sha256 = (s: string) =>
   nodeCrypto.createHash("sha256").update(s).digest("hex");
@@ -44,6 +46,20 @@ function makeResolveDb(rows: Record<string, unknown>[]) {
     update,
     set,
     updateWhere,
+  };
+}
+
+/** select().from().where().orderBy() resolves `rows`; each hop is recorded. */
+function makeListDb(rows: Record<string, unknown>[]) {
+  const orderBy = vi.fn().mockResolvedValue(rows);
+  const where = vi.fn(() => ({ orderBy }));
+  const from = vi.fn(() => ({ where }));
+  const select = vi.fn((_projection: Record<string, unknown>) => ({ from }));
+  return {
+    database: { select } as unknown as typeof Database,
+    select,
+    where,
+    orderBy,
   };
 }
 
@@ -126,6 +142,40 @@ describe("resolveApiKey", () => {
     expect(await resolveApiKey(database, "bnd_futuretoken")).toEqual({
       userId: "u2",
     });
+  });
+});
+
+describe("listApiKeys", () => {
+  it("returns the queried rows scoped to the user, newest first", async () => {
+    const rows = [
+      { id: "k2", name: "recent", prefix: "bnd_bbb" },
+      { id: "k1", name: "older", prefix: "bnd_aaa" },
+    ];
+    const { database, where, orderBy } = makeListDb(rows);
+
+    // The chain result is passed straight through — no post-processing.
+    expect(await listApiKeys(database, "u1")).toBe(rows);
+    // Scoped to the caller so one user can't enumerate another's keys.
+    expect(where).toHaveBeenCalledWith(eq(apiKey.userId, "u1"));
+    // desc(createdAt) => most recently created key first.
+    expect(orderBy).toHaveBeenCalledWith(desc(apiKey.createdAt));
+  });
+
+  it("projects only display columns — never the secret keyHash", async () => {
+    const { database, select } = makeListDb([]);
+    await listApiKeys(database, "u1");
+
+    // The exact projection: safe metadata columns, and crucially no keyHash.
+    const projection = select.mock.calls[0]![0];
+    expect(projection).toEqual({
+      id: apiKey.id,
+      name: apiKey.name,
+      prefix: apiKey.prefix,
+      lastUsedAt: apiKey.lastUsedAt,
+      expiresAt: apiKey.expiresAt,
+      createdAt: apiKey.createdAt,
+    });
+    expect(projection).not.toHaveProperty("keyHash");
   });
 });
 

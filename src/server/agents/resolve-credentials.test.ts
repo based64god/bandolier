@@ -531,6 +531,31 @@ describe("selectRunCredentials", () => {
     source: "user" as const,
   };
 
+  // A set with no first-class (Bedrock/Anthropic/OpenAI/Gemini) credentials, for
+  // the gollm-routing and empty-provider paths below.
+  const noFirstClass = {
+    aws: null,
+    anthropicApiKey: null,
+    anthropicOauthToken: null,
+    openaiApiKey: null,
+    codexAuthJson: null,
+    geminiApiKey: null,
+    source: "user" as const,
+  };
+
+  // A full custom-provider credential; selectRunCredentials only reads `.provider`
+  // to route, but returns the whole object as `customProvider`.
+  const makeCustomProvider = (
+    provider: string,
+    apiKey: string | null = null,
+  ): CustomProvidersModule.CustomProviderCredential => ({
+    provider,
+    apiKey,
+    apiBase: null,
+    extraEnv: null,
+    models: null,
+  });
+
   it("routes to the picked provider even when a higher-precedence one is set", () => {
     const run = selectRunCredentials(
       { ...set, aws: repoAws },
@@ -588,5 +613,90 @@ describe("selectRunCredentials", () => {
     expect(run.provider).toBeNull();
     expect(run.authKind).toBeNull();
     expect(run.anthropicApiKey).toBeNull();
+  });
+
+  // ── gollm-proxied routing ──────────────────────────────────────────────────
+
+  it("routes a picked gollm provider to its stored credential, leaving first-class fields empty", () => {
+    const groq = makeCustomProvider("groq", "gsk-live");
+    const run = selectRunCredentials(
+      {
+        ...noFirstClass,
+        customProviders: [makeCustomProvider("openrouter"), groq],
+      },
+      { modelProvider: "gollm:groq" },
+    );
+    expect(run.provider).toBe("gollm:groq");
+    expect(run.customProvider).toBe(groq);
+    expect(run.authKind).toBeNull();
+    // Exactly one provider's secrets reach the pod: the four first-class fields
+    // stay null even though the set may carry others.
+    expect(run.aws).toBeNull();
+    expect(run.anthropicApiKey).toBeNull();
+    expect(run.openaiApiKey).toBeNull();
+    expect(run.geminiApiKey).toBeNull();
+  });
+
+  it("returns a null provider when the picked gollm provider is not in the set", () => {
+    const run = selectRunCredentials(
+      { ...noFirstClass, customProviders: [makeCustomProvider("groq")] },
+      { modelProvider: "gollm:openrouter" },
+    );
+    expect(run.provider).toBeNull();
+    expect(run.customProvider).toBeNull();
+    expect(run.authKind).toBeNull();
+  });
+
+  it("falls back to the first gollm provider for a gollm-only set with no picker", () => {
+    const groq = makeCustomProvider("groq", "gsk-live");
+    const run = selectRunCredentials({
+      ...noFirstClass,
+      customProviders: [groq, makeCustomProvider("openrouter")],
+    });
+    expect(run.provider).toBe("gollm:groq");
+    expect(run.customProvider).toBe(groq);
+    expect(run.authKind).toBeNull();
+    expect(run.anthropicApiKey).toBeNull();
+  });
+
+  it("returns a null provider for a malformed empty gollm provider id", () => {
+    // parseGollmProvider("gollm:") yields "" (falsy), so this bypasses the early
+    // gollm branch and falls into the fallback, where no credential matches the
+    // empty id — the guard must return null, not leak a credential or throw.
+    const run = selectRunCredentials(
+      { ...noFirstClass, customProviders: [makeCustomProvider("groq")] },
+      { modelProvider: "gollm:" },
+    );
+    expect(run.provider).toBeNull();
+    expect(run.customProvider).toBeNull();
+  });
+
+  // ── picked provider with no matching credentials ───────────────────────────
+
+  it("reports no auth kind when routed to Anthropic but the set has none", () => {
+    // The picked provider wins even when the set holds no credentials for it;
+    // the auth kind then lands on null (nothing to pin to).
+    const run = selectRunCredentials(
+      { ...noFirstClass, geminiApiKey: "sk-gemini" },
+      { modelProvider: "anthropic" },
+    );
+    expect(run.provider).toBe("anthropic");
+    expect(run.authKind).toBeNull();
+    expect(run.anthropicApiKey).toBeNull();
+    expect(run.anthropicOauthToken).toBeNull();
+    // The gemini key present in the set must not leak into an Anthropic route.
+    expect(run.geminiApiKey).toBeNull();
+  });
+
+  it("reports no auth kind when routed to OpenAI but the set has none", () => {
+    const run = selectRunCredentials(
+      { ...noFirstClass, geminiApiKey: "sk-gemini" },
+      { modelProvider: "openai" },
+    );
+    expect(run.provider).toBe("openai");
+    expect(run.authKind).toBeNull();
+    expect(run.openaiApiKey).toBeNull();
+    expect(run.codexAuthJson).toBeNull();
+    expect(run.geminiApiKey).toBeNull();
   });
 });

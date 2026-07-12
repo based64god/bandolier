@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const fakeReact = vi.hoisted(() => ({
   refs: [] as { current: unknown }[],
   refIndex: 0,
+  cleanups: [] as (() => void)[],
 }));
 
 vi.mock("react", () => ({
@@ -19,7 +20,37 @@ vi.mock("react", () => ({
   ) => getSnapshot(),
   useRef: (initial: unknown) =>
     (fakeReact.refs[fakeReact.refIndex++] ??= { current: initial }),
-  useEffect: (effect: () => unknown) => void effect(),
+  // Run the effect immediately and stash any returned cleanup so a test can
+  // drive an "unmount" (React would call the cleanup then) — useBackgroundPush
+  // uses one to cancel its in-flight async work.
+  useEffect: (effect: () => unknown) => {
+    const cleanup = effect();
+    if (typeof cleanup === "function")
+      fakeReact.cleanups.push(cleanup as () => void);
+  },
+}));
+
+// useBackgroundPush pulls the push subscribe/unsubscribe mutations off the tRPC
+// client. Mock it so the hook gets a `{ mutate }` it can call without a real
+// React-Query context; the two spies capture exactly what it persists /
+// forgets server-side. useMutation is invoked at render time (well after these
+// consts initialise), so the factory referencing them lazily dodges the mock's
+// hoisting TDZ.
+const saveSubMutate =
+  vi.fn<
+    (input: {
+      endpoint: string;
+      keys: { p256dh: string; auth: string };
+    }) => void
+  >();
+const dropSubMutate = vi.fn<(input: { endpoint: string }) => void>();
+vi.mock("~/trpc/react", () => ({
+  api: {
+    push: {
+      subscribe: { useMutation: () => ({ mutate: saveSubMutate }) },
+      unsubscribe: { useMutation: () => ({ mutate: dropSubMutate }) },
+    },
+  },
 }));
 
 /** Runs one "render": resets the ref cursor, then invokes the hook body. */
@@ -119,6 +150,117 @@ function stubAlertEnv({ standalone = false } = {}) {
   return { ...stubNotification("granted"), ...stubAudioContext() };
 }
 
+/**
+ * Alert environment whose navigator exposes a service worker — the branch
+ * showNativeNotification prefers over the Notification constructor (required in
+ * installed PWAs). `ready` resolves a registration with a controllable
+ * showNotification; `rejectShow` makes it throw so the fall-through to the
+ * constructor can be exercised.
+ */
+function stubServiceWorkerEnv({
+  standalone = false,
+  permission = "granted",
+  rejectShow = false,
+}: {
+  standalone?: boolean;
+  permission?: "default" | "granted" | "denied";
+  rejectShow?: boolean;
+} = {}) {
+  const showNotification = vi.fn<
+    (title: string, options: NotificationOptions) => Promise<void>
+  >(() =>
+    rejectShow
+      ? Promise.reject(new Error("SW notifications forbidden"))
+      : Promise.resolve(),
+  );
+  const navigator = {
+    serviceWorker: { ready: Promise.resolve({ showNotification }) },
+  };
+  vi.stubGlobal("navigator", navigator);
+  vi.stubGlobal("window", {
+    matchMedia: vi.fn(() => ({ matches: standalone })),
+    navigator,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  });
+  return {
+    showNotification,
+    ...stubNotification(permission),
+    ...stubAudioContext(),
+  };
+}
+
+// A canonical web-push VAPID public key (URL-safe base64, exercises the `-`
+// substitution and the two-char padding urlBase64ToUint8Array computes).
+const VAPID =
+  "BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeAtA3LFgDzkrxZJjSgSnfckjBJuBkr3qBUYIHBQFLXYp5Nksh8";
+
+type PushSubJson = {
+  endpoint?: string;
+  keys?: { p256dh?: string; auth?: string };
+};
+type FakePushSub = {
+  endpoint: string;
+  toJSON: () => PushSubJson;
+  unsubscribe: ReturnType<typeof vi.fn>;
+};
+
+/** A PushSubscription stand-in: the module reads .endpoint, .toJSON(), .unsubscribe(). */
+function makePushSub(
+  endpoint: string,
+  keys: { p256dh?: string; auth?: string } | null,
+): FakePushSub {
+  return {
+    endpoint,
+    toJSON: () => ({ endpoint, keys: keys ?? undefined }),
+    unsubscribe: vi.fn(() => Promise.resolve()),
+  };
+}
+
+/**
+ * Environment for useBackgroundPush: a window advertising PushManager, a
+ * navigator whose serviceWorker.ready resolves a registration with a
+ * controllable pushManager, and a Notification permission. VAPID_PUBLIC_KEY is
+ * supplied separately via vi.stubEnv before load() so pushSupported() sees it.
+ */
+function stubPushEnv({
+  permission = "granted",
+  existing = null,
+  fresh = null,
+  hasPushManager = true,
+}: {
+  permission?: "default" | "granted" | "denied";
+  existing?: FakePushSub | null;
+  fresh?: FakePushSub | null;
+  hasPushManager?: boolean;
+} = {}) {
+  const getSubscription = vi.fn<() => Promise<FakePushSub | null>>(() =>
+    Promise.resolve(existing),
+  );
+  const subscribe = vi.fn<
+    (opts: {
+      userVisibleOnly: boolean;
+      applicationServerKey: Uint8Array;
+    }) => Promise<FakePushSub>
+  >(() => Promise.resolve(fresh!));
+  const navigator = {
+    serviceWorker: {
+      ready: Promise.resolve({ pushManager: { getSubscription, subscribe } }),
+    },
+  };
+  vi.stubGlobal("navigator", navigator);
+  const win: Record<string, unknown> = { navigator };
+  if (hasPushManager) win.PushManager = class {};
+  vi.stubGlobal("window", win);
+  return { getSubscription, subscribe, ...stubNotification(permission) };
+}
+
+// The alert hooks and useBackgroundPush fire-and-forget an async chain that
+// awaits navigator.serviceWorker.ready before touching the notification /
+// subscription. Yield past the microtask + macrotask boundary so that chain
+// settles before asserting.
+const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
 // The module caches its AudioContext at module level; re-import per test so
 // the cache — and the fake refs backing the hooks — start fresh.
 async function load() {
@@ -129,10 +271,14 @@ beforeEach(() => {
   vi.resetModules();
   fakeReact.refs = [];
   fakeReact.refIndex = 0;
+  fakeReact.cleanups = [];
+  saveSubMutate.mockReset();
+  dropSubMutate.mockReset();
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });
 
@@ -467,5 +613,244 @@ describe("useAwaitingInputAlerts", () => {
 
     expect(env.constructed).not.toHaveBeenCalled();
     expect(env.contexts).toHaveLength(0);
+  });
+});
+
+// showNativeNotification is private; drive it through a completion transition.
+// The interesting, previously-uncovered branch is the service-worker path an
+// installed PWA takes, plus its fall-throughs.
+describe("showNativeNotification (service worker path)", () => {
+  it("prefers the service worker's showNotification over the constructor", async () => {
+    const env = stubServiceWorkerEnv();
+    const { useCompletionAlerts } = await load();
+
+    render(() => useCompletionAlerts([agent("a", "Running")], true));
+    render(() => useCompletionAlerts([agent("a", "Succeeded")], true));
+    await flush();
+
+    expect(env.showNotification).toHaveBeenCalledTimes(1);
+    expect(env.showNotification).toHaveBeenCalledWith("Agent finished", {
+      body: "task a",
+      icon: "/icon-192.png",
+      badge: "/icon-192.png",
+      tag: "complete:a",
+    });
+    // The constructor is the fallback only; with a service worker present it's
+    // never touched.
+    expect(env.constructed).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the constructor when the service worker rejects", async () => {
+    const env = stubServiceWorkerEnv({ rejectShow: true });
+    const { useCompletionAlerts } = await load();
+
+    render(() => useCompletionAlerts([agent("a", "Running")], true));
+    render(() => useCompletionAlerts([agent("a", "Failed")], true));
+    await flush();
+
+    // reg.showNotification threw; the catch drops through to the constructor.
+    expect(env.showNotification).toHaveBeenCalledTimes(1);
+    expect(env.constructed).toHaveBeenCalledWith(
+      "Agent failed",
+      expect.objectContaining({ tag: "complete:a" }),
+    );
+  });
+
+  it("is a no-op without granted permission, even with a service worker", async () => {
+    const env = stubServiceWorkerEnv({ permission: "denied" });
+    const { useCompletionAlerts } = await load();
+
+    render(() => useCompletionAlerts([agent("a", "Running")], true));
+    render(() => useCompletionAlerts([agent("a", "Succeeded")], true));
+    await flush();
+
+    expect(env.showNotification).not.toHaveBeenCalled();
+    expect(env.constructed).not.toHaveBeenCalled();
+  });
+
+  it("swallows a constructor that some installed PWAs forbid", async () => {
+    // Bare navigator (no serviceWorker) forces the constructor path; a PWA that
+    // forbids `new Notification` must not crash the alert — the contract is a
+    // silent no-op, not a throw.
+    vi.stubGlobal("navigator", {});
+    vi.stubGlobal("window", {
+      matchMedia: vi.fn(() => ({ matches: true })), // standalone: skip the chime
+      navigator: {},
+    });
+    class ThrowingNotification {
+      static permission = "granted" as const;
+      constructor() {
+        throw new Error("constructor forbidden");
+      }
+    }
+    vi.stubGlobal("Notification", ThrowingNotification);
+    const { useCompletionAlerts } = await load();
+
+    render(() => useCompletionAlerts([agent("a", "Running")], true));
+    expect(() =>
+      render(() => useCompletionAlerts([agent("a", "Succeeded")], true)),
+    ).not.toThrow();
+  });
+});
+
+describe("useBackgroundPush", () => {
+  it("is a no-op when the VAPID public key is unset", async () => {
+    // Empty string → env treats it as undefined → pushSupported() is false, so
+    // the subscription machinery is never touched regardless of enabled state.
+    vi.stubEnv("NEXT_PUBLIC_VAPID_PUBLIC_KEY", "");
+    const env = stubPushEnv();
+    const { useBackgroundPush } = await load();
+
+    render(() => useBackgroundPush(true));
+    await flush();
+
+    expect(env.getSubscription).not.toHaveBeenCalled();
+    expect(saveSubMutate).not.toHaveBeenCalled();
+    expect(dropSubMutate).not.toHaveBeenCalled();
+  });
+
+  it("is a no-op when the browser lacks PushManager", async () => {
+    vi.stubEnv("NEXT_PUBLIC_VAPID_PUBLIC_KEY", VAPID);
+    const env = stubPushEnv({ hasPushManager: false });
+    const { useBackgroundPush } = await load();
+
+    render(() => useBackgroundPush(true));
+    await flush();
+
+    expect(env.getSubscription).not.toHaveBeenCalled();
+    expect(saveSubMutate).not.toHaveBeenCalled();
+  });
+
+  it("subscribes and persists the endpoint + keys when enabled and granted", async () => {
+    vi.stubEnv("NEXT_PUBLIC_VAPID_PUBLIC_KEY", VAPID);
+    const fresh = makePushSub("https://push.example/new", {
+      p256dh: "PUBK",
+      auth: "AUTHK",
+    });
+    const env = stubPushEnv({ existing: null, fresh });
+    const { useBackgroundPush } = await load();
+
+    render(() => useBackgroundPush(true));
+    await flush();
+
+    // No existing subscription → it subscribes, converting the URL-safe base64
+    // VAPID key to the byte array the browser wants (urlBase64ToUint8Array).
+    expect(env.subscribe).toHaveBeenCalledTimes(1);
+    const opts = env.subscribe.mock.calls[0]?.[0];
+    expect(opts?.userVisibleOnly).toBe(true);
+    expect(Array.from(opts?.applicationServerKey ?? new Uint8Array())).toEqual(
+      Array.from(Buffer.from(VAPID, "base64url")),
+    );
+    expect(saveSubMutate).toHaveBeenCalledWith({
+      endpoint: "https://push.example/new",
+      keys: { p256dh: "PUBK", auth: "AUTHK" },
+    });
+    expect(dropSubMutate).not.toHaveBeenCalled();
+  });
+
+  it("reuses an existing subscription instead of re-subscribing", async () => {
+    vi.stubEnv("NEXT_PUBLIC_VAPID_PUBLIC_KEY", VAPID);
+    const existing = makePushSub("https://push.example/existing", {
+      p256dh: "EPK",
+      auth: "EAK",
+    });
+    const env = stubPushEnv({ existing });
+    const { useBackgroundPush } = await load();
+
+    render(() => useBackgroundPush(true));
+    await flush();
+
+    expect(env.subscribe).not.toHaveBeenCalled();
+    expect(saveSubMutate).toHaveBeenCalledWith({
+      endpoint: "https://push.example/existing",
+      keys: { p256dh: "EPK", auth: "EAK" },
+    });
+  });
+
+  it("does not persist when the subscription JSON is missing a key", async () => {
+    vi.stubEnv("NEXT_PUBLIC_VAPID_PUBLIC_KEY", VAPID);
+    // Endpoint present but no `auth` key → the guard rejects the incomplete
+    // subscription rather than saving a half-formed one.
+    const existing = makePushSub("https://push.example/partial", {
+      p256dh: "only",
+    });
+    const env = stubPushEnv({ existing });
+    const { useBackgroundPush } = await load();
+
+    render(() => useBackgroundPush(true));
+    await flush();
+
+    expect(env.subscribe).not.toHaveBeenCalled();
+    expect(saveSubMutate).not.toHaveBeenCalled();
+  });
+
+  it("does not subscribe when enabled but permission isn't granted", async () => {
+    vi.stubEnv("NEXT_PUBLIC_VAPID_PUBLIC_KEY", VAPID);
+    const env = stubPushEnv({
+      permission: "default",
+      existing: makePushSub("https://push.example/x", {
+        p256dh: "x",
+        auth: "y",
+      }),
+    });
+    const { useBackgroundPush } = await load();
+
+    render(() => useBackgroundPush(true));
+    await flush();
+
+    // Bails before ever asking for a subscription.
+    expect(env.getSubscription).not.toHaveBeenCalled();
+    expect(saveSubMutate).not.toHaveBeenCalled();
+  });
+
+  it("tears down the subscription and forgets it server-side when disabled", async () => {
+    vi.stubEnv("NEXT_PUBLIC_VAPID_PUBLIC_KEY", VAPID);
+    const existing = makePushSub("https://push.example/drop", {
+      p256dh: "x",
+      auth: "y",
+    });
+    stubPushEnv({ existing });
+    const { useBackgroundPush } = await load();
+
+    render(() => useBackgroundPush(false));
+    await flush();
+
+    expect(existing.unsubscribe).toHaveBeenCalledTimes(1);
+    expect(dropSubMutate).toHaveBeenCalledWith({
+      endpoint: "https://push.example/drop",
+    });
+    expect(saveSubMutate).not.toHaveBeenCalled();
+  });
+
+  it("is a no-op when disabled and there is no subscription to drop", async () => {
+    vi.stubEnv("NEXT_PUBLIC_VAPID_PUBLIC_KEY", VAPID);
+    const env = stubPushEnv({ existing: null });
+    const { useBackgroundPush } = await load();
+
+    render(() => useBackgroundPush(false));
+    await flush();
+
+    expect(env.getSubscription).toHaveBeenCalledTimes(1);
+    expect(dropSubMutate).not.toHaveBeenCalled();
+  });
+
+  it("abandons the in-flight subscription when unmounted before it resolves", async () => {
+    vi.stubEnv("NEXT_PUBLIC_VAPID_PUBLIC_KEY", VAPID);
+    const fresh = makePushSub("https://push.example/new", {
+      p256dh: "PUBK",
+      auth: "AUTHK",
+    });
+    const env = stubPushEnv({ existing: null, fresh });
+    const { useBackgroundPush } = await load();
+
+    render(() => useBackgroundPush(true));
+    // Unmount (React runs the effect cleanup) before serviceWorker.ready has
+    // settled: the `cancelled` guard must swallow the resolved subscription so a
+    // gone component never persists one.
+    fakeReact.cleanups.forEach((cleanup) => cleanup());
+    await flush();
+
+    expect(env.getSubscription).not.toHaveBeenCalled();
+    expect(saveSubMutate).not.toHaveBeenCalled();
   });
 });

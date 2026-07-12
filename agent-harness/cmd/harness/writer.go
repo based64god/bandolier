@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -24,6 +25,52 @@ const maxPRDiffBytes = 60_000
 // issue-writer model. The agent's write-up lands at the end, so we keep the tail.
 const maxIssueTranscriptBytes = 60_000
 
+// largeDiffFiles and largeDiffLines set when a change is big enough that the PR
+// description should lead with a commit-by-commit review guide rather than hand
+// a reviewer one undifferentiated diff. They mirror the widely-cited
+// reviewability guidance that smaller PRs are reviewed faster and with fewer
+// defects; either threshold trips the guide.
+const (
+	largeDiffFiles = 15
+	largeDiffLines = 400
+)
+
+// diffSummary is the size of a branch's change — files touched and lines added
+// and removed — as reported by `git diff --numstat`.
+type diffSummary struct {
+	files   int
+	added   int
+	deleted int
+}
+
+func (d diffSummary) lines() int { return d.added + d.deleted }
+
+// large reports whether the change is big enough to warrant a review guide.
+func (d diffSummary) large() bool {
+	return d.files >= largeDiffFiles || d.lines() >= largeDiffLines
+}
+
+// summarizeNumstat parses `git diff --numstat` output into a diffSummary. Each
+// line is "<added>\t<deleted>\t<path>"; binary files report "-" for the counts,
+// contributing a changed file but no lines.
+func summarizeNumstat(numstat string) diffSummary {
+	var d diffSummary
+	for _, line := range strings.Split(strings.TrimSpace(numstat), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+		d.files++
+		if n, err := strconv.Atoi(fields[0]); err == nil {
+			d.added += n
+		}
+		if n, err := strconv.Atoi(fields[1]); err == nil {
+			d.deleted += n
+		}
+	}
+	return d
+}
+
 // buildPRPrompt assembles the instruction + commits/diff context the PR-writer
 // model turns into a title and description. Shared by every provider's writer so
 // they all produce identical copy from the same inputs.
@@ -43,17 +90,34 @@ func buildPRPrompt(ctx context.Context, cfg config, branchName string) string {
 	// introduced relative to where it diverged.
 	diffRange := fmt.Sprintf("%s...%s", cfg.diffBase(), branchName)
 	diffstat, _ := captureCmd(ctx, cfg.workDir, "git", "diff", "--stat", diffRange)
+	// numstat is parsed for size gating; it is computed over the full change even
+	// when the diff text below is truncated, so a huge change is still detected.
+	numstat, _ := captureCmd(ctx, cfg.workDir, "git", "diff", "--numstat", diffRange)
 	diff, _ := captureCmd(ctx, cfg.workDir, "git", "diff", diffRange)
 	if len(diff) > maxPRDiffBytes {
 		diff = diff[:maxPRDiffBytes] + "\n…(diff truncated)…"
 	}
 
-	return fmt.Sprintf(`Write a GitHub pull request title and description for the changes below, based ONLY on what the commits and diff actually show. Be accurate and concise; do not invent changes or mention the task prompt.
+	return renderPRPrompt(gitLog, diffstat, diff, summarizeNumstat(numstat))
+}
 
+// renderPRPrompt formats the PR-writer instruction from the gathered git
+// context. When the change is large, the writer is asked to lead the body with a
+// "## Suggested review order" walkthrough so the diff can be reviewed in small
+// pieces. Kept separate from the git plumbing so it is unit-testable.
+func renderPRPrompt(gitLog, diffstat, diff string, summary diffSummary) string {
+	bodyGuidance := `<markdown description: a one or two sentence summary, then a "## Changes" section with a bullet list of the notable changes>`
+	reviewGuidance := ""
+	if summary.large() {
+		reviewGuidance = fmt.Sprintf("\nThis is a large change (%d files changed, ~%d lines) — make it reviewable in small pieces. In the BODY, right after the summary and before \"## Changes\", add a \"## Suggested review order\" section: a numbered walkthrough that breaks the change into small logical steps a reviewer can check one at a time (follow the commits when there are several, otherwise group by area or file). Keep the \"## Changes\" section as well.\n", summary.files, summary.lines())
+	}
+
+	return fmt.Sprintf(`Write a GitHub pull request title and description for the changes below, based ONLY on what the commits and diff actually show. Be accurate and concise; do not invent changes or mention the task prompt.
+%s
 Respond in EXACTLY this format, with no preamble and no code fences:
 TITLE: <single-line imperative title, ~70 chars max>
 BODY:
-<markdown description: a one or two sentence summary, then a "## Changes" section with a bullet list of the notable changes>
+%s
 
 === COMMITS ===
 %s
@@ -62,7 +126,7 @@ BODY:
 %s
 
 === DIFF ===
-%s`, strings.TrimSpace(gitLog), strings.TrimSpace(diffstat), diff)
+%s`, reviewGuidance, bodyGuidance, strings.TrimSpace(gitLog), strings.TrimSpace(diffstat), diff)
 }
 
 // buildIssuePrompt assembles the instruction + run transcript the issue-writer

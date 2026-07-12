@@ -81,6 +81,9 @@ func TestBuildRepoSystemPrompt(t *testing.T) {
 	if !strings.Contains(got, "Do NOT push or open a pull request") {
 		t.Error("buildRepoSystemPrompt should forbid pushing")
 	}
+	if !strings.Contains(got, "commit-by-commit") {
+		t.Error("buildRepoSystemPrompt should ask for a reviewable, commit-by-commit history")
+	}
 }
 
 func TestBuildInteractiveSystemPrompt(t *testing.T) {

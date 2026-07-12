@@ -36,6 +36,12 @@ vi.mock("~/server/webhooks/issue-opened", () => ({
   handleIssueEdited: (...args: unknown[]) => handleIssueEdited(...(args as [])),
 }));
 
+const handlePrReviewComment = vi.fn<() => Promise<void>>();
+vi.mock("~/server/webhooks/pr-review-comment", () => ({
+  handlePrReviewComment: (...args: unknown[]) =>
+    handlePrReviewComment(...(args as [])),
+}));
+
 const handleCiFailure = vi.fn<() => Promise<void>>();
 vi.mock("~/server/webhooks/ci-failure", () => ({
   handleCiFailure: (...args: unknown[]) => handleCiFailure(...(args as [])),
@@ -101,6 +107,7 @@ beforeEach(() => {
   handleIssueComment.mockResolvedValue(undefined);
   handleIssueOpened.mockResolvedValue(undefined);
   handleIssueEdited.mockResolvedValue(undefined);
+  handlePrReviewComment.mockResolvedValue(undefined);
   handleCiFailure.mockResolvedValue(undefined);
   handleInstallation.mockResolvedValue(undefined);
   getRepoWebhookConfig.mockResolvedValue(null);
@@ -191,6 +198,22 @@ describe("POST /api/webhooks/github event dispatch", () => {
     const res = await POST(signedReq("issues", { action: "edited" }));
     expect(res.status).toBe(200);
     expect(handleIssueEdited).toHaveBeenCalledTimes(1);
+  });
+
+  it("routes a pull_request_review_comment.created event to handlePrReviewComment", async () => {
+    const res = await POST(
+      signedReq("pull_request_review_comment", { action: "created" }),
+    );
+    expect(res.status).toBe(200);
+    expect(handlePrReviewComment).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores a pull_request_review_comment.edited event", async () => {
+    const res = await POST(
+      signedReq("pull_request_review_comment", { action: "edited" }),
+    );
+    expect(res.status).toBe(200);
+    expect(handlePrReviewComment).not.toHaveBeenCalled();
   });
 
   it("returns 500 (not an unhandled rejection) when a handler throws", async () => {

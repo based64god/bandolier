@@ -12,10 +12,12 @@ import {
   handleIssueEdited,
   handleIssueOpened,
 } from "~/server/webhooks/issue-opened";
+import { handlePrReviewComment } from "~/server/webhooks/pr-review-comment";
 import {
   type InstallationPayload,
   type IssueCommentPayload,
   type IssuePayload,
+  type PullRequestReviewCommentPayload,
   type WorkflowRunPayload,
 } from "~/server/webhooks/types";
 
@@ -109,6 +111,21 @@ export async function POST(req: NextRequest) {
           : null;
         await handleIssueComment(payload as IssueCommentPayload, config);
       }
+    } else if (
+      event === "pull_request_review_comment" &&
+      (payload as PullRequestReviewCommentPayload).action === "created"
+    ) {
+      // An inline review comment on a PR's diff resumes that PR's most recent
+      // run, just like a vanilla comment, carrying the file/line it's anchored
+      // to. Unlike issue comments there's no approval short-circuit: the
+      // credential-approval flow lives on the issue's vanilla comment thread.
+      const config = repoFullName
+        ? await getRepoWebhookConfig(db, repoFullName)
+        : null;
+      await handlePrReviewComment(
+        payload as PullRequestReviewCommentPayload,
+        config,
+      );
     } else if (
       event === "workflow_run" &&
       (payload as WorkflowRunPayload).action === "completed"

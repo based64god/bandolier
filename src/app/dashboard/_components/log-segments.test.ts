@@ -157,7 +157,9 @@ describe("groupHarnessBlocks", () => {
 describe("harnessSubagentText", () => {
   it("splits the label and body of a subagent line", () => {
     expect(
-      harnessSubagentText(subLine("Agent(Explore): find auth", "→ Grep: login")),
+      harnessSubagentText(
+        subLine("Agent(Explore): find auth", "→ Grep: login"),
+      ),
     ).toEqual({ label: "Agent(Explore): find auth", text: "→ Grep: login" });
   });
 

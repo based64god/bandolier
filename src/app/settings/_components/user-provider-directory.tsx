@@ -30,7 +30,7 @@ export function UserProviderDirectory() {
   const { data: catalog } = api.account.customProviderCatalog.useQuery();
   const { data: configured } = api.account.customProviderStatus.useQuery();
 
-  const { result, onSave, onRemove } = useCredentialMutations(() =>
+  const { result, setResult, onSave, onRemove } = useCredentialMutations(() =>
     utils.account.customProviderStatus.invalidate(),
   );
   const setCustom = api.account.setCustomProvider.useMutation({
@@ -38,6 +38,9 @@ export function UserProviderDirectory() {
   });
   const deleteCustom = api.account.deleteCustomProvider.useMutation({
     onSuccess: onRemove,
+  });
+  const testCustom = api.account.testCustomProvider.useMutation({
+    onSuccess: (r) => setResult(r.valid ? "Valid ✓" : `Invalid: ${r.error}`),
   });
 
   const configuredById = new Map(
@@ -92,6 +95,7 @@ export function UserProviderDirectory() {
         accent: "sky",
         configured: configuredById.has(c.id),
         keywords: c.id,
+        priority: c.priority,
         body: (
           <GenericProviderForm
             entry={c}
@@ -106,6 +110,11 @@ export function UserProviderDirectory() {
             savePending={setCustom.isPending}
             saveError={setCustom.error?.message}
             result={result}
+            onTest={() => {
+              setResult("Testing…");
+              testCustom.mutate({ provider: c.id });
+            }}
+            testPending={testCustom.isPending}
             onRemove={() => deleteCustom.mutate({ provider: c.id })}
             removePending={deleteCustom.isPending}
           />

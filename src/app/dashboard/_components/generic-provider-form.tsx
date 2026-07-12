@@ -54,6 +54,8 @@ export function GenericProviderForm({
   savePending,
   saveError,
   result,
+  onTest,
+  testPending,
   onRemove,
   removePending,
 }: {
@@ -64,6 +66,9 @@ export function GenericProviderForm({
   savePending: boolean;
   saveError?: string | null;
   result: string | null;
+  /** Live-test the stored credential (omit to hide the Test button). */
+  onTest?: () => void;
+  testPending?: boolean;
   onRemove: () => void;
   removePending: boolean;
 }) {
@@ -91,16 +96,28 @@ export function GenericProviderForm({
               ? ` · +${configured.extraEnvKeys.join(", ")}`
               : ""}
           </div>
-          <button
-            type="button"
-            onClick={onRemove}
-            disabled={removePending}
-            className="shrink-0 rounded-lg border border-white/10 px-3 py-1.5 text-xs text-white/60 hover:bg-white/5 disabled:opacity-50"
-          >
-            Remove
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            {onTest && (
+              <button
+                type="button"
+                onClick={onTest}
+                disabled={testPending}
+                className="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-white/60 hover:bg-white/5 disabled:opacity-50"
+              >
+                Test
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onRemove}
+              disabled={removePending}
+              className="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-white/60 hover:bg-white/5 disabled:opacity-50"
+            >
+              Remove
+            </button>
+          </div>
         </div>
-        <CredentialFeedback result={result} />
+        <CredentialFeedback result={result} saveError={saveError} />
       </div>
     );
   }

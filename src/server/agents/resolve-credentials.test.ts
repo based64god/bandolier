@@ -290,15 +290,24 @@ describe("resolveModelCredentials", () => {
     });
   });
 
-  it("keeps only the user's own custom providers when the user set wins", async () => {
+  it("merges the repo's shared custom providers into the winning user set (user wins per id)", async () => {
     getUserAnthropicKey.mockResolvedValue("sk-user");
-    getUserCustomProviders.mockResolvedValue([{ provider: "groq" }]);
-    getRepoCustomProviders.mockResolvedValue([{ provider: "together" }]);
-    // Default preference → user set wins; the repo's custom providers are not
-    // exposed (mirrors how the repo's Gemini key is invisible when user wins).
+    getUserCustomProviders.mockResolvedValue([
+      { provider: "groq", apiKey: "user-groq" },
+    ]);
+    getRepoCustomProviders.mockResolvedValue([
+      { provider: "groq", apiKey: "repo-groq" },
+      { provider: "together", apiKey: "repo-tg" },
+    ]);
+    // Default preference → user set wins; its gollm providers win per id, but the
+    // repo's shared ones (together) still fill the gaps so they stay available
+    // (unlike the first-class credentials, which move as an all-or-nothing unit).
     const r = await resolveModelCredentials(db, "u1", "owner/repo");
     expect(r.source).toBe("user");
-    expect(r.customProviders?.map((c) => c.provider)).toEqual(["groq"]);
+    const byId = Object.fromEntries(
+      (r.customProviders ?? []).map((c) => [c.provider, c.apiKey]),
+    );
+    expect(byId).toEqual({ groq: "user-groq", together: "repo-tg" });
   });
 
   it("does NOT mix the repo's Anthropic key with the user's OAuth token (Claude side is atomic)", async () => {

@@ -5,6 +5,7 @@ import {
   gollmProviderInfo,
   keyFieldOf,
   providerFields,
+  providerPriority,
   type GollmProviderInfo,
 } from "./gollm-catalog";
 
@@ -141,5 +142,20 @@ describe("catalog shape-hint coverage", () => {
     const info = gollmProviderInfo(id);
     expect(info, `unknown provider "${id}"`).toBeDefined();
     expect(surfacesShapeHint(info!)).toBe(true);
+  });
+});
+
+describe("provider metadata", () => {
+  it("weights common providers above the long tail, below the first-class band", () => {
+    expect(providerPriority("groq")).toBeGreaterThan(0);
+    // Never outranks the four first-class providers (70–100).
+    expect(providerPriority("groq")).toBeLessThan(70);
+    // An obscure long-tail gateway gets the default weight.
+    expect(providerPriority("darkbloom")).toBe(0);
+  });
+
+  it("marks subscription-style backends", () => {
+    expect(gollmProviderInfo("github_copilot")?.subscription).toBe(true);
+    expect(gollmProviderInfo("groq")?.subscription).toBeUndefined();
   });
 });

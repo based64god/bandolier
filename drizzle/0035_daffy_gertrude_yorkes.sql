@@ -1,0 +1,2 @@
+ALTER TABLE "repo_custom_provider_credentials" ADD COLUMN "configured_by" text;--> statement-breakpoint
+ALTER TABLE "repo_custom_provider_credentials" ADD CONSTRAINT "repo_custom_provider_credentials_configured_by_user_id_fk" FOREIGN KEY ("configured_by") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;

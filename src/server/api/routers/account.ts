@@ -11,14 +11,17 @@ import { cleanSessionToken, validateAwsCredentials } from "~/server/agents/aws";
 import { getUserCompute, parseComputeInput } from "~/server/agents/compute";
 import { maskKey, stripWhitespace } from "~/server/api/credentials";
 import {
+  getRepoCustomProviders,
   getUserCustomProviders,
   normalizeCustomProviderInput,
+  testCustomProviderCredential,
   validateCustomProviderInput,
 } from "~/server/agents/custom-providers";
 import {
   GOLLM_PROVIDERS,
   gollmProviderInfo,
   providerFields,
+  providerPriority,
 } from "~/server/agents/gollm-catalog";
 import {
   getUserKubeconfig,
@@ -430,6 +433,7 @@ export const accountRouter = createTRPCRouter({
       id: info.id,
       label: info.label,
       listable: info.listable ?? false,
+      priority: providerPriority(info.id),
       hint: info.hint ?? null,
       fields: providerFields(info).map((f) => ({
         env: f.env,
@@ -494,6 +498,19 @@ export const accountRouter = createTRPCRouter({
       return { success: true };
     }),
 
+  // Live-tests a stored custom-provider credential (the post-save "Test"
+  // action) — the gollm counterpart of testAws/testAnthropic/…
+  testCustomProvider: protectedProcedure
+    .input(z.object({ provider: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      const rows = await getUserCustomProviders(ctx.db, ctx.session.user.id);
+      const cred = rows.find((r) => r.provider === input.provider);
+      if (!cred) {
+        return { valid: false as const, error: "No credential configured." };
+      }
+      return testCustomProviderCredential(cred);
+    }),
+
   // ── Kubeconfig ────────────────────────────────────────────────────────────
 
   kubeconfigStatus: protectedProcedure
@@ -508,13 +525,17 @@ export const accountRouter = createTRPCRouter({
       const repo = input?.repoFullName
         ? await getRepoCredentials(ctx.db, input.repoFullName)
         : null;
+      const repoCustom = input?.repoFullName
+        ? await getRepoCustomProviders(ctx.db, input.repoFullName)
+        : [];
       const managedByRepo =
         !!repo?.preferRepoCredentials &&
         (!!repo.kubeconfig ||
           !!repo.anthropicApiKey ||
           !!repo.openaiApiKey ||
           !!repo.geminiApiKey ||
-          !!repo.aws);
+          !!repo.aws ||
+          repoCustom.length > 0);
       if (managedByRepo) {
         return {
           managedByRepo: true as const,

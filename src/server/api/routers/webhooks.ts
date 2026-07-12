@@ -7,6 +7,7 @@ import { validateAnthropicKey } from "~/server/agents/anthropic";
 import {
   getRepoCustomProviders,
   normalizeCustomProviderInput,
+  testCustomProviderCredential,
   validateCustomProviderInput,
 } from "~/server/agents/custom-providers";
 import { gollmProviderInfo } from "~/server/agents/gollm-catalog";
@@ -805,15 +806,20 @@ export const webhooksRouter = createTRPCRouter({
         });
       }
       const normalized = normalizeCustomProviderInput(input);
+      const configuredBy = ctx.session.user.id;
       await ctx.db
         .insert(repoCustomProviderCredentials)
-        .values({ repoFullName: input.repoFullName, ...normalized })
+        .values({
+          repoFullName: input.repoFullName,
+          configuredBy,
+          ...normalized,
+        })
         .onConflictDoUpdate({
           target: [
             repoCustomProviderCredentials.repoFullName,
             repoCustomProviderCredentials.provider,
           ],
-          set: { ...normalized, updatedAt: new Date() },
+          set: { ...normalized, configuredBy, updatedAt: new Date() },
         });
       return { valid: true as const };
     }),
@@ -836,5 +842,24 @@ export const webhooksRouter = createTRPCRouter({
           ),
         );
       return { success: true };
+    }),
+
+  // Live-tests a repo's stored custom-provider credential (admin-only) — the
+  // gollm counterpart of the first-class repo credential checks.
+  testCustomProvider: protectedProcedure
+    .input(
+      z.object({
+        repoFullName: z.string().min(1),
+        provider: z.string().min(1),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await requireRepoAdmin(ctx, input.repoFullName);
+      const rows = await getRepoCustomProviders(ctx.db, input.repoFullName);
+      const cred = rows.find((r) => r.provider === input.provider);
+      if (!cred) {
+        return { valid: false as const, error: "No credential configured." };
+      }
+      return testCustomProviderCredential(cred);
     }),
 });

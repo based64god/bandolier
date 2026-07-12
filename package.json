@@ -23,7 +23,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "test:integration": "vitest run -c vitest.integration.config.ts",
     "test:e2e": "node e2e/run.mjs",
+    "test:e2e:flow": "node e2e/flow-run.mjs",
+    "test:e2e:authflow": "node e2e/authflow-run.mjs",
     "typecheck": "tsc --noEmit",
     "vapid:generate": "node scripts/generate-vapid-keys.mjs"
   },

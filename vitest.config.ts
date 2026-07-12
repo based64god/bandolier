@@ -1,5 +1,5 @@
 import { fileURLToPath } from "node:url";
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 
 // Unit-test configuration. Tests target the app's pure logic modules (parsing,
 // validation, formatting, crypto token derivation) — no database, network, or
@@ -8,6 +8,10 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/**/*.test.ts"],
+    // The DB-backed integration suite shares the `.test.ts` suffix but needs a
+    // real Postgres (and its own config); keep it out of the fast unit run. It
+    // runs via `pnpm test:integration` (vitest.integration.config.ts).
+    exclude: [...configDefaults.exclude, "**/*.integration.test.ts"],
     // Satisfy ~/env validation for modules whose import graph reaches it. These
     // are inert placeholders — no test performs real DB/network/AWS access.
     env: {

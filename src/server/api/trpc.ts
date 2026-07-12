@@ -88,7 +88,11 @@ export const createTRPCRouter = t.router;
 const timingMiddleware = t.middleware(async ({ next, path }) => {
   const start = Date.now();
 
-  if (t._config.isDev) {
+  // The artificial delay simulates production latency in local dev. Skip it
+  // under vitest (VITEST is set only there): it adds 100-500ms per procedure
+  // call, which would slow — and flake — the integration suites that drive many
+  // real procedures against Postgres, for no test value.
+  if (t._config.isDev && !process.env.VITEST) {
     // artificial delay in dev
     const waitMs = Math.floor(Math.random() * 400) + 100;
     await new Promise((resolve) => setTimeout(resolve, waitMs));

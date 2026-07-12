@@ -137,6 +137,64 @@ describe("buildResumeUserMessage", () => {
     });
     expect(message).toContain("(empty comment)");
   });
+
+  it("anchors a review comment to a single line and shows its diff hunk", () => {
+    const message = buildResumeUserMessage({
+      kind: "pull request",
+      number: 42,
+      title: "Add login",
+      commenter: "octocat",
+      comment: "This should handle the null case.",
+      reviewComment: {
+        path: "src/auth.ts",
+        line: 42,
+        diffHunk: "@@ -40,3 +40,4 @@\n   const u = user;\n+  return u;",
+      },
+    });
+    expect(message).toContain("## Follow-up on pull request #42: Add login");
+    expect(message).toContain(
+      "@octocat left a review comment on `src/auth.ts` line 42:",
+    );
+    expect(message).toContain("This should handle the null case.");
+    expect(message).toContain("```diff\n@@ -40,3 +40,4 @@");
+  });
+
+  it("renders a multi-line review comment as a line range", () => {
+    const message = buildResumeUserMessage({
+      kind: "pull request",
+      number: 42,
+      title: "Add login",
+      commenter: "octocat",
+      comment: "Extract this block.",
+      reviewComment: { path: "src/auth.ts", line: 44, startLine: 40 },
+    });
+    expect(message).toContain("`src/auth.ts` lines 40–44");
+  });
+
+  it("names only the file when the line can't be mapped", () => {
+    const message = buildResumeUserMessage({
+      kind: "pull request",
+      number: 42,
+      title: "Add login",
+      commenter: "octocat",
+      comment: "Outdated, but relevant.",
+      reviewComment: { path: "src/auth.ts", line: null },
+    });
+    expect(message).toContain("review comment on `src/auth.ts`:");
+    expect(message).not.toContain(" line");
+  });
+
+  it("omits the diff block when there is no hunk", () => {
+    const message = buildResumeUserMessage({
+      kind: "pull request",
+      number: 42,
+      title: "Add login",
+      commenter: "octocat",
+      comment: "Nit.",
+      reviewComment: { path: "src/auth.ts", line: 3 },
+    });
+    expect(message).not.toContain("```diff");
+  });
 });
 
 describe("buildCiResumeUserMessage", () => {

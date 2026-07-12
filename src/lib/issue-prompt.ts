@@ -102,15 +102,76 @@ Do not ask for clarification. Implement the best solution you can.`;
  * issue/PR context. The harness prepends the parent run's transcript, so this
  * only needs to carry what's new.
  */
+/**
+ * Where a PR review comment is anchored: the file, the line (or line range) it
+ * targets, and the diff hunk it was left on. Folded into the resume user
+ * message so the agent sees which code the reviewer is pointing at without
+ * having to re-derive it from the transcript.
+ */
+export interface ReviewCommentLocation {
+  /** Repo-relative path of the file the comment is anchored to. */
+  path: string;
+  /**
+   * The line the comment targets — the last line of the range for a multi-line
+   * comment. Null when GitHub can't map it to a current line (outdated diff).
+   */
+  line: number | null;
+  /** First line of a multi-line comment range; absent for a single line. */
+  startLine?: number | null;
+  /** The diff hunk the comment was left on, for surrounding code context. */
+  diffHunk?: string | null;
+}
+
+/** "`path` lines A–B" / "`path` line A" / "`path`" for a review comment. */
+function reviewCommentAnchor(loc: ReviewCommentLocation): string {
+  const lineRef =
+    loc.startLine && loc.line && loc.startLine !== loc.line
+      ? `lines ${loc.startLine}–${loc.line}`
+      : loc.line
+        ? `line ${loc.line}`
+        : null;
+  return lineRef ? `\`${loc.path}\` ${lineRef}` : `\`${loc.path}\``;
+}
+
+/**
+ * Builds the user message for a resumed run: the follow-up comment in its
+ * issue/PR context. The harness prepends the parent run's transcript, so this
+ * only needs to carry what's new. A PR review comment additionally carries the
+ * file/line it's anchored to (`reviewComment`), rendered so the agent knows
+ * which code the reviewer is referring to.
+ */
 export function buildResumeUserMessage(opts: {
   kind: "issue" | "pull request";
   number: number;
   title: string;
   commenter: string;
   comment: string;
+  reviewComment?: ReviewCommentLocation;
 }): string {
   const body = opts.comment.trim() || "(empty comment)";
-  return `## Follow-up on ${opts.kind} #${opts.number}: ${opts.title}
+  const header = `## Follow-up on ${opts.kind} #${opts.number}: ${opts.title}`;
+
+  if (opts.reviewComment) {
+    const loc = opts.reviewComment;
+    let message = `${header}
+
+@${opts.commenter} left a review comment on ${reviewCommentAnchor(loc)}:
+
+${body}`;
+    const hunk = loc.diffHunk?.trim();
+    if (hunk) {
+      message += `
+
+The comment is anchored to this diff hunk:
+
+\`\`\`diff
+${hunk}
+\`\`\``;
+    }
+    return message;
+  }
+
+  return `${header}
 
 @${opts.commenter} commented:
 

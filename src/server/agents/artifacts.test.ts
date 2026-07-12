@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
-import { DeleteObjectCommand } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 
 import type { db as Database } from "~/server/db";
 import {
   type ArtifactStore,
   getArtifact,
+  putArtifact,
   repoArtifactStore,
   resolveArtifactStore,
   transcriptKey,
@@ -278,6 +279,47 @@ describe("getArtifact", () => {
   it("returns null when the read fails", async () => {
     s3State.sendImpl = () => Promise.reject(s3Error("NoSuchKey"));
     expect(await getArtifact(minioStore, "k")).toBeNull();
+    expect(lastClient().destroy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("putArtifact", () => {
+  it("writes the body as a PutObject with the default content type, then tears the client down", async () => {
+    await putArtifact(minioStore, "runs/j/transcript.log", "log line");
+    const cmd = lastClient().send.mock.calls[0]![0] as {
+      input: Record<string, unknown>;
+    };
+    expect(cmd).toBeInstanceOf(PutObjectCommand);
+    // The default content type is applied when the caller omits it.
+    expect(cmd.input).toEqual({
+      Bucket: "acme-run-logs",
+      Key: "runs/j/transcript.log",
+      Body: "log line",
+      ContentType: "text/plain; charset=utf-8",
+    });
+    expect(lastClient().destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it("honors a caller-supplied content type", async () => {
+    await putArtifact(minioStore, "runs/j/meta.json", "{}", "application/json");
+    const cmd = lastClient().send.mock.calls[0]![0] as {
+      input: Record<string, unknown>;
+    };
+    expect(cmd.input).toMatchObject({
+      Key: "runs/j/meta.json",
+      Body: "{}",
+      ContentType: "application/json",
+    });
+  });
+
+  it("propagates the write error but still destroys the client", async () => {
+    // Unlike getArtifact, putArtifact deliberately doesn't swallow failures —
+    // the caller decides how a failed persist is handled — but the finally
+    // block still tears the client down.
+    s3State.sendImpl = () => Promise.reject(s3Error("AccessDenied", "denied"));
+    await expect(putArtifact(minioStore, "k", "body")).rejects.toThrow(
+      "denied",
+    );
     expect(lastClient().destroy).toHaveBeenCalledTimes(1);
   });
 });

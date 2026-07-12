@@ -1,15 +1,24 @@
+import * as k8s from "@kubernetes/client-node";
 import { describe, expect, it } from "vitest";
 
 import {
+  getBatchV1Api,
+  getCoreV1Api,
   getKubeconfigServer,
+  getNetworkingV1Api,
+  getPolicyV1Api,
+  getRbacAuthorizationV1Api,
+  getVersionApi,
   unsupportedKubeconfigAuth,
 } from "~/server/k8s/client";
 
 // unsupportedKubeconfigAuth and getKubeconfigServer are real parsing logic on
 // top of @kubernetes/client-node's loadFromString, which is a hermetic parser —
-// no cluster access happens, so no mocks are needed. The four get*Api factories
-// are one-line makeApiClient glue and are deliberately not tested beyond the
-// shared empty-input guard they all route through.
+// no cluster access happens, so no mocks are needed. The six get*Api factories
+// are one-line makeApiClient glue: they're exercised only through the shared
+// empty-input guard they all route through and the typed client each returns
+// (makeApiClient constructs the client from the parsed config without any
+// cluster round-trip, so this stays hermetic too).
 
 /**
  * A minimal valid kubeconfig (cluster c1 → https://1.2.3.4:6443, context ctx,
@@ -141,4 +150,42 @@ describe("getKubeconfigServer", () => {
   it("throws on an empty kubeconfig", () => {
     expect(() => getKubeconfigServer("")).toThrow("No kubeconfig provided.");
   });
+});
+
+// Each factory is makeApiClient glue routing through buildKubeConfig's
+// empty-input guard. `ApiClass` is the @kubernetes/client-node class the factory
+// is typed to return, so `instanceof` proves the right client came back.
+const apiFactories: [
+  name: string,
+  factory: (kubeconfig: string) => object,
+  ApiClass: new (...args: never[]) => object,
+][] = [
+  ["getCoreV1Api", getCoreV1Api, k8s.CoreV1Api],
+  ["getBatchV1Api", getBatchV1Api, k8s.BatchV1Api],
+  ["getPolicyV1Api", getPolicyV1Api, k8s.PolicyV1Api],
+  [
+    "getRbacAuthorizationV1Api",
+    getRbacAuthorizationV1Api,
+    k8s.RbacAuthorizationV1Api,
+  ],
+  ["getVersionApi", getVersionApi, k8s.VersionApi],
+  ["getNetworkingV1Api", getNetworkingV1Api, k8s.NetworkingV1Api],
+];
+
+describe("get*Api factories", () => {
+  it.each(apiFactories)(
+    "%s throws on an empty kubeconfig",
+    (_name, factory) => {
+      expect(() => factory("")).toThrow("No kubeconfig provided.");
+    },
+  );
+
+  it.each(apiFactories)(
+    "%s returns a client of the matching @kubernetes/client-node class for a valid kubeconfig",
+    (_name, factory, ApiClass) => {
+      const client = factory(kubeconfigWith("      token: abc"));
+      expect(client).toBeTruthy();
+      expect(client).toBeInstanceOf(ApiClass);
+    },
+  );
 });

@@ -132,4 +132,48 @@ for (const vp of VIEWPORTS) {
   await page.close();
 }
 
+// Devices with a notch / Dynamic Island / home indicator report non-zero
+// safe-area insets. Aligning the row to the raw viewport top would tuck the
+// interactive controls behind the island; the reveal instead offsets by the top
+// inset (scroll-mt) and the body trims both insets so the composer clears the
+// home indicator. env() can't be emulated in headless Chromium, so stand in for
+// a device with insets by overriding the --safe-area-inset-* vars the reveal
+// reads (see globals.css): the row must land just *below* the top inset and the
+// composer just *above* the bottom one.
+{
+  const insetTop = 64;
+  const insetBottom = 34;
+  const height = 800;
+  const page = await browser.newPage({ viewport: { width: 390, height } });
+  await page.goto(`${BASE}/dev/interactive-scroll`);
+  const row = page.locator("[data-testid='rows'] > tr").first();
+  await row.waitFor({ state: "visible", timeout: 5000 });
+
+  await page.evaluate(
+    ({ t, b }) => {
+      document.body.style.setProperty("--safe-area-inset-top", `${t}px`);
+      document.body.style.setProperty("--safe-area-inset-bottom", `${b}px`);
+    },
+    { t: insetTop, b: insetBottom },
+  );
+
+  await page.getByTestId("await").click();
+  await settleScroll(page);
+
+  const rowTop = (await row.boundingBox()).y;
+  const bottom = await composerBottom(page);
+  check(
+    `insets: row clears the top inset, not behind the island (top=${rowTop.toFixed(0)}, inset=${insetTop})`,
+    Math.abs(rowTop - insetTop) <= 3,
+  );
+  check(
+    `insets: composer clears the bottom inset (bottom=${bottom?.toFixed(0)}, safe=${height - insetBottom})`,
+    bottom !== null &&
+      bottom <= height - insetBottom + 2 &&
+      bottom >= height - insetBottom - 24,
+  );
+
+  await page.close();
+}
+
 await finish(browser);

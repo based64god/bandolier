@@ -131,7 +131,9 @@ export function InteractiveRow({
   // top of the viewport: aligning this row's top with the viewport top puts its
   // interactive controls (collapse, end session, terminate) at the top of the
   // screen. The expanded body (below) is sized to fill the rest, landing the
-  // composer at the bottom.
+  // composer at the bottom. The row carries scroll-mt = the top safe-area inset
+  // (see its className) so on a device with a notch / Dynamic Island the reveal
+  // stops the row just below it instead of scrolling the controls up behind it.
   const rowRef = useRef<HTMLTableRowElement>(null);
   const revealSession = () => {
     rowRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -146,7 +148,11 @@ export function InteractiveRow({
   // the screen and pushed the input off the bottom. 100dvh (not vh) tracks the
   // visible height as mobile browser chrome shows and hides; the row height is
   // measured so the fit survives the row resizing and the viewport resizing.
-  // Falls back to the prior 85vh until the first measure.
+  // Subtract the top and bottom safe-area insets too: the reveal drops the row
+  // below the notch / Dynamic Island (scroll-mt above), so without trimming the
+  // body by both insets the composer would be pushed the same distance past the
+  // home indicator, off the bottom of the screen. Falls back to the prior 85vh
+  // until the first measure.
   const [rowHeight, setRowHeight] = useState(0);
   useEffect(() => {
     const el = rowRef.current;
@@ -158,7 +164,9 @@ export function InteractiveRow({
     return () => observer.disconnect();
   }, []);
   const bodyHeight = rowHeight
-    ? "calc(100dvh - " + String(rowHeight) + "px)"
+    ? "calc(100dvh - " +
+      String(rowHeight) +
+      "px - var(--safe-area-inset-top) - var(--safe-area-inset-bottom))"
     : "85vh";
 
   const awaiting = agent.awaitingInput;
@@ -268,7 +276,7 @@ export function InteractiveRow({
       <tr
         ref={rowRef}
         onClick={() => setCollapsed((c) => !c)}
-        className={`cursor-pointer select-none ${rowTint}`}
+        className={`cursor-pointer scroll-mt-[var(--safe-area-inset-top)] select-none ${rowTint}`}
       >
         {/* Status (+ awaiting pill) — centered to match the centered "Status"
             header and the non-interactive TaskRow. The pills stack vertically

@@ -46,10 +46,19 @@ body {
      Pad the content in by the safe-area insets so the top bar and the rest of
      the UI stay inside the *visible* viewport instead of scrolling up under the
      notch / Dynamic Island / status bar. Devices that report zero insets are
-     unaffected. */
-  padding-top: env(safe-area-inset-top, 0px);
+     unaffected.
+
+     The top/bottom insets are also published as custom properties: components
+     that scroll content flush to a viewport edge need to leave the same room
+     for the notch / Dynamic Island / home indicator, and reading it from one
+     source keeps them in step with the padding here. (env() can't be read in
+     JS or overridden, so the interactive session body composes it into a
+     calc() via these vars, and tests set them to fake a device with insets.) */
+  --safe-area-inset-top: env(safe-area-inset-top, 0px);
+  --safe-area-inset-bottom: env(safe-area-inset-bottom, 0px);
+  padding-top: var(--safe-area-inset-top);
   padding-right: env(safe-area-inset-right, 0px);
-  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-bottom: var(--safe-area-inset-bottom);
   padding-left: env(safe-area-inset-left, 0px);
 }
 

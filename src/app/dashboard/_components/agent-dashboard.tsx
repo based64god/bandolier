@@ -8,7 +8,7 @@ import { InstallButton } from "~/app/_components/install-button";
 import { repoToNamespace } from "~/server/agents/namespace";
 import { authClient } from "~/server/better-auth/client";
 import { api } from "~/trpc/react";
-import { isAgentOutputResolved, nextAwaitingTarget } from "./agent-ui";
+import { isAgentResolved, nextAwaitingTarget } from "./agent-ui";
 import { DashboardHeader } from "./dashboard-header";
 import { DeployModal } from "./deploy-modal";
 import { useHideResolved, useOnlyMine } from "./view-prefs";
@@ -118,9 +118,10 @@ export function AgentDashboard({
   // One contiguous list. Tasks awaiting input float to the top regardless of
   // age (they need the user now); the rest follow newest-first. Interactive
   // tasks render as expandable cards (unchanged behaviour); the rest as rows.
-  // "Hide resolved" drops tasks whose output has reached a terminal state on
-  // GitHub — a merged/closed PR or a closed/completed issue. "Only my tasks"
-  // drops collaborators' tasks (repo views list the whole repo's).
+  // "Hide resolved" drops tasks that are done with: output has reached a
+  // terminal state on GitHub (a merged/closed PR or a closed/completed issue),
+  // or the task succeeded and has since expired. "Only my tasks" drops
+  // collaborators' tasks (repo views list the whole repo's).
   const sortedAgents = [...agents].sort((a, b) => {
     const awaitDiff = Number(b.awaitingInput) - Number(a.awaitingInput);
     if (awaitDiff !== 0) return awaitDiff;
@@ -128,8 +129,7 @@ export function AgentDashboard({
   });
   const visibleAgents = sortedAgents.filter(
     (a) =>
-      (!hideResolved || !isAgentOutputResolved(a)) &&
-      (!onlyMine || a.ownedByViewer),
+      (!hideResolved || !isAgentResolved(a)) && (!onlyMine || a.ownedByViewer),
   );
 
   // The placeholders to actually render: only for the repo currently in view,

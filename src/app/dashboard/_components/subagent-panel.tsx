@@ -29,7 +29,7 @@ export function SubagentPanel({ items }: { items: TimelineItem[] }) {
         className="flex w-full items-center gap-2 border-b border-purple-400/20 bg-purple-500/[0.07] px-4 py-2 text-left text-xs hover:bg-purple-500/[0.12]"
         title="View subagent narration"
       >
-        <span className="shrink-0 select-none text-purple-300">⇉</span>
+        <span className="shrink-0 text-purple-300 select-none">⇉</span>
         <span className="shrink-0 font-medium text-purple-200">
           {narration.length} subagent{narration.length === 1 ? "" : "s"}
         </span>

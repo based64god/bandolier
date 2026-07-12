@@ -8,8 +8,8 @@
 //
 // Run against a dev server serving the harness route:
 //   pnpm next dev --port 3137 &
-//   node e2e/deploy-modal.spec.mjs
-import { BASE, check, launch, finish } from "./helpers.mjs";
+//   node e2e/deploy-modal.spec.ts
+import { BASE, check, launch, finish } from "./helpers.ts";
 
 const browser = await launch();
 const page = await browser.newPage();
@@ -17,11 +17,16 @@ const page = await browser.newPage();
 // Stub the one request the modal makes on its own — the deploy mutation on
 // submit — with a jsonl-framed success body (what the httpBatchStreamLink
 // expects). Everything else resolves from the seeded cache.
-let deployPayload = null;
+const captured: {
+  payload: Record<string, { json?: Record<string, unknown> }> | null;
+} = { payload: null };
 await page.route("**/api/trpc/agents.deploy**", async (route) => {
   const req = route.request();
   if (req.method() !== "POST") return route.continue();
-  deployPayload = req.postDataJSON();
+  captured.payload = req.postDataJSON() as Record<
+    string,
+    { json?: Record<string, unknown> }
+  >;
   await route.fulfill({
     status: 200,
     headers: { "content-type": "application/jsonl" },
@@ -34,7 +39,7 @@ await page.route("**/api/trpc/agents.deploy**", async (route) => {
 
 const dialog = page.getByRole("dialog");
 const deployBtn = () => page.getByRole("button", { name: "Deploy", exact: true });
-const openScenario = async (id) => {
+const openScenario = async (id: string) => {
   await page.getByTestId(`open-${id}`).click();
   await dialog.waitFor({ state: "visible", timeout: 8000 });
 };
@@ -95,12 +100,12 @@ await deployBtn().click();
 await dialog.waitFor({ state: "hidden", timeout: 8000 });
 check(
   "deploy payload carries the task",
-  deployPayload?.["0"]?.json?.task === "investigate the flaky test",
+  captured.payload?.["0"]?.json?.task === "investigate the flaky test",
 );
 check(
   "deploy payload carries the chosen model + provider",
-  deployPayload?.["0"]?.json?.model === "claude-opus-4-8" &&
-    deployPayload?.["0"]?.json?.modelProvider === "anthropic",
+  captured.payload?.["0"]?.json?.model === "claude-opus-4-8" &&
+    captured.payload?.["0"]?.json?.modelProvider === "anthropic",
 );
 check(
   "onDeployed fires with the created job name",
@@ -137,7 +142,7 @@ await deployBtn().click();
 await dialog.waitFor({ state: "hidden", timeout: 8000 });
 check(
   "deploy payload carries the selected issue number",
-  deployPayload?.["0"]?.json?.issueNumber === 235,
+  captured.payload?.["0"]?.json?.issueNumber === 235,
 );
 
 // ── Repo-credentials provider source ─────────────────────────────────────────

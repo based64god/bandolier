@@ -61,6 +61,54 @@ jobs:
           path: coverage/
           if-no-files-found: ignore
 
+  integration:
+    name: Integration tests (tRPC · routes · real Postgres)
+    runs-on: ubuntu-latest
+    # DB-backed integration suite: real tRPC procedures + route handlers against
+    # a real, migrated Postgres. Kept separate from the fast hermetic `web` unit
+    # job (distinct *.integration.test.ts glob + vitest.integration.config.ts) so
+    # unit runtime and the coverage-badge numbers stay untouched.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: bandolier_test
+        ports:
+          - 5432:5432
+        # Block the job until Postgres accepts connections.
+        options: >-
+          --health-cmd "pg_isready -U test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The vitest globalSetup applies the production migrations (./drizzle) to
+      # this database before any test runs, so no separate migrate step is
+      # needed. The other env vars are inert placeholders the integration config
+      # also supplies; DATABASE_URL is the one real value, pointing at the
+      # service container.
+      - name: Integration tests
+        run: pnpm test:integration
+        env:
+          DATABASE_URL: postgresql://test:test@localhost:5432/bandolier_test
+
   coverage-badge:
     name: Publish coverage badges
     # The README's coverage badges read shields.io endpoint JSON from the
@@ -144,8 +192,8 @@ jobs:
       - name: Install Playwright browser
         run: pnpm exec playwright install --with-deps chromium
 
-      # e2e/run.mjs boots `next dev`, waits for the /dev/* routes, then runs each
-      # e2e/*.spec.mjs against it. The routes contact no real services, so inert
+      # e2e/run.ts boots `next dev`, waits for the /dev/* routes, then runs each
+      # e2e/*.spec.ts against it. The routes contact no real services, so inert
       # placeholders satisfy env.js validation at import time.
       - name: Run browser smoke tests
         run: pnpm test:e2e
@@ -155,6 +203,63 @@ jobs:
           BETTER_AUTH_GITHUB_CLIENT_ID: ci
           BETTER_AUTH_GITHUB_CLIENT_SECRET: ci
           DATABASE_URL: postgres://ci:ci@localhost:5432/ci
+
+  e2e-flow:
+    name: Browser product-flow tests (playwright)
+    runs-on: ubuntu-latest
+    # The authenticated flows migrate + drive a real Postgres (the gate flow is
+    # hermetic and ignores it).
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: bandolier_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browser
+        run: pnpm exec playwright install --with-deps chromium
+
+      # e2e/flow-run.ts boots `next dev` with the shared-password gate ENABLED
+      # and runs the hermetic e2e/*.flow.ts specs (no DB/k8s/GitHub).
+      - name: Run gate flow tests
+        run: pnpm test:e2e:flow
+        env:
+          BETTER_AUTH_URL: http://localhost:3138
+          BETTER_AUTH_SECRET: ci
+          BETTER_AUTH_GITHUB_CLIENT_ID: ci
+          BETTER_AUTH_GITHUB_CLIENT_SECRET: ci
+          DATABASE_URL: postgres://ci:ci@localhost:5432/ci
+
+      # e2e/authflow-run.ts migrates the Postgres service, boots `next dev` with
+      # the gate disabled + a fake Kubernetes server, and runs the authenticated
+      # e2e/*.authflow.ts specs (better-auth session bypass; no GitHub OAuth).
+      - name: Run authenticated flow tests
+        run: pnpm test:e2e:authflow
+        env:
+          DATABASE_URL: postgresql://test:test@localhost:5432/bandolier_test
 
   harness:
     name: Agent harness (vet · test)

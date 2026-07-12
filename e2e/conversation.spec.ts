@@ -5,8 +5,8 @@
 //
 // Run against a dev server serving the harness route:
 //   pnpm next dev --port 3137 &
-//   node e2e/conversation.spec.mjs
-import { BASE, check, launch, finish } from "./helpers.mjs";
+//   node e2e/conversation.spec.ts
+import { BASE, check, launch, finish } from "./helpers.ts";
 
 const browser = await launch();
 const page = await browser.newPage();

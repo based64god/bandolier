@@ -9,6 +9,9 @@
     "moduleDetection": "force",
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
+    /* The e2e scripts run under Node's native TypeScript type-stripping, which
+       resolves the literal path, so they import each other with .ts extensions. */
+    "allowImportingTsExtensions": true,
     /* Strictness */
     "strict": true,
     "noUncheckedIndexedAccess": true,

@@ -15,8 +15,10 @@
 //
 // Run against a dev server serving the harness route:
 //   pnpm next dev --port 3137 &
-//   node e2e/interactive-scroll.spec.mjs
-import { BASE, check, launch, finish } from "./helpers.mjs";
+//   node e2e/interactive-scroll.spec.ts
+import type { Locator, Page } from "playwright";
+
+import { BASE, check, launch, finish } from "./helpers.ts";
 
 const browser = await launch();
 
@@ -34,7 +36,7 @@ const VIEWPORTS = [
 // The reveal uses smooth scroll (and the awaiting transition also snaps the
 // transcript and focuses the composer). Poll window.scrollY until it stops
 // moving so measurements come from the settled position.
-async function settleScroll(page) {
+async function settleScroll(page: Page) {
   let last = -1;
   for (let i = 0; i < 40; i++) {
     const y = await page.evaluate(() => window.scrollY);
@@ -46,7 +48,7 @@ async function settleScroll(page) {
 
 // The composer is the bordered input bar wrapping the textarea; walk up from the
 // textarea to it so we can measure the whole control, padding included.
-function composerBottom(page) {
+function composerBottom(page: Page) {
   return page.evaluate(() => {
     const ta = document.querySelector("textarea");
     if (!ta) return null;
@@ -59,8 +61,13 @@ function composerBottom(page) {
 // Assert the revealed session pins its interactive row to the top of the
 // viewport and its composer to the bottom (visible, not clipped, not floating
 // short of it).
-async function checkRevealed(page, row, label, height) {
-  const rowTop = (await row.boundingBox()).y;
+async function checkRevealed(
+  page: Page,
+  row: Locator,
+  label: string,
+  height: number,
+) {
+  const rowTop = (await row.boundingBox())!.y;
   const bottom = await composerBottom(page);
   check(
     `${label}: interactive row is at the top (top=${rowTop.toFixed(0)})`,
@@ -160,7 +167,7 @@ for (const vp of VIEWPORTS) {
   await page.getByTestId("await").click();
   await settleScroll(page);
 
-  const rowTop = (await row.boundingBox()).y;
+  const rowTop = (await row.boundingBox())!.y;
   const bottom = await composerBottom(page);
   check(
     `insets: row clears the top inset, not behind the island (top=${rowTop.toFixed(0)}, inset=${insetTop})`,

@@ -8,6 +8,9 @@
 
 # testing
 /coverage
+# Go coverage profiles + the CI badge-staging dir (see scripts/badge.mjs)
+*.cov
+/go-cov
 
 # database
 /prisma/db.sqlite

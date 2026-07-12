@@ -62,15 +62,16 @@ jobs:
           if-no-files-found: ignore
 
   coverage-badge:
-    name: Publish coverage badge
-    # The README's coverage badge reads a shields.io endpoint JSON from the
-    # `badges` branch (via img.shields.io/endpoint), so refresh it whenever the
-    # default branch changes. A single-commit orphan branch is force-pushed
+    name: Publish coverage badges
+    # The README's coverage badges read shields.io endpoint JSON from the
+    # `badges` branch (via img.shields.io/endpoint), so refresh them whenever
+    # the default branch changes. A single-commit orphan branch is force-pushed
     # each time — no history accumulates. This is a separate job so that
     # `contents: write` is never granted to the jobs that execute
-    # dependency/lifecycle code.
+    # dependency/lifecycle code. Needs both the web job (its coverage artifact)
+    # and the harness job (the Go coverage numbers).
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: web
+    needs: [web, harness]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -78,11 +79,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download coverage report
+      - name: Download web coverage report
         uses: actions/download-artifact@v4
         with:
           name: web-coverage
           path: coverage
+
+      - name: Download Go coverage numbers
+        uses: actions/download-artifact@v4
+        with:
+          name: go-coverage
+          path: go-cov
 
       # Vercel must not deploy this push: vercel.json's git.deploymentEnabled
       # only takes effect if the file exists on the pushed branch (this one is
@@ -93,14 +100,18 @@ jobs:
           set -euo pipefail
           mkdir -p /tmp/badges
           node scripts/coverage-badge.mjs > /tmp/badges/coverage.json
-          cat /tmp/badges/coverage.json
+          node scripts/badge.mjs "agent-harness" "$(cat go-cov/agent-harness.pct)" \
+            > /tmp/badges/agent-harness-coverage.json
+          node scripts/badge.mjs "gollm proxy" "$(cat go-cov/gollm-proxy.pct)" \
+            > /tmp/badges/gollm-proxy-coverage.json
+          cat /tmp/badges/*.json
           cp vercel.json /tmp/badges/vercel.json
           cd /tmp/badges
           git init -q -b badges
-          git add coverage.json vercel.json
+          git add coverage.json agent-harness-coverage.json gollm-proxy-coverage.json vercel.json
           git -c user.name="github-actions[bot]" \
               -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-              commit -qm "Update coverage badge [vercel skip]"
+              commit -qm "Update coverage badges [vercel skip]"
           git push -f \
             "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
             badges
@@ -174,13 +185,39 @@ jobs:
         run: go vet ./...
 
       - name: Test
-        run: go test -race -count=1 ./...
+        run: go test -race -count=1 -coverprofile=harness.cov ./...
 
       # The harness embeds the vendored gollm module (go.mod replace ../gollm),
       # so its tests gate the harness image too.
       - name: Test gollm (vendored module)
         working-directory: gollm
         run: go vet ./... && go test -race -count=1 ./...
+
+      # Coverage percentages for the README badges (rendered by the
+      # coverage-badge job, which has Node). The agent-harness badge covers the
+      # whole module (cmd/harness + internal/acp) from the profile the Test step
+      # already wrote; the gollm badge covers the proxy package the harness
+      # embeds. Emitted as bare numbers so the badge job renders them through
+      # the shared scripts/badge.mjs color scale.
+      - name: Collect coverage numbers for badges
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/go-cov"
+          go tool cover -func=harness.cov \
+            | awk '/^total:/{gsub(/%/,"",$3); print $3}' \
+            > "$GITHUB_WORKSPACE/go-cov/agent-harness.pct"
+          ( cd "$GITHUB_WORKSPACE/gollm" \
+            && go test -count=1 -coverprofile=proxy.cov ./proxy/ \
+            && go tool cover -func=proxy.cov \
+              | awk '/^total:/{gsub(/%/,"",$3); print $3}' \
+              > "$GITHUB_WORKSPACE/go-cov/gollm-proxy.pct" )
+          cat "$GITHUB_WORKSPACE"/go-cov/*.pct
+
+      - name: Upload go coverage numbers
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-coverage
+          path: go-cov/
 
   chart:
     name: Helm chart (lint · kubeconform)

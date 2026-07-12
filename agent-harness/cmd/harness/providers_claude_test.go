@@ -60,6 +60,7 @@ type capturingSink struct {
 	toolUses    []struct{ id, name, parentID string }
 	toolResults []struct{ id, parentID string }
 	texts       []struct{ text, parentID string }
+	bgTasks     []int
 }
 
 func (s *capturingSink) onSlashCommands([]string) {}
@@ -74,6 +75,9 @@ func (s *capturingSink) onToolResult(id, parentID string, _ bool, _ json.RawMess
 	s.toolResults = append(s.toolResults, struct{ id, parentID string }{id, parentID})
 }
 func (s *capturingSink) onResult(claudeEvent) {}
+func (s *capturingSink) onBackgroundTasks(active int) {
+	s.bgTasks = append(s.bgTasks, active)
+}
 
 // The parser must thread the top-level parent_tool_use_id to the sink: empty for
 // the main agent (the Agent spawn itself), and the spawning Agent id for every
@@ -95,6 +99,18 @@ func TestDispatchThreadsParentToolUseID(t *testing.T) {
 	}
 	if len(s.toolResults) != 1 || s.toolResults[0].parentID != "toolu_agent01" {
 		t.Errorf("subagent tool_result = %+v, want parentID=toolu_agent01", s.toolResults)
+	}
+}
+
+// The parser must surface the count of in-flight background subagent tasks from
+// system/background_tasks_changed events, so the driver can tell a mid-turn yield
+// (the agent will auto-resume when a task finishes) from a real user-input await.
+func TestDispatchRoutesBackgroundTasks(t *testing.T) {
+	s := &capturingSink{}
+	dispatchClaudeEvent([]byte(`{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"a"},{"task_id":"b"}]}`), s)
+	dispatchClaudeEvent([]byte(`{"type":"system","subtype":"background_tasks_changed","tasks":[]}`), s)
+	if len(s.bgTasks) != 2 || s.bgTasks[0] != 2 || s.bgTasks[1] != 0 {
+		t.Fatalf("bgTasks = %v, want [2 0]", s.bgTasks)
 	}
 }
 

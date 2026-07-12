@@ -356,7 +356,23 @@ export interface SubagentNarration {
   toolCallId: string;
   /** The subagent's label (from its spawn tool call), e.g. "Agent(Explore): …". */
   label: string;
+  /**
+   * The spawning call's ACP status: "pending" while the subagent runs,
+   * "completed"/"failed" once it finishes. Defaults to "pending" when the spawn
+   * call isn't in view (so a subagent is never treated as done unless confirmed).
+   * See isSubagentDone.
+   */
+  status: string;
   entries: { variant: "message" | "thinking"; text: string }[];
+}
+
+/**
+ * Whether a subagent's spawning call has reached a terminal status. A running
+ * subagent's spawn call sits at "pending" (the Claude driver has no in_progress
+ * state) and flips to "completed"/"failed" when the subagent returns.
+ */
+export function isSubagentDone(status: string): boolean {
+  return status === "completed" || status === "failed";
 }
 
 /**
@@ -367,10 +383,10 @@ export interface SubagentNarration {
 export function collectSubagentNarration(
   items: TimelineItem[],
 ): SubagentNarration[] {
-  const labels = new Map<string, string>();
+  const spawns = new Map<string, { label: string; status: string }>();
   for (const it of items) {
     if (it.type === "tool" && it.kind === "subagent" && it.toolCallId) {
-      labels.set(it.toolCallId, it.title);
+      spawns.set(it.toolCallId, { label: it.title, status: it.status });
     }
   }
   const order: string[] = [];
@@ -379,9 +395,11 @@ export function collectSubagentNarration(
     if (it.type !== "subagent-log") continue;
     let n = byId.get(it.parentToolCallId);
     if (!n) {
+      const spawn = spawns.get(it.parentToolCallId);
       n = {
         toolCallId: it.parentToolCallId,
-        label: labels.get(it.parentToolCallId) ?? "subagent",
+        label: spawn?.label ?? "subagent",
+        status: spawn?.status ?? "pending",
         entries: [],
       };
       byId.set(it.parentToolCallId, n);

@@ -5,6 +5,7 @@ import {
   batchAwaitsInput,
   collectSubagentNarration,
   END_SESSION_FRAME,
+  isSubagentDone,
   groupTimeline,
   promptFrame,
   type RawAcpFrame,
@@ -732,6 +733,7 @@ describe("subagent narration", () => {
       {
         toolCallId: "agentA",
         label: "Agent(Explore): find auth",
+        status: "pending",
         entries: [
           { variant: "message", text: "found it" },
           { variant: "thinking", text: "considering" },
@@ -740,6 +742,7 @@ describe("subagent narration", () => {
       {
         toolCallId: "agentB",
         label: "Agent(Plan): sketch fix",
+        status: "pending",
         entries: [{ variant: "message", text: "planning" }],
       },
     ]);
@@ -772,6 +775,58 @@ describe("subagent narration", () => {
       ],
     );
     expect(collectSubagentNarration(items)).toEqual([]);
+  });
+
+  it("reflects the spawn call's status, flipping to done when it completes", () => {
+    const { items } = applyFrames(
+      [],
+      [
+        update(1, "s", {
+          sessionUpdate: "tool_call",
+          toolCallId: "agentA",
+          kind: "subagent",
+          title: "Agent(Explore): find auth",
+          status: "pending",
+        }),
+        update(2, "s", {
+          sessionUpdate: "agent_message_chunk",
+          parentToolCallId: "agentA",
+          content: { text: "found it" },
+        }),
+        update(3, "s", {
+          sessionUpdate: "tool_call_update",
+          toolCallId: "agentA",
+          status: "completed",
+        }),
+      ],
+    );
+    const narration = collectSubagentNarration(items);
+    expect(narration).toHaveLength(1);
+    expect(narration[0]!.status).toBe("completed");
+    expect(isSubagentDone(narration[0]!.status)).toBe(true);
+  });
+
+  it("defaults status to pending when the spawn call isn't in view", () => {
+    const { items } = applyFrames(
+      [],
+      [
+        update(1, "s", {
+          sessionUpdate: "agent_message_chunk",
+          parentToolCallId: "ghost",
+          content: { text: "orphan narration" },
+        }),
+      ],
+    );
+    expect(collectSubagentNarration(items)[0]!.status).toBe("pending");
+  });
+});
+
+describe("isSubagentDone", () => {
+  it("is true only for terminal spawn-call statuses", () => {
+    expect(isSubagentDone("completed")).toBe(true);
+    expect(isSubagentDone("failed")).toBe(true);
+    expect(isSubagentDone("pending")).toBe(false);
+    expect(isSubagentDone("in_progress")).toBe(false);
   });
 });
 

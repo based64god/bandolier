@@ -3,20 +3,20 @@
 // Postgres, a fake Kubernetes cluster, and a stubbed GitHub. Verifies the whole
 // authenticated deploy→observe→logs contract (authz, kubeconfig resolution, job
 // creation, pod listing, log reading) end to end.
-import { BASE, check, launch, finish } from "./helpers.mjs";
-import { signUp, uniqueEmail } from "./auth-helper.mjs";
+import { BASE, check, launch, finish } from "./helpers.ts";
+import { signUp, uniqueEmail } from "./auth-helper.ts";
 import {
   connect,
   seedAnthropicCredential,
   seedGithubAccount,
   seedKubeconfig,
   userIdByEmail,
-} from "./db.mjs";
+} from "./db.ts";
 
 const K8S = process.env.E2E_FAKE_K8S_URL;
 const REPO = process.env.E2E_GH_REPO ?? "acme/widgets";
 if (!K8S) {
-  console.error("E2E_FAKE_K8S_URL not set — run via authflow-run.mjs");
+  console.error("E2E_FAKE_K8S_URL not set — run via authflow-run.ts");
   process.exit(1);
 }
 
@@ -49,6 +49,7 @@ const { cookie, email } = await signUp(BASE, { email: uniqueEmail("deploy") });
 // deployable model).
 const sql = connect();
 const userId = await userIdByEmail(sql, email);
+if (!userId) throw new Error(`no user row for ${email}`);
 await seedGithubAccount(sql, userId);
 await seedKubeconfig(sql, userId, kubeconfig);
 await seedAnthropicCredential(sql, userId);
@@ -92,7 +93,7 @@ await deployBtn.click();
 // The deploy created a job → the fake cluster synthesized a Running pod. Reload
 // to drop the client-only optimistic placeholder and read the real pod back
 // from agents.list.
-await dialog.waitFor({ state: "hidden", timeout: 15_000 }).catch(() => {});
+await dialog.waitFor({ state: "hidden", timeout: 15_000 }).catch(() => undefined);
 await new Promise((r) => setTimeout(r, 2000));
 await page.goto(`${BASE}/repo/${REPO}`);
 

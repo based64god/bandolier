@@ -1,25 +1,25 @@
 // Orchestrates the AUTHENTICATED browser product-flow tests under
-// e2e/*.authflow.mjs — the real signed-in product surface, backed by a real
+// e2e/*.authflow.ts — the real signed-in product surface, backed by a real
 // (throwaway) Postgres. Distinct from:
-//   - run.mjs        (/dev/* component fixtures, port 3137)
-//   - flow-run.mjs   (the shared-password gate, hermetic, port 3138)
+//   - run.ts        (/dev/* component fixtures, port 3137)
+//   - flow-run.ts   (the shared-password gate, hermetic, port 3138)
 // This runner (port 3139):
 //   1. migrates + truncates the database at DATABASE_URL,
 //   2. boots `next dev` against it with the gate DISABLED,
-//   3. waits for the app, then runs each e2e/*.authflow.mjs spec,
+//   3. waits for the app, then runs each e2e/*.authflow.ts spec,
 //   4. tears the server down and exits non-zero if any spec failed.
 //
 // Specs mint a real better-auth session by POSTing /api/auth/sign-up/email and
-// carry the returned cookie, and seed extra rows via e2e/db.mjs — no GitHub
+// carry the returned cookie, and seed extra rows via e2e/db.ts — no GitHub
 // OAuth and no reverse-engineering of cookie signing. Flows that need a cluster
-// point a seeded kubeconfig at the fake Kubernetes server (e2e/fake-k8s.mjs).
-import { spawn } from "node:child_process";
+// point a seeded kubeconfig at the fake Kubernetes server (e2e/fake-k8s.ts).
+import { spawn, type ChildProcess } from "node:child_process";
 import { readdirSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
 
-import { connect, migrateDb, resetDb } from "./db.mjs";
-import { startFakeK8s } from "./fake-k8s.mjs";
+import { connect, migrateDb, resetDb, type Sql } from "./db.ts";
+import { type FakeK8s, startFakeK8s } from "./fake-k8s.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const port = Number(process.env.PORT ?? 3139);
@@ -41,7 +41,7 @@ const SERVER_ENV = {
   // Gate DISABLED for authed flows (no APP_PASSWORD).
 };
 
-function log(msg) {
+function log(msg: string): void {
   console.log(`[authflow-e2e] ${msg}`);
 }
 
@@ -69,7 +69,7 @@ async function waitForRoutes(timeoutMs = 120_000) {
 
 let fakeK8sUrl = process.env.E2E_FAKE_K8S_URL ?? "";
 
-function runNode(file) {
+function runNode(file: string): Promise<number> {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [file], {
       stdio: "inherit",
@@ -86,12 +86,12 @@ function runNode(file) {
 
 // Intercept the server's own GitHub calls (Playwright can't reach them) by
 // preloading a global-fetch stub into the Next server process.
-const preload = pathToFileURL(join(here, "stub-preload.mjs")).href;
+const preload = pathToFileURL(join(here, "stub-preload.ts")).href;
 const nodeOptions = [process.env.NODE_OPTIONS, `--import ${preload}`]
   .filter(Boolean)
   .join(" ");
 
-let server;
+let server: ChildProcess | undefined;
 function startServer() {
   log(`starting next dev on port ${port} (gate disabled, real DB)`);
   server = spawn("pnpm", ["exec", "next", "dev", "--port", String(port)], {
@@ -121,11 +121,11 @@ function stopServer() {
 }
 
 const specs = readdirSync(here)
-  .filter((f) => f.endsWith(".authflow.mjs"))
+  .filter((f) => f.endsWith(".authflow.ts"))
   .sort();
 
 if (specs.length === 0) {
-  log("no *.authflow.mjs files found");
+  log("no *.authflow.ts files found");
   process.exit(0);
 }
 
@@ -134,8 +134,8 @@ process.on("SIGINT", () => {
   process.exit(130);
 });
 
-let sql;
-let fakeK8s;
+let sql: Sql | undefined;
+let fakeK8s: FakeK8s | undefined;
 try {
   log(`migrating + resetting ${databaseUrl}`);
   sql = connect();
@@ -168,7 +168,7 @@ try {
   }
 
   stopServer();
-  if (fakeK8s) await fakeK8s.close().catch(() => {});
+  if (fakeK8s) await fakeK8s.close().catch(() => undefined);
   if (failed > 0) {
     log(`${failed}/${specs.length} authflow spec(s) failed`);
     process.exit(1);
@@ -177,8 +177,8 @@ try {
   process.exit(0);
 } catch (err) {
   console.error(err);
-  if (sql) await sql.end().catch(() => {});
-  if (fakeK8s) await fakeK8s.close().catch(() => {});
+  if (sql) await sql.end().catch(() => undefined);
+  if (fakeK8s) await fakeK8s.close().catch(() => undefined);
   stopServer();
   process.exit(1);
 }

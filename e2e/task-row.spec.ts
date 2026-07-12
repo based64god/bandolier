@@ -6,8 +6,8 @@
 //
 // Run against a dev server serving the harness route:
 //   pnpm next dev --port 3137 &
-//   node e2e/task-row.spec.mjs
-import { BASE, check, launch, finish } from "./helpers.mjs";
+//   node e2e/task-row.spec.ts
+import { BASE, check, launch, finish } from "./helpers.ts";
 
 const browser = await launch();
 // A narrow, phone-width viewport where the Actions column is at its slimmest.
@@ -18,7 +18,7 @@ await page.goto(`${BASE}/dev/task-row`);
 // The harness renders extra worst-case rows for layout measurement; this spec
 // exercises only the first (the original running manual task).
 const row = page.locator("[data-testid='rows'] tr").first();
-const rowHeight = async () => (await row.boundingBox()).height;
+const rowHeight = async () => (await row.boundingBox())!.height;
 
 const glyphHeight = await rowHeight();
 
@@ -50,6 +50,7 @@ const pendingCell = wide
   .nth(2);
 const cellBox = await pendingCell.boundingBox();
 const labelBox = await pendingCell.getByText("propagating…").boundingBox();
+if (!cellBox || !labelBox) throw new Error("pending cell/label has no box");
 // Distance from the label's right edge to the cell's right edge — only the
 // cell's right padding when the description fills the column.
 const rightGap = cellBox.x + cellBox.width - (labelBox.x + labelBox.width);
@@ -69,6 +70,7 @@ const firstTaskText = await wide
   .nth(2)
   .locator("span[title]")
   .textContent();
+if (firstTaskText === null) throw new Error("task cell has no text");
 check(
   `task cell renders the full prompt, not the 60-char preview (${firstTaskText.length} chars)`,
   firstTaskText.length > 61 && !firstTaskText.endsWith("…"),

@@ -10,8 +10,8 @@
 //
 // Run against a dev server serving the harness route:
 //   pnpm next dev --port 3137 &
-//   node e2e/cluster-deploy.spec.mjs
-import { BASE, check, launch, finish } from "./helpers.mjs";
+//   node e2e/cluster-deploy.spec.ts
+import { BASE, check, launch, finish } from "./helpers.ts";
 
 const browser = await launch();
 const page = await browser.newPage();
@@ -44,12 +44,12 @@ const doneDeployment = () =>
   });
 
 // jsonl-framed single-procedure success body (what httpBatchStreamLink expects).
-const trpcBody = (data) =>
+const trpcBody = (data: unknown) =>
   JSON.stringify({ json: { 0: [[{ result: { data } }]] } }) + "\n";
 
-let startPayload = null;
+let startPayload: unknown = null;
 await page.route("**/api/trpc/clusterDeploy.start**", async (route) => {
-  startPayload = route.request().postDataJSON();
+  startPayload = route.request().postDataJSON() as unknown;
   await route.fulfill({
     status: 200,
     headers: { "content-type": "application/jsonl" },
@@ -59,9 +59,9 @@ await page.route("**/api/trpc/clusterDeploy.start**", async (route) => {
 
 // Every tick reports the deployment finished — the spec's stand-in for the
 // state machine reaching "done" server-side.
-let tickPayload = null;
+let tickPayload: unknown = null;
 await page.route("**/api/trpc/clusterDeploy.tick**", (route) => {
-  tickPayload = route.request().postDataJSON();
+  tickPayload = route.request().postDataJSON() as unknown;
   return route.fulfill({
     status: 200,
     headers: { "content-type": "application/jsonl" },
@@ -107,7 +107,7 @@ await page.route("**/api/trpc/clusterDeploy.dismiss**", (route) => {
   });
 });
 
-const openScenario = async (id) => {
+const openScenario = async (id: string) => {
   await page.getByTestId(`open-${id}`).click();
 };
 

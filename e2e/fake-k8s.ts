@@ -12,8 +12,9 @@
 //     labels + annotations, so a later pod list returns it (deploy → observe)
 //   - GET pods (+labelSelector, ignored) → the synthesized pods
 //   - GET pods/{name}/log → a canned log line (inspectPod + getLogs)
-import http from "node:http";
 import { randomUUID } from "node:crypto";
+import http, { type IncomingMessage, type ServerResponse } from "node:http";
+import type { AddressInfo } from "node:net";
 
 const K8S_VERSION = {
   major: "1",
@@ -30,13 +31,45 @@ const K8S_VERSION = {
 // A recognizable log line the deploy spec asserts appears in the LogModal.
 export const FAKE_LOG_LINE = "e2e-fake-agent-log: working on the task";
 
-function readBody(req) {
+type K8sObject = Record<string, unknown> & {
+  metadata?: Record<string, unknown>;
+};
+
+// The subset of a Job body the pod synthesis reads.
+type JobBody = {
+  metadata?: { name?: string };
+  spec?: {
+    template?: {
+      metadata?: {
+        labels?: Record<string, string>;
+        annotations?: Record<string, string>;
+      };
+    };
+  };
+};
+
+export type FakeK8s = {
+  url: string;
+  store: { podsByNs: Map<string, K8sObject[]> };
+  close: () => Promise<void>;
+};
+
+const LOG_RE = /^\/api\/v1\/namespaces\/([^/]+)\/pods\/([^/]+)\/log$/;
+const PODS_RE = /^\/api\/v1\/namespaces\/([^/]+)\/pods$/;
+const JOBS_RE = /^\/apis\/batch\/v1\/namespaces\/([^/]+)\/jobs$/;
+const SA_RE = /^\/api\/v1\/namespaces\/[^/]+\/serviceaccounts$/;
+const SECRET_RE = /^\/api\/v1\/namespaces\/[^/]+\/secrets$/;
+const NETPOL_RE =
+  /^\/apis\/networking\.k8s\.io\/v1\/namespaces\/[^/]+\/networkpolicies/;
+const PDB_RE = /^\/apis\/policy\/v1\/namespaces\/[^/]+\/poddisruptionbudgets$/;
+
+function readBody(req: IncomingMessage): Promise<K8sObject> {
   return new Promise((resolve) => {
     let raw = "";
-    req.on("data", (c) => (raw += c));
+    req.on("data", (c: Buffer) => (raw += c.toString()));
     req.on("end", () => {
       try {
-        resolve(raw ? JSON.parse(raw) : {});
+        resolve(raw ? (JSON.parse(raw) as K8sObject) : {});
       } catch {
         resolve({});
       }
@@ -44,24 +77,27 @@ function readBody(req) {
   });
 }
 
-export function startFakeK8s() {
+export function startFakeK8s(): Promise<FakeK8s> {
   // Pods synthesized by job creations, keyed by namespace.
-  const store = { podsByNs: new Map() };
+  const store = { podsByNs: new Map<string, K8sObject[]>() };
 
-  const server = http.createServer(async (req, res) => {
-    const path = (req.url ?? "").split("?")[0];
+  const handle = async (
+    req: IncomingMessage,
+    res: ServerResponse,
+  ): Promise<void> => {
+    const path = (req.url ?? "").split("?")[0] ?? "";
     const method = req.method ?? "GET";
-    const json = (status, body) => {
+    const json = (status: number, body: unknown): void => {
       res.writeHead(status, { "content-type": "application/json" });
       res.end(JSON.stringify(body));
     };
-    const text = (status, body) => {
+    const text = (status: number, body: string): void => {
       res.writeHead(status, { "content-type": "text/plain" });
       res.end(body);
     };
     // Echo a created object back with kind/apiVersion/uid filled in — enough for
     // the typed client to deserialize it.
-    const created = (kind, apiVersion, body) =>
+    const created = (kind: string, apiVersion: string, body: K8sObject): void =>
       json(201, {
         kind,
         apiVersion,
@@ -79,9 +115,7 @@ export function startFakeK8s() {
     }
 
     // ── pod log (inspectPod + getLogs) ───────────────────────────────────────
-    const logMatch = path.match(
-      /^\/api\/v1\/namespaces\/([^/]+)\/pods\/([^/]+)\/log$/,
-    );
+    const logMatch = LOG_RE.exec(path);
     if (method === "GET" && logMatch) {
       return text(
         200,
@@ -90,9 +124,9 @@ export function startFakeK8s() {
     }
 
     // ── list pods (dashboard task list) ──────────────────────────────────────
-    const podsMatch = path.match(/^\/api\/v1\/namespaces\/([^/]+)\/pods$/);
+    const podsMatch = PODS_RE.exec(path);
     if (method === "GET" && podsMatch) {
-      const ns = podsMatch[1];
+      const ns = podsMatch[1] ?? "";
       return json(200, {
         kind: "PodList",
         apiVersion: "v1",
@@ -111,15 +145,13 @@ export function startFakeK8s() {
     }
 
     // ── job creation → synthesize a Running pod ──────────────────────────────
-    const jobMatch = path.match(
-      /^\/apis\/batch\/v1\/namespaces\/([^/]+)\/jobs$/,
-    );
+    const jobMatch = JOBS_RE.exec(path);
     if (method === "POST" && jobMatch) {
-      const ns = jobMatch[1];
-      const body = await readBody(req);
+      const ns = jobMatch[1] ?? "";
+      const body = (await readBody(req)) as JobBody & K8sObject;
       const jobName = body.metadata?.name ?? `bandolier-agent-${Date.now()}`;
       const tmpl = body.spec?.template?.metadata ?? {};
-      const pod = {
+      const pod: K8sObject = {
         kind: "Pod",
         apiVersion: "v1",
         metadata: {
@@ -154,29 +186,16 @@ export function startFakeK8s() {
     }
 
     // ── bootstrap resources: accept every create/replace ─────────────────────
-    if (
-      method === "POST" &&
-      path === "/api/v1/namespaces"
-    ) {
+    if (method === "POST" && path === "/api/v1/namespaces") {
       return created("Namespace", "v1", await readBody(req));
     }
-    if (
-      method === "POST" &&
-      /^\/api\/v1\/namespaces\/[^/]+\/serviceaccounts$/.test(path)
-    ) {
+    if (method === "POST" && SA_RE.test(path)) {
       return created("ServiceAccount", "v1", await readBody(req));
     }
-    if (
-      method === "POST" &&
-      /^\/api\/v1\/namespaces\/[^/]+\/secrets$/.test(path)
-    ) {
+    if (method === "POST" && SECRET_RE.test(path)) {
       return created("Secret", "v1", await readBody(req));
     }
-    if (
-      /^\/apis\/networking\.k8s\.io\/v1\/namespaces\/[^/]+\/networkpolicies/.test(
-        path,
-      )
-    ) {
+    if (NETPOL_RE.test(path)) {
       const status = method === "POST" ? 201 : 200;
       return json(status, {
         kind: "NetworkPolicy",
@@ -184,10 +203,7 @@ export function startFakeK8s() {
         ...(await readBody(req)),
       });
     }
-    if (
-      method === "POST" &&
-      /^\/apis\/policy\/v1\/namespaces\/[^/]+\/poddisruptionbudgets$/.test(path)
-    ) {
+    if (method === "POST" && PDB_RE.test(path)) {
       return created("PodDisruptionBudget", "policy/v1", await readBody(req));
     }
 
@@ -200,15 +216,17 @@ export function startFakeK8s() {
       reason: "NotFound",
       code: 404,
     });
-  });
+  };
+
+  const server = http.createServer((req, res) => void handle(req, res));
 
   return new Promise((resolve) => {
     server.listen(0, "127.0.0.1", () => {
-      const { port } = server.address();
+      const { port } = server.address() as AddressInfo;
       resolve({
         url: `http://127.0.0.1:${port}`,
         store,
-        close: () => new Promise((r) => server.close(() => r())),
+        close: () => new Promise<void>((r) => server.close(() => r())),
       });
     });
   });

@@ -192,8 +192,8 @@ jobs:
       - name: Install Playwright browser
         run: pnpm exec playwright install --with-deps chromium
 
-      # e2e/run.mjs boots `next dev`, waits for the /dev/* routes, then runs each
-      # e2e/*.spec.mjs against it. The routes contact no real services, so inert
+      # e2e/run.ts boots `next dev`, waits for the /dev/* routes, then runs each
+      # e2e/*.spec.ts against it. The routes contact no real services, so inert
       # placeholders satisfy env.js validation at import time.
       - name: Run browser smoke tests
         run: pnpm test:e2e
@@ -242,8 +242,8 @@ jobs:
       - name: Install Playwright browser
         run: pnpm exec playwright install --with-deps chromium
 
-      # e2e/flow-run.mjs boots `next dev` with the shared-password gate ENABLED
-      # and runs the hermetic e2e/*.flow.mjs specs (no DB/k8s/GitHub).
+      # e2e/flow-run.ts boots `next dev` with the shared-password gate ENABLED
+      # and runs the hermetic e2e/*.flow.ts specs (no DB/k8s/GitHub).
       - name: Run gate flow tests
         run: pnpm test:e2e:flow
         env:
@@ -253,9 +253,9 @@ jobs:
           BETTER_AUTH_GITHUB_CLIENT_SECRET: ci
           DATABASE_URL: postgres://ci:ci@localhost:5432/ci
 
-      # e2e/authflow-run.mjs migrates the Postgres service, boots `next dev` with
+      # e2e/authflow-run.ts migrates the Postgres service, boots `next dev` with
       # the gate disabled + a fake Kubernetes server, and runs the authenticated
-      # e2e/*.authflow.mjs specs (better-auth session bypass; no GitHub OAuth).
+      # e2e/*.authflow.ts specs (better-auth session bypass; no GitHub OAuth).
       - name: Run authenticated flow tests
         run: pnpm test:e2e:authflow
         env:

@@ -5,8 +5,8 @@
 // Proves the cookie → RSC-session → conditional product surface path works for
 // real. No GitHub or Kubernetes needed: an email/password sign-up creates no
 // GitHub account, so repos.list returns [] and no cluster is configured.
-import { BASE, check, launch, finish } from "./helpers.mjs";
-import { signUp, uniqueEmail } from "./auth-helper.mjs";
+import { BASE, check, launch, finish } from "./helpers.ts";
+import { signUp, uniqueEmail } from "./auth-helper.ts";
 
 const browser = await launch();
 

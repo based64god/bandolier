@@ -3,11 +3,11 @@
 // row must stay within the viewport instead of pushing the page wider than it —
 // a long repo name in the header, or many tabs, must not cause horizontal
 // page overflow.
-import { BASE, check, finish, launch } from "./helpers.mjs";
+import { BASE, check, finish, launch } from "./helpers.ts";
 
 const browser = await launch();
 
-async function measure(width) {
+async function measure(width: number) {
   const page = await browser.newPage({ viewport: { width, height: 812 } });
   await page.goto(`${BASE}/dev/settings-shell`, { waitUntil: "networkidle" });
   await page.waitForSelector("nav");
@@ -18,9 +18,9 @@ async function measure(width) {
     return {
       docScrollWidth: doc.scrollWidth,
       docClientWidth: doc.clientWidth,
-      navRight: nav.getBoundingClientRect().right,
-      headerScrollWidth: header.scrollWidth,
-      headerClientWidth: header.clientWidth,
+      navRight: nav!.getBoundingClientRect().right,
+      headerScrollWidth: header!.scrollWidth,
+      headerClientWidth: header!.clientWidth,
       innerWidth: window.innerWidth,
     };
   });

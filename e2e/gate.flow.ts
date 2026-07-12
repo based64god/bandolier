@@ -6,7 +6,7 @@
 // Hermetic: the middleware-level checks use raw fetch (no cookie), and the form
 // flow keeps from=/gate so the post-gate redirect lands on the exempt /gate page
 // — nothing here touches the database, Kubernetes, or GitHub.
-import { BASE, check, launch, finish } from "./helpers.mjs";
+import { BASE, check, launch, finish } from "./helpers.ts";
 
 const PASSWORD = process.env.E2E_APP_PASSWORD ?? "flow-gate-secret";
 
@@ -45,7 +45,7 @@ check("a wrong password shows the error", errorShown);
 // Correct password → 303 back to /gate (from), setting the gate cookie.
 await page.getByLabel("Password").fill(PASSWORD);
 await page.getByRole("button", { name: "Continue" }).click();
-await page.waitForLoadState("networkidle").catch(() => {});
+await page.waitForLoadState("networkidle").catch(() => undefined);
 
 // The gate cookie is httpOnly, so read it from the context (not document.cookie).
 const gateCookie = await page

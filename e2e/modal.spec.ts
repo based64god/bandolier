@@ -2,8 +2,8 @@
 //
 // Run against a dev server serving the harness route:
 //   pnpm next dev --port 3137 &
-//   node e2e/modal.spec.mjs
-import { BASE, check, launch, finish } from "./helpers.mjs";
+//   node e2e/modal.spec.ts
+import { BASE, check, launch, finish } from "./helpers.ts";
 
 const browser = await launch();
 const page = await browser.newPage();
@@ -27,6 +27,7 @@ check("body scroll locked while open", scrollLocked);
 
 // ── A drag that starts inside the panel and ends on the backdrop keeps it open
 const box = await panel.boundingBox();
+if (!box) throw new Error("panel has no bounding box");
 // Press inside the panel…
 await page.mouse.move(box.x + box.width / 2, box.y + 20);
 await page.mouse.down();

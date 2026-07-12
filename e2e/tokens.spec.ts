@@ -4,15 +4,15 @@
 //
 // Run against a dev server serving the harness route:
 //   pnpm next dev --port 3137 &
-//   node e2e/tokens.spec.mjs
-import { BASE, check, launch, finish } from "./helpers.mjs";
+//   node e2e/tokens.spec.ts
+import { BASE, check, launch, finish } from "./helpers.ts";
 
 const browser = await launch();
 const page = await browser.newPage();
 
 await page.goto(`${BASE}/dev/tokens`);
 
-const cell = (label) => page.getByTestId(`readout-${label}`);
+const cell = (label: string) => page.getByTestId(`readout-${label}`);
 
 // ── No-usage states render nothing ───────────────────────────────────────────
 check(
@@ -48,7 +48,8 @@ check(
 check(
   "thousands title carries the full breakdown",
   await (async () => {
-    const title = await thousands.locator("[title]").getAttribute("title");
+    const title =
+      (await thousands.locator("[title]").getAttribute("title")) ?? "";
     return (
       title.includes("6,800 tokens") &&
       title.includes("input 4,200") &&

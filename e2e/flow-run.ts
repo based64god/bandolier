@@ -1,19 +1,19 @@
-// Orchestrates the browser PRODUCT-FLOW tests under e2e/*.flow.mjs — the real
+// Orchestrates the browser PRODUCT-FLOW tests under e2e/*.flow.ts — the real
 // authenticated/gated product surface, as opposed to the isolated /dev/* fixture
-// smoke tests that e2e/run.mjs drives. This runner:
+// smoke tests that e2e/run.ts drives. This runner:
 //
 //   1. boots `next dev` on PORT (default 3138) with the shared-password gate
 //      ENABLED (APP_PASSWORD set), so the flow specs can exercise it,
 //   2. waits until the exempt routes (/gate, /api/version) answer 200,
-//   3. runs each e2e/*.flow.mjs spec in turn, streaming its output,
+//   3. runs each e2e/*.flow.ts spec in turn, streaming its output,
 //   4. tears the server down and exits non-zero if any spec failed.
 //
-// It is a sibling of run.mjs (own port, own *.flow.mjs glob, own env) so the two
+// It is a sibling of run.ts (own port, own *.flow.ts glob, own env) so the two
 // suites never collide. The heavier authenticated flows (deploy → pod → logs,
 // settings persistence) build on this runner plus a real DATABASE_URL, a fake
 // Kubernetes server, and the better-auth session bypass; the password-gate spec
 // here is fully hermetic (no DB/k8s/GitHub) and proves the runner itself.
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -42,7 +42,7 @@ const PLACEHOLDER_ENV = {
   APP_PASSWORD,
 };
 
-function log(msg) {
+function log(msg: string): void {
   console.log(`[flow-e2e] ${msg}`);
 }
 
@@ -67,7 +67,7 @@ async function waitForRoutes(timeoutMs = 90_000) {
   }
 }
 
-function runNode(file) {
+function runNode(file: string): Promise<number> {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [file], {
       stdio: "inherit",
@@ -81,7 +81,7 @@ function runNode(file) {
   });
 }
 
-let server;
+let server: ChildProcess | undefined;
 function startServer() {
   log(`starting next dev on port ${port} (gate enabled)`);
   server = spawn("pnpm", ["exec", "next", "dev", "--port", String(port)], {
@@ -106,11 +106,11 @@ function stopServer() {
 }
 
 const specs = readdirSync(here)
-  .filter((f) => f.endsWith(".flow.mjs"))
+  .filter((f) => f.endsWith(".flow.ts"))
   .sort();
 
 if (specs.length === 0) {
-  log("no *.flow.mjs files found");
+  log("no *.flow.ts files found");
   process.exit(0);
 }
 

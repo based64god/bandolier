@@ -2,8 +2,8 @@
 //
 // Run against a dev server serving the harness route:
 //   pnpm next dev --port 3137 &
-//   node e2e/effort-picker.spec.mjs
-import { BASE, check, launch, finish } from "./helpers.mjs";
+//   node e2e/effort-picker.spec.ts
+import { BASE, check, launch, finish } from "./helpers.ts";
 
 const browser = await launch();
 const page = await browser.newPage();
@@ -16,7 +16,7 @@ await page.goto(`${BASE}/dev/effort-picker`);
 const trigger = page.getByRole("button").first();
 // Pick a level by opening the dropdown and clicking its row (labelled with the
 // human-facing name); returns once the panel has closed again.
-async function pick(label) {
+async function pick(label: string) {
   await trigger.click();
   const search = page.getByPlaceholder("Search effort…");
   await search.waitFor({ state: "visible", timeout: 5000 });
@@ -33,7 +33,7 @@ for (const [label, level] of [
   ["High", "high"],
   ["Extra high", "xhigh"],
   ["Max — Ultracode", "max"],
-]) {
+] as const) {
   await pick(label);
   check(
     `selecting '${label}' resolves to '${level}'`,

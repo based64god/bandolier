@@ -1,4 +1,4 @@
-// Orchestrates the browser smoke tests under e2e/*.spec.mjs.
+// Orchestrates the browser smoke tests under e2e/*.spec.ts.
 //
 // Each spec is a standalone Playwright script that drives a dev server serving
 // the /dev/* harness routes and exits non-zero on the first failed assertion.
@@ -10,12 +10,12 @@
 //   4. tear the server down and exit non-zero if any spec failed.
 //
 // Usage:
-//   node e2e/run.mjs                 # boot a server, run every spec
-//   E2E_BASE_URL=… node e2e/run.mjs  # reuse an already-running server
+//   node e2e/run.ts                 # boot a server, run every spec
+//   E2E_BASE_URL=… node e2e/run.ts  # reuse an already-running server
 //
-// Every spec reads E2E_BASE_URL (via e2e/helpers.mjs), so a single base URL
+// Every spec reads E2E_BASE_URL (via e2e/helpers.ts), so a single base URL
 // configures the whole suite; this runner just points it at the server it boots.
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -55,7 +55,7 @@ const PLACEHOLDER_ENV = {
   DATABASE_URL: "postgres://e2e:e2e@localhost:5432/e2e",
 };
 
-function log(msg) {
+function log(msg: string): void {
   console.log(`[e2e] ${msg}`);
 }
 
@@ -80,7 +80,7 @@ async function waitForRoutes(timeoutMs = 90_000) {
   }
 }
 
-function runNode(file) {
+function runNode(file: string): Promise<number> {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [file], {
       stdio: "inherit",
@@ -93,7 +93,7 @@ function runNode(file) {
   });
 }
 
-let server;
+let server: ChildProcess | undefined;
 function startServer() {
   log(`starting next dev on port ${port}`);
   // `detached: true` puts next in its own process group so stopServer() can
@@ -123,11 +123,11 @@ function stopServer() {
 }
 
 const specs = readdirSync(here)
-  .filter((f) => f.endsWith(".spec.mjs"))
+  .filter((f) => f.endsWith(".spec.ts"))
   .sort();
 
 if (specs.length === 0) {
-  log("no *.spec.mjs files found");
+  log("no *.spec.ts files found");
   process.exit(0);
 }
 

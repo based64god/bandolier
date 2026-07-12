@@ -19,14 +19,14 @@ const repo = {
   permissions: { admin: true, push: true, pull: true },
 };
 
-function jsonResponse(body, status = 200) {
+function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: { "content-type": "application/json" },
   });
 }
 
-function githubMock(url) {
+function githubMock(url: string): Response {
   const { pathname } = new URL(url);
   if (pathname === "/user/repos") return jsonResponse([repo]);
   if (pathname === `/repos/${REPO_FULL}`) return jsonResponse(repo);
@@ -39,7 +39,7 @@ function githubMock(url) {
 
 // Anthropic model listing (models.list → listAnthropicModels) hits
 // GET /v1/models; return a small catalog so the deploy form has a model.
-function anthropicMock(url) {
+function anthropicMock(url: string): Response {
   const { pathname } = new URL(url);
   if (pathname === "/v1/models") {
     return jsonResponse({
@@ -54,13 +54,16 @@ function anthropicMock(url) {
 }
 
 const realFetch = globalThis.fetch;
-globalThis.fetch = async (input, init) => {
+globalThis.fetch = async (
+  input: RequestInfo | URL,
+  init?: RequestInit,
+): Promise<Response> => {
   const url =
     typeof input === "string"
       ? input
       : input instanceof URL
         ? input.href
-        : (input?.url ?? String(input));
+        : input.url;
   if (url.startsWith("https://api.github.com")) return githubMock(url);
   if (url.startsWith("https://api.anthropic.com")) return anthropicMock(url);
   return realFetch(input, init);

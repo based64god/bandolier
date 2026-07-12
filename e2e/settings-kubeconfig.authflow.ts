@@ -5,12 +5,12 @@
 // Kubernetes server, so the server-side SSRF guard passes (127.0.0.1) and the
 // live GET /version succeeds, the row is upserted, and a reload shows it
 // configured. The only flow that drives the setter end-to-end against a cluster.
-import { BASE, check, launch, finish } from "./helpers.mjs";
-import { signUp, uniqueEmail } from "./auth-helper.mjs";
+import { BASE, check, launch, finish } from "./helpers.ts";
+import { signUp, uniqueEmail } from "./auth-helper.ts";
 
 const K8S = process.env.E2E_FAKE_K8S_URL;
 if (!K8S) {
-  console.error("E2E_FAKE_K8S_URL not set — run via authflow-run.mjs");
+  console.error("E2E_FAKE_K8S_URL not set — run via authflow-run.ts");
   process.exit(1);
 }
 

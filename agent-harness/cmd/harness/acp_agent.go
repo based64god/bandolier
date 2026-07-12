@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/bandolier/agent-harness/internal/acp"
 )
@@ -167,6 +168,15 @@ type claudeDriver struct {
 	stdin    io.WriteCloser
 	turnDone chan acp.PromptResult
 	agent    *acpAgent
+	// bgActive is the number of background subagent tasks in flight, from the most
+	// recent system/background_tasks_changed event. While it's non-zero, a result
+	// event is a mid-turn yield to a background task — the CLI auto-resumes the
+	// agent when the task finishes — not the end of the user's turn. It's written
+	// on the stdout-reading goroutine (onBackgroundTasks) and reset by promptClaude
+	// on the request goroutine at each turn start, so it's atomic: a turn that ends
+	// abnormally (a session/cancel while a task is still in flight) must not leave a
+	// stale count that suppresses the next turn's completion.
+	bgActive atomic.Int32
 }
 
 // claudeDriverArgs builds the claude CLI arguments for an interactive ACP
@@ -237,6 +247,11 @@ func (d *claudeDriver) handle(raw []byte) { dispatchClaudeEvent(raw, d) }
 // a typeahead menu.
 func (d *claudeDriver) onSlashCommands(names []string) { d.agent.emitAvailableCommands(names) }
 
+// onBackgroundTasks records how many background subagent tasks are in flight so
+// onResult can tell a mid-turn yield (the agent auto-resumes when a task finishes)
+// from the real end of the user's turn.
+func (d *claudeDriver) onBackgroundTasks(active int) { d.bgActive.Store(int32(active)) }
+
 // onText and onThinking carry parentID (the spawning Agent/Task id when the
 // message came from a subagent). Subagent narration is tagged with
 // ParentToolCallID so the client routes it to the subagent narration card
@@ -304,6 +319,16 @@ func (d *claudeDriver) onResult(ev claudeEvent) {
 		a.mu.Unlock()
 		logTokenUsage(total)
 	}
+	// A result that arrives while background subagent tasks are still in flight is
+	// a mid-turn yield, not the end of the user's turn: the CLI auto-resumes the
+	// agent (with no user message) when the task finishes and emits a later result
+	// once the background set drains. Completing the turn here would end the ACP
+	// prompt early and fire a spurious "waiting for input" notification while the
+	// agent is really just waiting on its subagents — so hold the turn open for the
+	// result that arrives once no background tasks remain.
+	if d.bgActive.Load() > 0 {
+		return
+	}
 	reason := acp.StopEndTurn
 	if ev.IsError {
 		reason = acp.StopRefusal
@@ -324,6 +349,12 @@ func (a *acpAgent) promptClaude(ctx context.Context, text string) (any, error) {
 	case <-d.turnDone:
 	default:
 	}
+	// Start this turn with a clean background-task count: the previous turn may
+	// have ended abnormally (a session/cancel while a background subagent was still
+	// in flight), which would otherwise leave bgActive non-zero and wrongly cause
+	// this turn's own end-of-turn result to be held open. The turn's own
+	// background_tasks_changed events repopulate it as needed.
+	d.bgActive.Store(0)
 	if err := writeUserMessage(d.stdin, text); err != nil {
 		return nil, &acp.RPCError{Code: acp.CodeInternalError, Message: "write message: " + err.Error()}
 	}

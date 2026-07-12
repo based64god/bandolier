@@ -448,3 +448,76 @@ func TestACPAgentClaudeTurn(t *testing.T) {
 		t.Fatalf("unexpected chunks: %v", chunks)
 	}
 }
+
+// A result that arrives while a background subagent task is still in flight is a
+// mid-turn yield — the CLI auto-resumes the agent (no user message) when the task
+// finishes — not the end of the user's turn. The driver must hold the ACP turn
+// open on it, or the prompt ends early and a spurious "waiting for input"
+// notification fires while the agent is merely waiting on its subagent. The turn
+// completes only on the result that arrives once the background set drains.
+func TestClaudeDriverHoldsTurnForBackgroundTasks(t *testing.T) {
+	d := &claudeDriver{turnDone: make(chan acp.PromptResult, 1), agent: &acpAgent{}}
+
+	// A background subagent spawns: one task now in flight.
+	d.handle([]byte(`{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"t1"}]}`))
+	// The agent yields its turn — this result must be swallowed, not completed.
+	d.handle([]byte(`{"type":"result","stop_reason":"end_turn","num_turns":2}`))
+	select {
+	case r := <-d.turnDone:
+		t.Fatalf("turn completed on a background yield (stopReason=%q); want it held open", r.StopReason)
+	default:
+	}
+
+	// The task finishes and the background set drains to empty.
+	d.handle([]byte(`{"type":"system","subtype":"background_tasks_changed","tasks":[]}`))
+	// The agent auto-resumes and truly finishes — now the turn completes.
+	d.handle([]byte(`{"type":"result","stop_reason":"end_turn","num_turns":1}`))
+	select {
+	case r := <-d.turnDone:
+		if r.StopReason != acp.StopEndTurn {
+			t.Fatalf("final stopReason = %q, want %q", r.StopReason, acp.StopEndTurn)
+		}
+	default:
+		t.Fatal("turn did not complete after background tasks drained")
+	}
+}
+
+// discardWriteCloser is a stdin stand-in for a driver whose CLI is never actually
+// spawned (the test drives the sink directly).
+type discardWriteCloser struct{}
+
+func (discardWriteCloser) Write(p []byte) (int, error) { return len(p), nil }
+func (discardWriteCloser) Close() error                { return nil }
+
+// The in-flight background-task count must not leak across turns. A turn that ends
+// abnormally — a session/cancel while a background subagent is still running —
+// makes promptClaude return before the background set drains, leaving the count
+// non-zero. The next turn must reset it, or its own end-of-turn result is wrongly
+// held open and the turn hangs. promptClaude clears the count at turn start; drive
+// a real prompt with a stale count and assert the turn still completes.
+func TestPromptClaudeResetsStaleBackgroundCount(t *testing.T) {
+	d := &claudeDriver{stdin: discardWriteCloser{}, turnDone: make(chan acp.PromptResult, 1)}
+	a := &acpAgent{claude: d}
+	d.agent = a
+	d.bgActive.Store(3) // stale count left by a cancelled prior turn
+
+	res := make(chan acp.PromptResult, 1)
+	go func() {
+		r, _ := a.promptClaude(context.Background(), "hello")
+		res <- r.(acp.PromptResult)
+	}()
+
+	// promptClaude resets the count before it blocks waiting for the turn result.
+	waitFor(t, func() bool { return d.bgActive.Load() == 0 })
+	// The turn finishes with no background work: it must complete, not be swallowed.
+	d.handle([]byte(`{"type":"result","stop_reason":"end_turn"}`))
+
+	select {
+	case r := <-res:
+		if r.StopReason != acp.StopEndTurn {
+			t.Fatalf("stopReason = %q, want %q", r.StopReason, acp.StopEndTurn)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("promptClaude hung: a stale background count leaked across turns")
+	}
+}

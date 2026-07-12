@@ -36,7 +36,15 @@ type claudeEvent struct {
 	SlashCommands []string `json:"slash_commands"`
 	NumTurns      int      `json:"num_turns"`
 	IsError       bool     `json:"is_error"`
-	Message       struct {
+	// Tasks is carried by the system/background_tasks_changed event: the set of
+	// background subagent tasks currently in flight. A non-empty set means the
+	// agent has yielded its turn to a background task and will auto-resume — with
+	// no user message — once it finishes, so a result event arriving while the set
+	// is non-empty is a mid-turn yield, not a user-input await.
+	Tasks []struct {
+		TaskID string `json:"task_id"`
+	} `json:"tasks"`
+	Message struct {
 		Content []struct {
 			Type     string          `json:"type"`
 			Text     string          `json:"text"`
@@ -62,8 +70,9 @@ type claudeEvent struct {
 // whether) it renders is the sink's choice, not the parser's.
 // The event-scoped callbacks carry parentID: empty for the main agent, or the
 // spawning Agent/Task tool_use id when the event came from a subagent, so each
-// sink can attribute the activity. onSlashCommands/onResult are never
-// subagent-scoped (system/result events), so they take no parentID.
+// sink can attribute the activity. onSlashCommands/onResult/onBackgroundTasks are
+// session-level (system/result events), never subagent-scoped, so they take no
+// parentID.
 type claudeEventSink interface {
 	onSlashCommands(names []string)
 	onText(text, parentID string)
@@ -71,6 +80,9 @@ type claudeEventSink interface {
 	onToolUse(id, name, parentID string, input json.RawMessage)
 	onToolResult(id, parentID string, isError bool, content json.RawMessage)
 	onResult(ev claudeEvent)
+	// onBackgroundTasks reports how many background subagent tasks are currently
+	// in flight, from a system/background_tasks_changed event.
+	onBackgroundTasks(active int)
 }
 
 // dispatchClaudeEvent parses one stream-json line and drives the sink. Anything
@@ -86,6 +98,12 @@ func dispatchClaudeEvent(raw []byte, sink claudeEventSink) {
 		// commands.
 		if ev.Subtype == "init" && len(ev.SlashCommands) > 0 {
 			sink.onSlashCommands(ev.SlashCommands)
+		}
+		// background_tasks_changed carries the live set of in-flight background
+		// subagent tasks; a non-empty set means the agent has yielded to a
+		// background task and will auto-resume when it finishes.
+		if ev.Subtype == "background_tasks_changed" {
+			sink.onBackgroundTasks(len(ev.Tasks))
 		}
 	case "assistant":
 		for _, c := range ev.Message.Content {
@@ -147,6 +165,10 @@ func (s *claudeLogSink) subagentPrefix(parentID string) string {
 }
 
 func (*claudeLogSink) onSlashCommands([]string) {}
+
+// onBackgroundTasks is a no-op for the one-shot log path: it drives no ACP turn,
+// so it has no turn to hold open while background subagents run.
+func (*claudeLogSink) onBackgroundTasks(int) {}
 
 func (s *claudeLogSink) onText(text, parentID string) {
 	if parentID == "" {

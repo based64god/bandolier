@@ -48,6 +48,7 @@ export function UserProviderDirectory() {
     {
       id: "anthropic",
       label: "Anthropic",
+      hint: "API key (sk-ant-…) or Claude subscription",
       accent: "purple",
       configured: !!(
         anthropic.data?.apiKeyMasked ?? anthropic.data?.oauthTokenMasked
@@ -59,6 +60,7 @@ export function UserProviderDirectory() {
     {
       id: "openai",
       label: "OpenAI",
+      hint: "API key (sk-…) or ChatGPT (Codex) sign-in",
       accent: "teal",
       configured: !!(
         openai.data?.apiKeyMasked ?? openai.data?.chatgptConfigured
@@ -70,6 +72,7 @@ export function UserProviderDirectory() {
     {
       id: "gemini",
       label: "Gemini",
+      hint: "Google Cloud service-account JSON",
       accent: "blue",
       configured: !!gemini.data?.configured,
       keywords: "google vertex",
@@ -79,6 +82,7 @@ export function UserProviderDirectory() {
     {
       id: "bedrock",
       label: "AWS Bedrock",
+      hint: "Access key + secret + region",
       accent: "orange",
       configured: !!aws.data?.configured,
       keywords: "aws amazon claude",

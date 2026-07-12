@@ -601,6 +601,7 @@ function RepoProviderDirectory({
     {
       id: "anthropic",
       label: "Anthropic",
+      hint: "API key (sk-ant-…) or Claude subscription",
       accent: "purple",
       configured: !!creds?.anthropic.configured,
       keywords: "claude",
@@ -616,6 +617,7 @@ function RepoProviderDirectory({
     {
       id: "openai",
       label: "OpenAI",
+      hint: "API key (sk-…) or ChatGPT (Codex) sign-in",
       accent: "teal",
       configured: !!creds?.openai.configured,
       keywords: "gpt chatgpt",
@@ -631,6 +633,7 @@ function RepoProviderDirectory({
     {
       id: "gemini",
       label: "Gemini",
+      hint: "Google Cloud service-account JSON",
       accent: "blue",
       configured: !!creds?.gemini.configured,
       keywords: "google vertex",
@@ -646,6 +649,7 @@ function RepoProviderDirectory({
     {
       id: "bedrock",
       label: "AWS Bedrock",
+      hint: "Access key + secret + region",
       accent: "orange",
       configured: !!creds?.aws.configured,
       keywords: "aws amazon claude",

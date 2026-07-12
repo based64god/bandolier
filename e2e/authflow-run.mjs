@@ -15,7 +15,7 @@
 // point a seeded kubeconfig at the fake Kubernetes server (e2e/fake-k8s.mjs).
 import { spawn } from "node:child_process";
 import { readdirSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
 
 import { connect, migrateDb, resetDb } from "./db.mjs";
@@ -84,12 +84,24 @@ function runNode(file) {
   });
 }
 
+// Intercept the server's own GitHub calls (Playwright can't reach them) by
+// preloading a global-fetch stub into the Next server process.
+const preload = pathToFileURL(join(here, "stub-preload.mjs")).href;
+const nodeOptions = [process.env.NODE_OPTIONS, `--import ${preload}`]
+  .filter(Boolean)
+  .join(" ");
+
 let server;
 function startServer() {
   log(`starting next dev on port ${port} (gate disabled, real DB)`);
   server = spawn("pnpm", ["exec", "next", "dev", "--port", String(port)], {
     stdio: ["ignore", "inherit", "inherit"],
-    env: { ...SERVER_ENV, ...process.env, ...SERVER_ENV },
+    env: {
+      ...SERVER_ENV,
+      ...process.env,
+      ...SERVER_ENV,
+      NODE_OPTIONS: nodeOptions,
+    },
     detached: true,
   });
 }

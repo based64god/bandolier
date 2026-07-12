@@ -37,6 +37,7 @@ const ROUTES = [
   "/dev/interactive-scroll",
   "/dev/log",
   "/dev/modal",
+  "/dev/provider-directory",
   "/dev/searchable-select",
   "/dev/settings-shell",
   "/dev/status-badge",

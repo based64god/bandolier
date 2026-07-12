@@ -47,12 +47,16 @@ export function SessionComposer({
   const [draft, setDraft] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Focus (and scroll into view) whenever the parent bumps the signal. The
-  // effect also runs on mount, so a request that first expands a collapsed row
-  // still lands focus once the textarea renders.
+  // Move keyboard focus into the textarea whenever the parent bumps the signal.
+  // preventScroll is essential: the row's reveal has already scrolled the
+  // session to the top of the viewport (interactive controls at the top,
+  // composer at the bottom), and a plain focus() would scroll the textarea back
+  // into view from the bottom, dragging the row up and off the top. The effect
+  // also runs on mount, so a request that first expands a collapsed row still
+  // lands focus once the textarea renders.
   useEffect(() => {
     if (!focusSignal) return;
-    textareaRef.current?.focus();
+    textareaRef.current?.focus({ preventScroll: true });
   }, [focusSignal]);
   // Index of the arrow-key-highlighted command in the slash menu.
   const [cmdHighlight, setCmdHighlight] = useState(0);

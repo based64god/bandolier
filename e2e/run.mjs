@@ -34,6 +34,7 @@ const ROUTES = [
   "/dev/credential-ui",
   "/dev/deploy-modal",
   "/dev/effort-picker",
+  "/dev/interactive-scroll",
   "/dev/log",
   "/dev/modal",
   "/dev/searchable-select",

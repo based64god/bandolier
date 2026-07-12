@@ -71,6 +71,19 @@ export interface GollmProviderInfo {
   defaultBase?: string;
   /** One-line settings hint (key format, extra env the provider needs). */
   hint?: string;
+  /**
+   * Credential-shape hints for the derived key/base form (providers without
+   * explicit `fields`): the API key's placeholder (its distinctive prefix, e.g.
+   * "gsk_…"), an optional per-field note under the key input, and the endpoint
+   * field's placeholder (its URL shape, e.g. "http://localhost:1234/v1"). They
+   * flow straight onto the corresponding derived field in `providerFields`, so
+   * every provider's form indicates the shape it expects — like the first-class
+   * Anthropic/OpenAI/Gemini/Bedrock forms do. Ignored when `fields` is set (put
+   * the placeholder/hint on the field there).
+   */
+  keyPlaceholder?: string;
+  keyHint?: string;
+  basePlaceholder?: string;
 }
 
 const p = (info: GollmProviderInfo) => info;
@@ -93,6 +106,7 @@ export const GOLLM_PROVIDERS: readonly GollmProviderInfo[] = [
     id: "groq",
     label: "Groq",
     keyEnv: "GROQ_API_KEY",
+    keyPlaceholder: "gsk_…",
     listable: true,
     defaultBase: "https://api.groq.com/openai/v1",
   }),
@@ -100,6 +114,7 @@ export const GOLLM_PROVIDERS: readonly GollmProviderInfo[] = [
     id: "mistral",
     label: "Mistral",
     keyEnv: "MISTRAL_API_KEY",
+    keyHint: "A Mistral API key (console.mistral.ai).",
     baseEnv: "MISTRAL_API_BASE",
     listable: true,
     defaultBase: "https://api.mistral.ai/v1",
@@ -108,12 +123,14 @@ export const GOLLM_PROVIDERS: readonly GollmProviderInfo[] = [
     id: "codestral",
     label: "Mistral Codestral",
     keyEnv: "CODESTRAL_API_KEY",
+    keyHint: "A Mistral Codestral API key (console.mistral.ai).",
     baseEnv: "CODESTRAL_API_BASE",
   }),
   p({
     id: "deepseek",
     label: "DeepSeek",
     keyEnv: "DEEPSEEK_API_KEY",
+    keyPlaceholder: "sk-…",
     baseEnv: "DEEPSEEK_API_BASE",
     listable: true,
     defaultBase: "https://api.deepseek.com/v1",
@@ -122,6 +139,7 @@ export const GOLLM_PROVIDERS: readonly GollmProviderInfo[] = [
     id: "xai",
     label: "xAI (Grok)",
     keyEnv: "XAI_API_KEY",
+    keyPlaceholder: "xai-…",
     listable: true,
     defaultBase: "https://api.x.ai/v1",
   }),
@@ -129,23 +147,36 @@ export const GOLLM_PROVIDERS: readonly GollmProviderInfo[] = [
     id: "together",
     label: "Together AI",
     keyEnv: "TOGETHER_API_KEY",
+    keyHint: "A Together AI API key (api.together.xyz).",
     baseEnv: "TOGETHER_AI_API_BASE",
     listable: true,
     defaultBase: "https://api.together.xyz/v1",
   }),
-  p({ id: "fireworks", label: "Fireworks AI", keyEnv: "FIREWORKS_API_KEY" }),
+  p({
+    id: "fireworks",
+    label: "Fireworks AI",
+    keyEnv: "FIREWORKS_API_KEY",
+    keyPlaceholder: "fw_…",
+  }),
   p({
     id: "openrouter",
     label: "OpenRouter",
     keyEnv: "OPENROUTER_API_KEY",
+    keyPlaceholder: "sk-or-v1-…",
     listable: true,
     defaultBase: "https://openrouter.ai/api/v1",
   }),
-  p({ id: "perplexity", label: "Perplexity", keyEnv: "PERPLEXITY_API_KEY" }),
+  p({
+    id: "perplexity",
+    label: "Perplexity",
+    keyEnv: "PERPLEXITY_API_KEY",
+    keyPlaceholder: "pplx-…",
+  }),
   p({
     id: "cerebras",
     label: "Cerebras",
     keyEnv: "CEREBRAS_API_KEY",
+    keyPlaceholder: "csk-…",
     baseEnv: "CEREBRAS_API_BASE",
     listable: true,
     defaultBase: "https://api.cerebras.ai/v1",
@@ -154,6 +185,7 @@ export const GOLLM_PROVIDERS: readonly GollmProviderInfo[] = [
     id: "moonshot",
     label: "Moonshot (Kimi)",
     keyEnv: "MOONSHOT_API_KEY",
+    keyPlaceholder: "sk-…",
     baseEnv: "MOONSHOT_API_BASE",
     listable: true,
     defaultBase: "https://api.moonshot.ai/v1",
@@ -162,6 +194,7 @@ export const GOLLM_PROVIDERS: readonly GollmProviderInfo[] = [
     id: "nvidia",
     label: "NVIDIA NIM",
     keyEnv: "NVIDIA_NIM_API_KEY",
+    keyPlaceholder: "nvapi-…",
     baseEnv: "NVIDIA_NIM_API_BASE",
     listable: true,
     defaultBase: "https://integrate.api.nvidia.com/v1",
@@ -176,6 +209,7 @@ export const GOLLM_PROVIDERS: readonly GollmProviderInfo[] = [
     id: "deepinfra",
     label: "DeepInfra",
     keyEnv: "DEEPINFRA_API_KEY",
+    keyHint: "A DeepInfra API token (deepinfra.com).",
     baseEnv: "DEEPINFRA_API_BASE",
     listable: true,
     defaultBase: "https://api.deepinfra.com/v1/openai",
@@ -184,6 +218,7 @@ export const GOLLM_PROVIDERS: readonly GollmProviderInfo[] = [
     id: "ai21",
     label: "AI21",
     keyEnv: "AI21_API_KEY",
+    keyHint: "An AI21 Studio API key (studio.ai21.com).",
     baseEnv: "AI21_API_BASE",
   }),
   p({
@@ -196,6 +231,7 @@ export const GOLLM_PROVIDERS: readonly GollmProviderInfo[] = [
     id: "sambanova",
     label: "SambaNova",
     keyEnv: "SAMBANOVA_API_KEY",
+    keyHint: "A SambaNova Cloud API key (cloud.sambanova.ai).",
     baseEnv: "SAMBANOVA_API_BASE",
     listable: true,
     defaultBase: "https://api.sambanova.ai/v1",
@@ -234,6 +270,7 @@ export const GOLLM_PROVIDERS: readonly GollmProviderInfo[] = [
     id: "github",
     label: "GitHub Models",
     keyEnv: "GITHUB_API_KEY",
+    keyPlaceholder: "ghp_… or github_pat_…",
     baseEnv: "GITHUB_API_BASE",
     hint: "A GitHub PAT with models access (not your repo token).",
   }),
@@ -247,6 +284,7 @@ export const GOLLM_PROVIDERS: readonly GollmProviderInfo[] = [
     id: "nebius",
     label: "Nebius AI Studio",
     keyEnv: "NEBIUS_API_KEY",
+    keyHint: "A Nebius AI Studio API key (studio.nebius.ai).",
     baseEnv: "NEBIUS_API_BASE",
     listable: true,
     defaultBase: "https://api.studio.nebius.ai/v1",
@@ -255,6 +293,7 @@ export const GOLLM_PROVIDERS: readonly GollmProviderInfo[] = [
     id: "novita",
     label: "Novita AI",
     keyEnv: "NOVITA_API_KEY",
+    keyPlaceholder: "sk_…",
     baseEnv: "NOVITA_API_BASE",
     listable: true,
     defaultBase: "https://api.novita.ai/v3/openai",
@@ -275,6 +314,7 @@ export const GOLLM_PROVIDERS: readonly GollmProviderInfo[] = [
     id: "dashscope",
     label: "Alibaba DashScope (Qwen)",
     keyEnv: "DASHSCOPE_API_KEY",
+    keyPlaceholder: "sk-…",
     baseEnv: "DASHSCOPE_API_BASE",
     listable: true,
     defaultBase: "https://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -289,6 +329,7 @@ export const GOLLM_PROVIDERS: readonly GollmProviderInfo[] = [
     id: "v0",
     label: "v0 (Vercel)",
     keyEnv: "V0_API_KEY",
+    keyHint: "A v0 API key from v0.dev.",
     baseEnv: "V0_API_BASE",
   }),
   p({
@@ -301,6 +342,7 @@ export const GOLLM_PROVIDERS: readonly GollmProviderInfo[] = [
     id: "lambda_ai",
     label: "Lambda",
     keyEnv: "LAMBDA_API_KEY",
+    keyPlaceholder: "secret_…",
     baseEnv: "LAMBDA_API_BASE",
     listable: true,
     defaultBase: "https://api.lambda.ai/v1",
@@ -315,6 +357,7 @@ export const GOLLM_PROVIDERS: readonly GollmProviderInfo[] = [
     id: "hyperbolic",
     label: "Hyperbolic",
     keyEnv: "HYPERBOLIC_API_KEY",
+    keyHint: "A Hyperbolic API key (app.hyperbolic.xyz).",
     baseEnv: "HYPERBOLIC_API_BASE",
     listable: true,
     defaultBase: "https://api.hyperbolic.xyz/v1",
@@ -329,6 +372,7 @@ export const GOLLM_PROVIDERS: readonly GollmProviderInfo[] = [
     id: "wandb",
     label: "W&B Inference",
     keyEnv: "WANDB_API_KEY",
+    keyHint: "Your Weights & Biases API key (wandb.ai/authorize).",
     baseEnv: "WANDB_API_BASE",
   }),
   p({
@@ -360,12 +404,14 @@ export const GOLLM_PROVIDERS: readonly GollmProviderInfo[] = [
     id: "gradient_ai",
     label: "DigitalOcean Gradient",
     keyEnv: "GRADIENT_AI_API_KEY",
+    keyHint: "A DigitalOcean Gradient model-access key.",
     baseEnv: "GRADIENT_AI_API_BASE",
   }),
   p({
     id: "huggingface",
     label: "Hugging Face",
     keyEnv: "HF_TOKEN",
+    keyPlaceholder: "hf_…",
     baseEnv: "HF_API_BASE",
     listable: true,
     defaultBase: "https://router.huggingface.co/v1",
@@ -380,6 +426,7 @@ export const GOLLM_PROVIDERS: readonly GollmProviderInfo[] = [
     id: "vercel_ai_gateway",
     label: "Vercel AI Gateway",
     keyEnv: "VERCEL_AI_GATEWAY_API_KEY",
+    keyHint: "A Vercel AI Gateway key (the AI tab of your Vercel dashboard).",
     baseEnv: "VERCEL_AI_GATEWAY_API_BASE",
   }),
 
@@ -406,6 +453,7 @@ export const GOLLM_PROVIDERS: readonly GollmProviderInfo[] = [
     label: "Azure AI Foundry",
     keyEnv: "AZURE_AI_API_KEY",
     baseEnv: "AZURE_AI_API_BASE",
+    basePlaceholder: "https://<resource>.services.ai.azure.com/models",
     needsBase: true,
   }),
   p({
@@ -413,6 +461,7 @@ export const GOLLM_PROVIDERS: readonly GollmProviderInfo[] = [
     label: "litellm proxy",
     keyEnv: "LITELLM_PROXY_API_KEY",
     baseEnv: "LITELLM_PROXY_API_BASE",
+    basePlaceholder: "http://localhost:4000",
     needsBase: true,
     listable: true,
   }),
@@ -420,6 +469,7 @@ export const GOLLM_PROVIDERS: readonly GollmProviderInfo[] = [
     id: "heroku",
     label: "Heroku Inference",
     keyEnv: "HEROKU_API_KEY",
+    keyHint: "From the Heroku Inference add-on's config vars.",
     baseEnv: "HEROKU_API_BASE",
     needsBase: true,
   }),
@@ -434,6 +484,7 @@ export const GOLLM_PROVIDERS: readonly GollmProviderInfo[] = [
     label: "vLLM (self-hosted)",
     keyEnv: "HOSTED_VLLM_API_KEY",
     baseEnv: "HOSTED_VLLM_API_BASE",
+    basePlaceholder: "http://localhost:8000/v1",
     needsBase: true,
     keyOptional: true,
     listable: true,
@@ -443,6 +494,7 @@ export const GOLLM_PROVIDERS: readonly GollmProviderInfo[] = [
     label: "llamafile",
     keyEnv: "LLAMAFILE_API_KEY",
     baseEnv: "LLAMAFILE_API_BASE",
+    basePlaceholder: "http://localhost:8080/v1",
     needsBase: true,
     keyOptional: true,
     listable: true,
@@ -452,6 +504,7 @@ export const GOLLM_PROVIDERS: readonly GollmProviderInfo[] = [
     label: "LM Studio",
     keyEnv: "LM_STUDIO_API_KEY",
     baseEnv: "LM_STUDIO_API_BASE",
+    basePlaceholder: "http://localhost:1234/v1",
     needsBase: true,
     keyOptional: true,
     listable: true,
@@ -461,6 +514,7 @@ export const GOLLM_PROVIDERS: readonly GollmProviderInfo[] = [
     label: "Docker Model Runner",
     keyEnv: "DOCKER_MODEL_RUNNER_API_KEY",
     baseEnv: "DOCKER_MODEL_RUNNER_API_BASE",
+    basePlaceholder: "http://localhost:12434/engines/v1",
     needsBase: true,
     keyOptional: true,
     listable: true,
@@ -470,6 +524,7 @@ export const GOLLM_PROVIDERS: readonly GollmProviderInfo[] = [
     label: "AMD Lemonade",
     keyEnv: "LEMONADE_API_KEY",
     baseEnv: "LEMONADE_API_BASE",
+    basePlaceholder: "http://localhost:8000/api/v1",
     needsBase: true,
     keyOptional: true,
   }),
@@ -478,6 +533,7 @@ export const GOLLM_PROVIDERS: readonly GollmProviderInfo[] = [
     label: "Xinference",
     keyEnv: "XINFERENCE_API_KEY",
     baseEnv: "XINFERENCE_API_BASE",
+    basePlaceholder: "http://localhost:9997/v1",
     needsBase: true,
     keyOptional: true,
   }),
@@ -486,6 +542,7 @@ export const GOLLM_PROVIDERS: readonly GollmProviderInfo[] = [
     label: "RAGFlow",
     keyEnv: "RAGFLOW_API_KEY",
     baseEnv: "RAGFLOW_API_BASE",
+    basePlaceholder: "http://localhost:9380/api/v1",
     needsBase: true,
     keyOptional: true,
   }),
@@ -494,6 +551,7 @@ export const GOLLM_PROVIDERS: readonly GollmProviderInfo[] = [
     label: "text-generation-webui",
     keyEnv: "OOBABOOGA_API_KEY",
     baseEnv: "OOBABOOGA_API_BASE",
+    basePlaceholder: "http://localhost:5000/v1",
     needsBase: true,
     keyOptional: true,
   }),
@@ -523,11 +581,21 @@ export const GOLLM_PROVIDERS: readonly GollmProviderInfo[] = [
   }),
   p({ id: "veniceai", label: "Venice AI", keyEnv: "VENICE_AI_API_KEY" }),
   p({ id: "xiaomi_mimo", label: "Xiaomi MiMo", keyEnv: "XIAOMI_MIMO_API_KEY" }),
-  p({ id: "scaleway", label: "Scaleway", keyEnv: "SCW_SECRET_KEY" }),
+  p({
+    id: "scaleway",
+    label: "Scaleway",
+    keyEnv: "SCW_SECRET_KEY",
+    keyHint: "Your Scaleway secret key (a UUID).",
+  }),
   p({ id: "synthetic", label: "Synthetic", keyEnv: "SYNTHETIC_API_KEY" }),
   p({ id: "apertis", label: "Apertis (Stima)", keyEnv: "STIMA_API_KEY" }),
   p({ id: "nano-gpt", label: "Nano-GPT", keyEnv: "NANOGPT_API_KEY" }),
-  p({ id: "poe", label: "Poe", keyEnv: "POE_API_KEY" }),
+  p({
+    id: "poe",
+    label: "Poe",
+    keyEnv: "POE_API_KEY",
+    keyHint: "A Poe API key (poe.com/api_key).",
+  }),
   p({ id: "chutes", label: "Chutes", keyEnv: "CHUTES_API_KEY" }),
   p({
     id: "abliteration",
@@ -630,12 +698,17 @@ export const GOLLM_PROVIDERS: readonly GollmProviderInfo[] = [
     label: "IBM watsonx.ai",
     listable: false,
     fields: [
-      secret("WATSONX_APIKEY", "IBM Cloud API key", { role: "key" }),
+      secret("WATSONX_APIKEY", "IBM Cloud API key", {
+        role: "key",
+        hint: "An IBM Cloud API key (IBM Cloud → Manage → Access → API keys).",
+      }),
       text("WATSONX_URL", "Service URL", {
         role: "base",
         placeholder: "https://us-south.ml.cloud.ibm.com",
       }),
-      text("WATSONX_PROJECT_ID", "Project ID"),
+      text("WATSONX_PROJECT_ID", "Project ID", {
+        placeholder: "01234567-89ab-cdef-0123-456789abcdef",
+      }),
     ],
   }),
   p({
@@ -715,8 +788,11 @@ export const GOLLM_PROVIDERS: readonly GollmProviderInfo[] = [
     id: "predibase",
     label: "Predibase",
     fields: [
-      secret("PREDIBASE_API_KEY", "API key", { role: "key" }),
-      text("PREDIBASE_TENANT_ID", "Tenant ID"),
+      secret("PREDIBASE_API_KEY", "API key", {
+        role: "key",
+        hint: "A Predibase API token (Settings → My profile).",
+      }),
+      text("PREDIBASE_TENANT_ID", "Tenant ID", { placeholder: "abc123" }),
     ],
   }),
   p({ id: "nlp_cloud", label: "NLP Cloud", keyEnv: "NLP_CLOUD_API_KEY" }),
@@ -759,6 +835,8 @@ export function providerFields(info: GollmProviderInfo): CredentialField[] {
         kind: "secret",
         role: "key",
         optional: info.keyOptional,
+        placeholder: info.keyPlaceholder,
+        hint: info.keyHint,
       }
     : null;
   const baseF: CredentialField | null = info.baseEnv
@@ -768,6 +846,7 @@ export function providerFields(info: GollmProviderInfo): CredentialField[] {
         kind: "text",
         role: "base",
         optional: !info.needsBase,
+        placeholder: info.basePlaceholder,
       }
     : null;
 

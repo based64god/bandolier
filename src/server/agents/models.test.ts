@@ -1,8 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { friendlyAwsError } from "~/server/agents/aws";
+import type { CustomProviderCredential } from "~/server/agents/custom-providers";
 import {
   fuzzyPickModel,
+  listModelsForUser,
   pickDefaultModel,
   pickLatestGeminiFlash,
   pickLatestGptMini,
@@ -10,6 +12,42 @@ import {
   pickPrWriterModel,
   type ModelOption,
 } from "~/server/agents/models";
+import type { ModelCredentials } from "~/server/agents/resolve-credentials";
+import type { db as Database } from "~/server/db";
+
+// The gollm custom-providers branch of listModelsForUser fans out to the
+// per-provider model fetcher, so mock the two boundaries it crosses — credential
+// resolution and the custom-provider listing — to drive the loop hermetically.
+// The pure pickers/error-mapping tests below use no mocks and are unaffected
+// (they don't touch either mocked module). vi.mock is hoisted above the imports;
+// the deferred arrows dodge the const-before-init TDZ.
+const resolveModelCredentials =
+  vi.fn<
+    (
+      database: unknown,
+      userId: string,
+      repoFullName?: string,
+    ) => Promise<ModelCredentials>
+  >();
+const listCustomProviderModels =
+  vi.fn<
+    (cred: CustomProviderCredential) => Promise<{ id: string; label: string }[]>
+  >();
+
+vi.mock("~/server/agents/resolve-credentials", () => ({
+  resolveModelCredentials: (
+    database: unknown,
+    userId: string,
+    repoFullName?: string,
+  ) => resolveModelCredentials(database, userId, repoFullName),
+}));
+// gollmProviderName is a pure `gollm:<id>` tag — reimplement it rather than stub
+// it away, so the provider labels the tests assert against are the real ones.
+vi.mock("~/server/agents/custom-providers", () => ({
+  listCustomProviderModels: (cred: CustomProviderCredential) =>
+    listCustomProviderModels(cred),
+  gollmProviderName: (id: string) => `gollm:${id}` as const,
+}));
 
 const m = (id: string, label = id): ModelOption => ({
   id,
@@ -285,5 +323,134 @@ describe("friendlyAwsError (bedrock)", () => {
     expect(friendlyAwsError(null, "bedrock")).toBe(
       "Failed to query AWS Bedrock models.",
     );
+  });
+});
+
+describe("listModelsForUser (gollm custom providers)", () => {
+  // listModelsForUser only forwards `db` to the (mocked) resolution, so a stub works.
+  const db = {} as unknown as typeof Database;
+
+  function creds(overrides: Partial<ModelCredentials>): ModelCredentials {
+    return {
+      aws: null,
+      anthropicApiKey: null,
+      anthropicOauthToken: null,
+      openaiApiKey: null,
+      codexAuthJson: null,
+      geminiApiKey: null,
+      source: "user",
+      ...overrides,
+    };
+  }
+
+  function customProvider(
+    overrides: Partial<CustomProviderCredential> & { provider: string },
+  ): CustomProviderCredential {
+    return {
+      apiKey: null,
+      apiBase: null,
+      extraEnv: null,
+      models: null,
+      ...overrides,
+    };
+  }
+
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    resolveModelCredentials.mockReset();
+    listCustomProviderModels.mockReset();
+    // Silence the provider-failure log and let a test assert its payload.
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    warnSpy.mockRestore();
+  });
+
+  it("lists a custom provider's models tagged with its gollm provider name", async () => {
+    const groq = customProvider({ provider: "groq", apiKey: "gsk-x" });
+    resolveModelCredentials.mockResolvedValue(
+      creds({ customProviders: [groq] }),
+    );
+    listCustomProviderModels.mockResolvedValue([
+      { id: "llama-3.3-70b", label: "Llama 3.3 70B" },
+    ]);
+
+    const result = await listModelsForUser(db, "user-1");
+
+    // The listing's bare {id,label} entries get re-tagged with `gollm:<id>`.
+    expect(result.models).toEqual([
+      { id: "llama-3.3-70b", label: "Llama 3.3 70B", provider: "gollm:groq" },
+    ]);
+    // The loop hands the whole stored credential to the boundary fetcher.
+    expect(listCustomProviderModels).toHaveBeenCalledExactlyOnceWith(groq);
+  });
+
+  it("lists each configured custom provider under its own gollm name, in order", async () => {
+    const groq = customProvider({ provider: "groq" });
+    const openrouter = customProvider({ provider: "openrouter" });
+    resolveModelCredentials.mockResolvedValue(
+      creds({ customProviders: [groq, openrouter] }),
+    );
+    listCustomProviderModels.mockImplementation((cred) =>
+      Promise.resolve(
+        cred.provider === "groq"
+          ? [{ id: "llama-3.3-70b", label: "Llama 3.3 70B" }]
+          : [{ id: "anthropic/claude", label: "Claude via OpenRouter" }],
+      ),
+    );
+
+    const { models } = await listModelsForUser(db, "user-1");
+
+    // Tasks fan out (and settle) in customProviders order.
+    expect(models).toEqual([
+      { id: "llama-3.3-70b", label: "Llama 3.3 70B", provider: "gollm:groq" },
+      {
+        id: "anthropic/claude",
+        label: "Claude via OpenRouter",
+        provider: "gollm:openrouter",
+      },
+    ]);
+    expect(listCustomProviderModels).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the surviving custom providers and logs the failure when one fails", async () => {
+    const groq = customProvider({ provider: "groq" });
+    const vllm = customProvider({ provider: "vllm" });
+    resolveModelCredentials.mockResolvedValue(
+      creds({ customProviders: [groq, vllm] }),
+    );
+    listCustomProviderModels.mockImplementation((cred) =>
+      cred.provider === "groq"
+        ? Promise.resolve([{ id: "llama-3.3-70b", label: "Llama 3.3 70B" }])
+        : Promise.reject(new Error("no models configured for vllm")),
+    );
+
+    const { models } = await listModelsForUser(db, "user-1");
+
+    expect(models).toEqual([
+      { id: "llama-3.3-70b", label: "Llama 3.3 70B", provider: "gollm:groq" },
+    ]);
+    // The failure is attributed to the provider's gollm name and logged, not thrown.
+    expect(warnSpy).toHaveBeenCalledExactlyOnceWith(
+      "[bandolier:models] provider model list failed",
+      { provider: "gollm:vllm", error: "no models configured for vllm" },
+    );
+  });
+
+  it("does not invoke the custom-provider fetcher when the set has none", async () => {
+    // The `?? []` guard: an absent customProviders list must skip the loop
+    // rather than fan out a spurious boundary call. A subscription token keeps
+    // the result non-empty via the static Claude list (no external calls).
+    resolveModelCredentials.mockResolvedValue(
+      creds({ anthropicOauthToken: "sk-ant-oat01-x" }),
+    );
+
+    const { models } = await listModelsForUser(db, "user-1");
+
+    expect(listCustomProviderModels).not.toHaveBeenCalled();
+    expect(models.length).toBeGreaterThan(0);
+    expect(models.every((opt) => opt.provider === "anthropic")).toBe(true);
   });
 });

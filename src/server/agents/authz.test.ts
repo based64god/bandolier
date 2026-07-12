@@ -21,14 +21,42 @@ vi.mock("~/server/agents/github-repos", () => ({
   userHasRepoAccess: () => userHasRepoAccess(),
 }));
 
-const { assertRepoAccess, repoViewSelector } =
-  await import("~/server/agents/authz");
+// requireKubeconfig / assertOwnsInteractiveJob resolve a kubeconfig and then hit
+// Kubernetes; mock both collaborators so the throw paths and the ownership label
+// selector are exercised without a stored config or a real cluster.
+const resolveKubeconfig = vi
+  .fn<() => Promise<string | null>>()
+  .mockResolvedValue("kc-yaml");
+vi.mock("~/server/agents/kubeconfig", () => ({
+  resolveKubeconfig: (...a: unknown[]) => resolveKubeconfig(...(a as [])),
+}));
+
+// Typed with the pod-list arg so a test can read back the labelSelector the
+// ownership check builds. Returned directly from getCoreV1Api so the recorded
+// call carries the real argument.
+const listNamespacedPod = vi.fn<
+  (arg: { namespace: string; labelSelector: string }) => Promise<{
+    items: unknown[];
+  }>
+>();
+vi.mock("~/server/k8s/client", () => ({
+  getCoreV1Api: () => ({ listNamespacedPod }),
+}));
+
+const {
+  assertOwnsInteractiveJob,
+  assertRepoAccess,
+  repoViewSelector,
+  requireKubeconfig,
+} = await import("~/server/agents/authz");
 
 const LABEL_SELECTOR = "app=bandolier-agent";
 
 beforeEach(() => {
   getUserGithubToken.mockReset().mockResolvedValue("gh-tok");
   userHasRepoAccess.mockReset().mockResolvedValue(true);
+  resolveKubeconfig.mockReset().mockResolvedValue("kc-yaml");
+  listNamespacedPod.mockReset();
 });
 
 afterEach(() => {
@@ -135,5 +163,71 @@ describe("assertRepoAccess", () => {
     vi.advanceTimersByTime(61_000);
     await assertRepoAccess(db, "u5", "owner/ttl");
     expect(userHasRepoAccess).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("requireKubeconfig", () => {
+  const db = {} as never;
+
+  it("returns the resolved kubeconfig when one is configured", async () => {
+    resolveKubeconfig.mockResolvedValue("my-kubeconfig");
+    await expect(requireKubeconfig(db, "u1", "owner/repo")).resolves.toBe(
+      "my-kubeconfig",
+    );
+  });
+
+  it("throws BAD_REQUEST when no kubeconfig is configured", async () => {
+    resolveKubeconfig.mockResolvedValue(null);
+    const err = await requireKubeconfig(db, "u1").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(TRPCError);
+    expect((err as TRPCError).code).toBe("BAD_REQUEST");
+    expect((err as TRPCError).message).toContain("No kubeconfig configured");
+  });
+});
+
+describe("assertOwnsInteractiveJob", () => {
+  const db = {} as never;
+  const userId = "u1";
+  const namespace = "ns-1";
+  const jobName = "job-1";
+
+  it("resolves and queries only the caller's own pod for the job", async () => {
+    resolveKubeconfig.mockResolvedValue("kc-yaml");
+    // A live interactive session has exactly this pod.
+    listNamespacedPod.mockResolvedValue({ items: [{}] });
+
+    await expect(
+      assertOwnsInteractiveJob(db, userId, namespace, jobName, "owner/repo"),
+    ).resolves.toBeUndefined();
+
+    // requireKubeconfig ran first.
+    expect(resolveKubeconfig).toHaveBeenCalled();
+    expect(listNamespacedPod).toHaveBeenCalledTimes(1);
+    expect(listNamespacedPod.mock.calls[0]?.[0]?.namespace).toBe(namespace);
+
+    // The selector ANDs the base label, the spawned-by scoping (so a caller can
+    // only match their own agents), and the specific job.
+    const selector = listNamespacedPod.mock.calls[0]?.[0]?.labelSelector;
+    expect(selector).toContain(LABEL_SELECTOR);
+    expect(selector).toContain(
+      `${SPAWNED_BY_LABEL}=${spawnedByLabelValue(userId)}`,
+    );
+    expect(selector).toContain(`bandolier.io/job=${jobName}`);
+  });
+
+  it("throws NOT_FOUND when no owned pod matches the job", async () => {
+    resolveKubeconfig.mockResolvedValue("kc-yaml");
+    // No pod carries the caller's spawned-by label for this job.
+    listNamespacedPod.mockResolvedValue({ items: [] });
+
+    const err = await assertOwnsInteractiveJob(
+      db,
+      userId,
+      namespace,
+      jobName,
+    ).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(TRPCError);
+    expect((err as TRPCError).code).toBe("NOT_FOUND");
+    expect((err as TRPCError).message).toContain(jobName);
   });
 });

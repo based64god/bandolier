@@ -9,6 +9,7 @@ import {
   postIssueComment,
   postIssueCommentReturningId,
   postIssueCommentWithFallback,
+  resolveItemStates,
 } from "~/server/agents/github-issues";
 
 function mockFetchOnce(body: unknown, ok = true, status = 200) {
@@ -435,5 +436,86 @@ describe("listCommentReactions", () => {
     await expect(listCommentReactions("tok", "o/r", 55)).rejects.toThrow(
       "GitHub API 500: Error",
     );
+  });
+});
+
+// resolveItemStates delegates to the in-module getGithubItemState, which is not
+// separately mockable, so these drive real behavior through the fetch mock.
+// getGithubItemState caches by the html url with no reset hook, so each test
+// here uses distinct issue/PR numbers to stay isolated from the suites above.
+describe("resolveItemStates", () => {
+  it("returns all-null states and never calls the API without a token", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    expect(
+      await resolveItemStates(null, {
+        pullRequestUrl: "https://github.com/o/r/pull/301",
+        createdIssueUrl: "https://github.com/o/r/issues/302",
+        issueUrl: "https://github.com/o/r/issues/303",
+      }),
+    ).toEqual({
+      pullRequestState: null,
+      createdIssueState: null,
+      issueState: null,
+    });
+    // Without a token the function short-circuits before any lookup.
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("resolves each url's state in parallel when a token is present", async () => {
+    // Route by the resolved GitHub API path so every ref gets a distinct state,
+    // proving each url maps to its own result field rather than to a shared one.
+    const fetchMock = vi.fn((url: string) => {
+      let body: unknown;
+      if (url.endsWith("/pulls/304")) {
+        body = { state: "closed", merged_at: "2024-01-01T00:00:00Z" };
+      } else if (url.endsWith("/issues/305")) {
+        body = { state: "closed", state_reason: "completed" };
+      } else {
+        body = { state: "open" };
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: () => Promise.resolve(body),
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    expect(
+      await resolveItemStates("tok", {
+        pullRequestUrl: "https://github.com/o/r/pull/304",
+        createdIssueUrl: "https://github.com/o/r/issues/305",
+        issueUrl: "https://github.com/o/r/issues/306",
+      }),
+    ).toEqual({
+      pullRequestState: "merged",
+      createdIssueState: "completed",
+      issueState: "open",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("skips the lookup for null urls and leaves their state null", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      json: () => Promise.resolve({ state: "open" }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    expect(
+      await resolveItemStates("tok", {
+        pullRequestUrl: null,
+        createdIssueUrl: null,
+        issueUrl: "https://github.com/o/r/issues/307",
+      }),
+    ).toEqual({
+      pullRequestState: null,
+      createdIssueState: null,
+      issueState: "open",
+    });
+    // Only the single non-null url triggers a fetch.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

@@ -101,15 +101,22 @@ export async function POST(req: NextRequest) {
       event === "issue_comment" &&
       (payload as IssueCommentPayload).action === "created"
     ) {
-      // A held, credential-gated run claims the issue's comments first: they
+      // A held, credential-gated run claims the item's comments first: they
       // approve/decline it rather than resuming anything. Otherwise a comment
       // on an issue or PR resumes that item's most recent run.
-      const gated = await handleApprovalComment(payload as IssueCommentPayload);
+      const p = payload as IssueCommentPayload;
+      const gated = await handleApprovalComment({
+        action: p.action,
+        repoFullName: p.repository.full_name,
+        itemNumber: p.issue.number,
+        commentBody: p.comment.body,
+        sender: p.sender,
+      });
       if (!gated) {
         const config = repoFullName
           ? await getRepoWebhookConfig(db, repoFullName)
           : null;
-        await handleIssueComment(payload as IssueCommentPayload, config);
+        await handleIssueComment(p, config);
       }
     } else if (
       event === "pull_request_review_comment" &&
@@ -117,15 +124,22 @@ export async function POST(req: NextRequest) {
     ) {
       // An inline review comment on a PR's diff resumes that PR's most recent
       // run, just like a vanilla comment, carrying the file/line it's anchored
-      // to. Unlike issue comments there's no approval short-circuit: the
-      // credential-approval flow lives on the issue's vanilla comment thread.
-      const config = repoFullName
-        ? await getRepoWebhookConfig(db, repoFullName)
-        : null;
-      await handlePrReviewComment(
-        payload as PullRequestReviewCommentPayload,
-        config,
-      );
+      // to — and follows the same approval short-circuit: a held, credential-
+      // gated run on that item consumes the comment as an approve/decline.
+      const p = payload as PullRequestReviewCommentPayload;
+      const gated = await handleApprovalComment({
+        action: p.action,
+        repoFullName: p.repository.full_name,
+        itemNumber: p.pull_request.number,
+        commentBody: p.comment.body,
+        sender: p.sender,
+      });
+      if (!gated) {
+        const config = repoFullName
+          ? await getRepoWebhookConfig(db, repoFullName)
+          : null;
+        await handlePrReviewComment(p, config);
+      }
     } else if (
       event === "workflow_run" &&
       (payload as WorkflowRunPayload).action === "completed"

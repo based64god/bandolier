@@ -5,7 +5,7 @@ import type { CommentReaction } from "~/server/agents/github-issues";
 import type * as RepoPermissions from "~/server/agents/repo-permissions";
 import type { RepoPermission } from "~/server/agents/repo-permissions";
 
-import { type IssueCommentPayload } from "./types";
+import { type ApprovalComment } from "./approval";
 
 // The approval handler is a thin policy layer over four collaborators — the
 // pending-run store, the bot-token broker, GitHub comment/reaction I/O, and the
@@ -75,20 +75,13 @@ const run: PendingRun = {
   },
 };
 
-function comment(
-  body: string | null,
-  sender = "maintainer",
-): IssueCommentPayload {
+function comment(body: string | null, sender = "maintainer"): ApprovalComment {
   return {
     action: "created",
-    issue: { number: 12, title: "t", body: null, html_url: "", labels: [] },
-    comment: { id: 99, body, user: { id: 1, login: sender } },
-    repository: {
-      full_name: "o/r",
-      clone_url: "",
-      default_branch: "main",
-    },
-    sender: { id: 1, login: sender },
+    repoFullName: "o/r",
+    itemNumber: 12,
+    commentBody: body,
+    sender: { login: sender },
   };
 }
 

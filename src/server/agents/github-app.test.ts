@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { env } from "~/env";
 import type { db as Database } from "~/server/db";
 import {
   buildAppJwt,
@@ -13,8 +14,13 @@ import {
   imageRegistryHost,
   isGithubAppConfigured,
   removeInstallation,
+  resolvePollToken,
   upsertInstallation,
 } from "~/server/agents/github-app";
+
+// The @t3-oss env is a readonly proxy; double-cast to poke a single field so a
+// test can flip isGithubAppConfigured() false, then restore it.
+const mutableEnv = env as unknown as Record<string, string | undefined>;
 
 /** A database stub whose select→from→where→limit chain resolves the rows. */
 function dbSelect(rows: { installationId: string }[]) {
@@ -174,6 +180,24 @@ describe("getInstallationToken", () => {
       /token exchange failed: 401/,
     );
   });
+
+  it("throws before any network call when the App is not configured", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    // Drop the App id so isGithubAppConfigured() is false; restore after.
+    const realId = mutableEnv.GITHUB_APP_ID;
+    mutableEnv.GITHUB_APP_ID = undefined;
+    try {
+      expect(isGithubAppConfigured()).toBe(false);
+      await expect(getInstallationToken("unconfigured", NOW)).rejects.toThrow(
+        "GitHub App is not configured",
+      );
+    } finally {
+      mutableEnv.GITHUB_APP_ID = realId;
+    }
+    // The guard short-circuits before the token exchange is attempted.
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
 
 // The module-level installation-id cache has no exported reset, so every test
@@ -246,6 +270,54 @@ describe("getRepoBotToken", () => {
     const { db } = dbSelect([{ installationId: "inst-broken" }]);
     expect(await getRepoBotToken(db, "acme/bot-broken", NOW)).toBeNull();
     expect(warn).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("resolvePollToken", () => {
+  const NOW = 1_700_000_000_000; // fixed epoch ms
+
+  it("prefers the repo's bot token over the viewer's own token", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 201,
+      statusText: "Created",
+      json: () =>
+        Promise.resolve({
+          token: "ghs_pollbot",
+          expires_at: new Date(NOW + 60 * 60_000).toISOString(),
+        }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { db } = dbSelect([{ installationId: "inst-poll" }]);
+    // With the App installed, the bot token wins over the viewer token.
+    expect(
+      await resolvePollToken(db, "acme/poll-installed", "gho_viewer", NOW),
+    ).toBe("ghs_pollbot");
+  });
+
+  it("falls back to the viewer's token when the App isn't installed on the repo", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const { db } = dbSelect([]);
+    expect(
+      await resolvePollToken(db, "acme/poll-uninstalled", "gho_viewer", NOW),
+    ).toBe("gho_viewer");
+    // No installation → no bot-token exchange, so the viewer token is returned.
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("returns the viewer's token without a DB lookup when there is no repo", async () => {
+    const { db, select } = dbSelect([{ installationId: "inst-unused" }]);
+    expect(await resolvePollToken(db, null, "gho_viewer", NOW)).toBe(
+      "gho_viewer",
+    );
+    // A null repo short-circuits before any installation-id lookup.
+    expect(select).not.toHaveBeenCalled();
+  });
+
+  it("returns null when neither a bot token nor a viewer token is available", async () => {
+    const { db } = dbSelect([]);
+    expect(await resolvePollToken(db, "acme/poll-none", null, NOW)).toBeNull();
   });
 });
 

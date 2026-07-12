@@ -54,11 +54,15 @@ vi.mock("~/server/api/root", () => ({
   createCaller: (ctx: unknown) => createCaller(ctx),
 }));
 
+import { type NextRequest, NextResponse } from "next/server";
+
 import {
   authenticate,
   callerForUser,
   errorMessage,
   getAccessibleRepo,
+  resolve,
+  restHandler,
   statusForTrpcError,
   toTaskResource,
 } from "~/server/api/rest";
@@ -392,6 +396,145 @@ describe("toTaskResource", () => {
       cacheReadInputTokens: 10,
       cacheCreationInputTokens: 5,
       totalTokens: 165,
+    });
+  });
+});
+
+describe("resolve", () => {
+  const userRow = { id: "u1", name: "Ada", email: "ada@x.com", image: null };
+
+  // Casts a bare Request into the NextRequest resolve() is typed against; only
+  // the header-reading surface authenticate() touches is actually exercised.
+  function nextRequest(headers: Record<string, string> = {}): NextRequest {
+    return request(headers) as unknown as NextRequest;
+  }
+
+  // getAccessibleRepo -> getRepoAccess does a real GET /repos fetch, so stub the
+  // network the same way the getAccessibleRepo suite above does.
+  function stubRepoReachable() {
+    getUserGithubToken.mockResolvedValue("gh-tok");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            clone_url: "https://github.com/o/r.git",
+            default_branch: "main",
+          }),
+      }),
+    );
+  }
+
+  it("returns a 401 error response when no user is authenticated", async () => {
+    // No token header and getSession resolves null (beforeEach default), so
+    // authenticate() yields null and resolve short-circuits before any repo probe.
+    const result = await resolve(nextRequest(), "Owner/Repo");
+
+    if (!("error" in result)) throw new Error("expected an error response");
+    expect(result.error.status).toBe(401);
+    expect((await result.error.json()) as { error: string }).toEqual({
+      error: "Unauthorized",
+    });
+  });
+
+  it("returns a 403 error response when the repo is not accessible", async () => {
+    getSession.mockResolvedValue({ user: { id: "u1" } });
+    // Has a token but GitHub denies the repo (404 -> accessible:false -> null),
+    // which resolve maps to a uniform 403 so task existence isn't leaked.
+    getUserGithubToken.mockResolvedValue("gh-tok");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: false, status: 404 }),
+    );
+
+    const result = await resolve(nextRequest(), "Owner/Repo");
+
+    if (!("error" in result)) throw new Error("expected an error response");
+    expect(result.error.status).toBe(403);
+    expect((await result.error.json()) as { error: string }).toEqual({
+      error: "Repository not found or not accessible",
+    });
+  });
+
+  it("returns a 401 error response when the user row is gone despite repo access", async () => {
+    getSession.mockResolvedValue({ user: { id: "u1" } });
+    stubRepoReachable();
+    // Repo is reachable, but the user vanished from the db (empty rows), so
+    // callerForUser returns null and resolve reports Unauthorized.
+    dbUserRows.mockResolvedValue([]);
+
+    const result = await resolve(nextRequest(), "Owner/Repo");
+
+    if (!("error" in result)) throw new Error("expected an error response");
+    expect(result.error.status).toBe(401);
+    expect((await result.error.json()) as { error: string }).toEqual({
+      error: "Unauthorized",
+    });
+    expect(createCaller).not.toHaveBeenCalled();
+  });
+
+  it("returns the resolved context when auth, repo access, and caller all succeed", async () => {
+    getSession.mockResolvedValue({ user: { id: "u1" } });
+    stubRepoReachable();
+    dbUserRows.mockResolvedValue([userRow]);
+    const caller = { tasks: {} };
+    createCaller.mockReturnValue(caller);
+
+    const result = await resolve(nextRequest(), "Owner/Repo");
+
+    if ("error" in result) throw new Error("expected the resolved context");
+    expect(result.userId).toBe("u1");
+    expect(result.caller).toBe(caller);
+    // access carries getAccessibleRepo's cloneUrl/defaultBranch through verbatim.
+    expect(result.access).toEqual({
+      cloneUrl: "https://github.com/o/r.git",
+      defaultBranch: "main",
+    });
+    expect(result.fullName).toBe("Owner/Repo");
+    // namespace is derived (repoToNamespace, not mocked): lowercased, slash->hyphen.
+    expect(result.namespace).toBe("owner-repo");
+  });
+});
+
+describe("restHandler", () => {
+  it("passes a returned NextResponse through untouched", async () => {
+    const passthrough = NextResponse.json({ ok: true });
+    const fn = vi.fn<(id: string) => Promise<NextResponse>>();
+    fn.mockResolvedValue(passthrough);
+
+    const res = await restHandler(fn)("task-1");
+
+    // The success response is returned as-is, not re-wrapped.
+    expect(res).toBe(passthrough);
+    expect(fn).toHaveBeenCalledWith("task-1");
+  });
+
+  it("wraps a thrown TRPCError as the { error } envelope with its mapped status", async () => {
+    const fn = vi.fn<() => Promise<NextResponse>>();
+    fn.mockRejectedValue(
+      new TRPCError({ code: "NOT_FOUND", message: "no such task" }),
+    );
+
+    const res = await restHandler(fn)();
+
+    // NOT_FOUND -> 404 via statusForTrpcError, message surfaced via errorMessage.
+    expect(res.status).toBe(404);
+    expect((await res.json()) as { error: string }).toEqual({
+      error: "no such task",
+    });
+  });
+
+  it("wraps a generic thrown Error as a 500 error envelope", async () => {
+    const fn = vi.fn<() => Promise<NextResponse>>();
+    fn.mockRejectedValue(new Error("kaboom"));
+
+    const res = await restHandler(fn)();
+
+    // A non-tRPC error falls through to 500 but still exposes its message.
+    expect(res.status).toBe(500);
+    expect((await res.json()) as { error: string }).toEqual({
+      error: "kaboom",
     });
   });
 });

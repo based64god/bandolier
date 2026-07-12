@@ -127,14 +127,39 @@ export function InteractiveRow({
   const [collapsed, setCollapsed] = useState(!running);
   const columnCount = useTaskColumnCount();
 
-  // Anchor on the collapsed header row so we can bring the whole session to the
-  // top of the viewport when it opens: its expanded body is ~full-height
-  // (`85vh`), so aligning this row's top with the viewport top makes the session
-  // fill the screen rather than sit half-scrolled with its input off-screen.
+  // Anchor on the collapsed header row so revealing a session brings it to the
+  // top of the viewport: aligning this row's top with the viewport top puts its
+  // interactive controls (collapse, end session, terminate) at the top of the
+  // screen. The expanded body (below) is sized to fill the rest, landing the
+  // composer at the bottom.
   const rowRef = useRef<HTMLTableRowElement>(null);
   const revealSession = () => {
     rowRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
+
+  // Height for the expanded body: fill the viewport from just under the header
+  // row down to the bottom edge, so the row stays pinned at the top and the
+  // composer sits at the bottom on every screen size. A fixed 85vh could not:
+  // the header row is a different fraction of the viewport on a phone than on a
+  // desktop (and grows when the Waiting pill stacks in, which is exactly when a
+  // session reveals), so on short viewports the row plus an 85vh body overran
+  // the screen and pushed the input off the bottom. 100dvh (not vh) tracks the
+  // visible height as mobile browser chrome shows and hides; the row height is
+  // measured so the fit survives the row resizing and the viewport resizing.
+  // Falls back to the prior 85vh until the first measure.
+  const [rowHeight, setRowHeight] = useState(0);
+  useEffect(() => {
+    const el = rowRef.current;
+    if (!el) return;
+    const measure = () => setRowHeight(el.getBoundingClientRect().height);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  const bodyHeight = rowHeight
+    ? "calc(100dvh - " + String(rowHeight) + "px)"
+    : "85vh";
 
   const awaiting = agent.awaitingInput;
 
@@ -518,15 +543,16 @@ export function InteractiveRow({
               never conjures phantom columns that would re-balance the table
               and shift every row sideways as it expands. */}
           <td colSpan={columnCount} className="p-0">
-            {/* Fill the viewport (`85vh`) so an expanded session dominates the
-                screen: the header and composer take their natural height while
-                the conversation flexes to fill the rest and scrolls. Because a
+            {/* Fill the viewport (bodyHeight, computed above) so an expanded
+                session dominates the screen: the header and composer take their
+                natural height while the conversation flexes to fill the rest
+                and scrolls. Because a
                 single expanded session is this tall, Tab-cycling between waiting
                 tasks pushes the neighbouring rows off-screen — each awaiting
                 session reads as its own full view rather than a cramped inline
                 pane competing with the others. `min-h-0` lets the conversation
                 shrink below its content so the flex child actually scrolls. */}
-            <div className="flex h-[85vh] flex-col">
+            <div className="flex flex-col" style={{ height: bodyHeight }}>
               <div className="shrink-0">
                 <SessionHeader podName={agent.name} tokens={agent.tokens} />
               </div>

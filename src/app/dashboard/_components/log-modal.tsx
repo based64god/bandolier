@@ -7,6 +7,7 @@ import { api } from "~/trpc/react";
 import { Modal } from "./modal";
 import {
   groupHarnessBlocks,
+  isToolCallLine,
   parseSegments,
   SUBAGENT_MARKER,
 } from "./log-segments";
@@ -48,9 +49,49 @@ export function UserSegment({ lines }: { lines: string[] }) {
 
 export function HarnessSegment({ lines }: { lines: string[] }) {
   const blocks = groupHarnessBlocks(lines);
-  // Count only the visible diagnostic lines: a tool call's folded output hides
-  // behind its own nested expander, so it shouldn't inflate the summary.
-  const count = blocks.reduce((n, b) => (b.kind === "line" ? n + 1 : n), 0);
+  // Count real tool calls: a → line, plus a subagent's own → calls (folded in
+  // its block), mirroring the interactive countNodes. Plain diagnostics — the
+  // system prompt, setup, thinking, lifecycle notes, a multi-line call's argument
+  // continuations — and a call's ← output are not tool calls, so they no longer
+  // inflate the count, nor zero it out for a subagent-only run.
+  const toolCalls = blocks.reduce((n, b) => {
+    if (b.kind === "line") return isToolCallLine(b.text) ? n + 1 : n;
+    if (b.kind === "subagent") return n + b.lines.filter(isToolCallLine).length;
+    return n;
+  }, 0);
+
+  // A run of nothing but plain diagnostics — no tool calls, output, or subagents
+  // — is preamble the log needs to show: the setup, system prompt, and task, or
+  // an assistant's between-call narration. Render it inline (dimmed) instead of
+  // burying it behind a collapsed summary that reads as empty.
+  if (
+    blocks.length > 0 &&
+    blocks.every((b) => b.kind === "line" && !isToolCallLine(b.text))
+  ) {
+    return (
+      <div className="my-1">
+        {blocks.map((b, i) =>
+          b.kind === "line" ? (
+            <div
+              key={i}
+              className="font-mono text-xs leading-5 break-all text-white/25"
+            >
+              {b.text}
+            </div>
+          ) : null,
+        )}
+      </div>
+    );
+  }
+
+  // With folded subagent/output activity but no countable calls (e.g. a
+  // background subagent whose → Agent spawn was logged in an earlier segment),
+  // summarize as output rather than lying with "0 tool calls".
+  const summary =
+    toolCalls > 0
+      ? `${toolCalls} tool ${toolCalls === 1 ? "call" : "calls"}`
+      : "output";
+
   return (
     <details className="group my-1">
       <summary className="flex cursor-pointer list-none items-center gap-1.5 text-white/30 hover:text-white/50 [&::-webkit-details-marker]:hidden">
@@ -61,9 +102,7 @@ export function HarnessSegment({ lines }: { lines: string[] }) {
         >
           <path d="M4 2l5 4-5 4V2z" />
         </svg>
-        <span className="font-mono text-xs">
-          {count} tool {count === 1 ? "call" : "calls"}
-        </span>
+        <span className="font-mono text-xs">{summary}</span>
       </summary>
       <div className="mt-0.5 ml-4 border-l border-white/10 pl-3">
         {blocks.map((block, i) =>

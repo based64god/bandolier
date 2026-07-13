@@ -58,4 +58,26 @@ check(
   (await noOutput.getByText("output", { exact: true }).count()) === 0,
 );
 
+// ── Preamble (setup / system prompt / task) renders inline, not collapsed ─────
+const preamble = page.getByTestId("preamble");
+check(
+  "preamble is visible without expanding anything",
+  await preamble
+    .getByText("You are Claude Code, running one-shot.")
+    .isVisible(),
+);
+check(
+  "preamble is not mislabeled as tool calls",
+  (await preamble.getByText(/tool calls?$/).count()) === 0,
+);
+
+// ── A subagent-only run reports its calls, not "0 tool calls" ─────────────────
+const subagentOnly = page.getByTestId("subagent-only");
+check(
+  "subagent-only run counts the subagent's call, not zero",
+  (await subagentOnly.getByText(/tool calls?$/).innerText()).includes(
+    "1 tool call",
+  ),
+);
+
 await finish(browser);

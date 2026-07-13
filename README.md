@@ -279,11 +279,9 @@ curl -X DELETE -H "Authorization: Bearer bnd_…" \
 | `DELETE` | `/api/v1/repos/{owner}/{repo}/tasks/{id}` | —                      | Terminate a task      |
 
 The models endpoint returns every model you can launch with, drawn from all the
-providers you've configured — the four first-class providers (Anthropic,
-Bedrock, OpenAI, Gemini) **and every provider gollm supports** (Groq,
-OpenRouter, Together, Mistral, DeepSeek, self-hosted vLLM/Ollama, and the rest
-of the ~90-provider catalog). Each entry carries the exact `model` /
-`modelProvider` / `modelAuth` to pass on launch:
+providers you've configured. Each entry carries the exact `model`,
+`modelProvider`, and `modelAuth` to pass back on launch — you copy those values
+from the response, you don't construct them:
 
 ```jsonc
 {
@@ -304,7 +302,7 @@ is JSON; every field except `task`/`prompt` is optional:
 | `prompt`        | string                                           | —                               | Alias for `task` (used when `task` is omitted).                             |
 | `branch`        | string                                           | the repo's default branch       | Branch to check out.                                                        |
 | `model`         | string                                           | your provider's preferred model | A model id from one of your providers (see the models endpoint above).      |
-| `modelProvider` | `anthropic` \| `bedrock` \| `openai` \| `gemini` \| `gollm:<id>` | primary-provider precedence     | Pins which provider serves `model` when several are configured. `gollm:<id>` selects a gollm-proxied provider (e.g. `gollm:groq`, `gollm:openrouter`); use the `provider` value returned by the models endpoint. |
+| `modelProvider` | string                                           | primary-provider precedence     | The model's `provider`, exactly as returned by the models endpoint. Pins which provider serves `model` when several are configured; pass the value back verbatim. |
 | `modelAuth`     | `api_key` \| `subscription`                      | api-key-beats-subscription      | Pins the credential kind for providers where both are configured.           |
 | `effort`        | `low` \| `medium` \| `high` \| `xhigh` \| `max`  | CLI default                     | Reasoning effort (Claude providers only; ignored otherwise).                |
 | `maxTurns`      | integer ≥ 1                                      | unlimited                       | Caps the number of agent turns.                                             |

@@ -673,13 +673,10 @@ curl -X DELETE -H "Authorization: Bearer bnd_…" \
           </div>
           <p>
             The models endpoint returns every model you can launch with, drawn
-            from all the providers you've configured — the four first-class
-            providers (Anthropic, Bedrock, OpenAI, Gemini) <strong>and every
-            provider gollm supports</strong> (Groq, OpenRouter, Together,
-            Mistral, DeepSeek, self-hosted vLLM/Ollama, and the rest of the
-            ~90-provider catalog). Each entry carries the exact
-            <code>provider</code> to pass as <code>modelProvider</code> — a
-            <code>gollm:&lt;id&gt;</code> for the proxied ones.
+            from all the providers you've configured. Each entry carries the
+            exact <code>provider</code> to pass back as
+            <code>modelProvider</code> — copy the value from the response, you
+            don't construct it.
           </p>
           <p>
             The launch endpoint accepts everything the dashboard's deploy dialog
@@ -696,7 +693,7 @@ curl -X DELETE -H "Authorization: Bearer bnd_…" \
                 <tr><td><code>prompt</code></td><td>string</td><td>Alias for <code>task</code>.</td></tr>
                 <tr><td><code>branch</code></td><td>string</td><td>Branch to check out (default: repo default).</td></tr>
                 <tr><td><code>model</code></td><td>string</td><td>A model id from one of your providers (see the models endpoint above).</td></tr>
-                <tr><td><code>modelProvider</code></td><td>anthropic · bedrock · openai · gemini · gollm:&lt;id&gt;</td><td>Pins which provider serves <code>model</code>. <code>gollm:&lt;id&gt;</code> (e.g. <code>gollm:groq</code>) selects a gollm-proxied provider — use the <code>provider</code> the models endpoint returns.</td></tr>
+                <tr><td><code>modelProvider</code></td><td>string</td><td>The model's <code>provider</code>, exactly as returned by the models endpoint. Pins which provider serves <code>model</code>; pass it back verbatim.</td></tr>
                 <tr><td><code>modelAuth</code></td><td>api_key · subscription</td><td>Pins the credential kind.</td></tr>
                 <tr><td><code>effort</code></td><td>low → max</td><td>Reasoning effort (Claude providers only).</td></tr>
                 <tr><td><code>maxTurns</code></td><td>integer ≥ 1</td><td>Caps the number of agent turns.</td></tr>

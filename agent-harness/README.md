@@ -36,13 +36,17 @@ go test -race ./...
 
 CI runs `go test -race -count=1 ./...` (see
 [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)), plus `gofmt -l .`
-and `go vet ./...`.
+and `go vet ./...`. The same job also runs the vendored [gollm](../gollm)
+module's own `go vet ./...` and `go test -race ./...`, since the harness image
+embeds it.
 
 ## File map
 
 | Path | What it is |
 | --- | --- |
 | `cmd/harness/main.go` | Entry point. Reads env config, clones the repo, runs the agent CLI non-interactively (`--print` mode), and handles issue mode (build prompt, create branch, push, open PR). |
+| `cmd/harness/modelproxy.go` | Starts the embedded [gollm](../gollm) proxy in-process for non-native providers, builds its model list, and points `ANTHROPIC_BASE_URL` at it. |
+| `cmd/harness/writer.go` | Out-of-band writer model (`PR_WRITER_MODEL`) that composes the PR/issue title and body, independent of the task model. |
 | `cmd/harness/acp_proxy.go` | Interactive-session proxy: relays [Agent Client Protocol](https://agentclientprotocol.com) frames between the frontend (over the HTTP relay) and the in-pod agent (over stdio), and owns session establishment. |
 | `cmd/harness/acp_agent.go` | `harness acp-agent` — the ACP agent (server) side, speaking JSON-RPC over stdio. |
 | `cmd/harness/tokens.go` | Per-run token accounting and the `BANDOLIER_TOKENS=` log marker the server greps for the live token readout. |

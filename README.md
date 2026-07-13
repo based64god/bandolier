@@ -537,3 +537,9 @@ wire-contract rule and notes on `patches/` and `skills-lock.json`.
 ## Tech stack
 
 Next.js (App Router) · React · tRPC · Better Auth (GitHub OAuth) · Drizzle ORM + PostgreSQL · Tailwind CSS · `@kubernetes/client-node` · AWS SDK (Bedrock/STS/S3) · Go (agent harness + embedded gollm LLM proxy).
+
+---
+
+## License
+
+Licensed under the [Apache License, Version 2.0](LICENSE). See [`NOTICE`](NOTICE) for attribution.

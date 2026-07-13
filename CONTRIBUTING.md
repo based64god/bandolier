@@ -18,8 +18,15 @@ cd agent-harness && go test ./...   # the Go harness suite
 
 `pnpm check` and `pnpm test` cover the web app; `pnpm test:e2e` boots a dev
 server and drives the UI harness routes; `go test ./...` (from `agent-harness/`)
-covers the Go binary that runs inside each agent pod. See the
-[Tests](README.md#tests) section for what each suite exercises.
+covers the Go binary that runs inside each agent pod (and the vendored `gollm`
+module it embeds).
+
+CI runs a few more suites that need a throwaway Postgres, so they're not in the
+loop above but will still gate your PR: the DB-backed integration tests
+(`pnpm test:integration`) and the product-flow browser specs
+(`pnpm test:e2e:flow` / `pnpm test:e2e:authflow`), plus Helm-chart linting and
+OpenTofu validation. See the [Tests](README.md#tests) section for what each
+suite exercises.
 
 ## The wire-contract rule
 

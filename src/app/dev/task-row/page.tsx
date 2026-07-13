@@ -97,7 +97,7 @@ export default function TaskRowHarness() {
     { width: "w-36 hidden lg:table-cell", label: "Created by" },
     { width: "w-[13%] hidden xl:table-cell", label: "Currently" },
     { width: "w-[9.5rem] hidden lg:table-cell", label: "Expires" },
-    { width: "w-[30%] md:w-40", label: "" },
+    { width: "w-24 md:w-40", label: "" },
   ];
 
   return (

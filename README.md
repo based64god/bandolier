@@ -30,7 +30,7 @@ When you deploy an agent, the web app:
 3. Writes a short-lived **per-job Secret** holding only that run's credentials, owned by the Job so Kubernetes garbage-collects it when the Job is deleted.
 4. Creates a Kubernetes **Job** running the harness image, with the task wired in via environment variables.
 
-The harness then clones the repo, runs `claude --print`, commits the work, pushes a branch, and opens a PR. The PR title and description are written out-of-band by the latest Sonnet model, regardless of which model performed the task. Logs stream back to the dashboard; if artifact storage is configured, the full transcript is uploaded to S3 so it outlives the Job's TTL.
+The harness then clones the repo, runs `claude --print`, commits the work, pushes a branch, and opens a PR. The `claude` CLI speaks Anthropic and Bedrock natively; every other provider (OpenAI, Gemini, a ChatGPT/Codex subscription login, and the ~90 more that [gollm](gollm/) supports) is served through a **gollm proxy the harness runs in-process** — it starts the proxy on localhost, points `ANTHROPIC_BASE_URL` at it, and Claude Code's Anthropic-format traffic is translated to the run's real backend. The PR title and description are written out-of-band by a cheap writer model — the latest Sonnet, GPT-mini, or Flash for the run's provider, falling back to the task model — independent of the model that performed the task. Logs stream back to the dashboard; if artifact storage is configured, the full transcript is uploaded to S3 so it outlives the Job's TTL.
 
 **Interactive sessions** work a little differently. Instead of a one-shot `claude --print`, the harness runs as a transparent proxy speaking the [Agent Client Protocol](https://agentclientprotocol.com) (ACP): it spawns `harness acp-agent` (an ACP server wrapping the Claude/Codex CLI over stdio) and relays JSON-RPC frames between it and the dashboard. The **dashboard is the ACP client** — it renders the agent's `session/update` stream (messages, tool calls) and sends follow-up prompts — while the harness keeps doing all the git/PR orchestration. Frames travel over the same outbound-only HTTP path as the rest of the pod's traffic (a small relay endpoint backed by Postgres), so this works the same whether Bandolier is on Vercel or self-hosted. One-shot (non-interactive) runs are unchanged.
 
@@ -220,7 +220,7 @@ It's layered _on top of_ Bandolier's own framing (the working agreement that let
 
 ## Auto-merging Bandolier PRs (optional)
 
-Auto-merge lives in the repo as a GitHub Action, not in the app. `.github/workflows/auto-merge.yml` triggers when the `CI` workflow finishes **successfully** on a `bandolier/*` head branch, resolves the open PR for that branch, and enables GitHub's native auto-merge (`gh pr merge --auto --squash`). The PR then lands on its own once every required check has passed and it's mergeable — no human click. Auto-merge still honors the branch's protection rules (required reviews / status checks), so this only merges what the repo's own gates already allow; a branch with no protection would merge right away. It's scoped to `bandolier/*` branches, so agent PRs auto-merge while human PRs still need a manual merge. Drop the workflow (or narrow its `if:` condition) to change the policy.
+Auto-merge lives in the repo as a GitHub Action, not in the app. `.github/workflows/auto-merge.yml` triggers when the `CI` workflow finishes **successfully** on a `bandolier/*` head branch, resolves the open PR for that branch, and enables GitHub's native auto-merge (`gh pr merge --auto --merge`). The PR then lands on its own once every required check has passed and it's mergeable — no human click. Auto-merge still honors the branch's protection rules (required reviews / status checks), so this only merges what the repo's own gates already allow; a branch with no protection would merge right away. It's scoped to `bandolier/*` branches, so agent PRs auto-merge while human PRs still need a manual merge. Drop the workflow (or narrow its `if:` condition) to change the policy.
 
 ---
 
@@ -398,8 +398,16 @@ src/
 
 agent-harness/
   cmd/harness/main.go        The Go binary that runs inside each agent pod
+  cmd/harness/modelproxy.go  Starts the embedded gollm proxy for non-native providers
+  cmd/harness/acp_proxy.go   Interactive-session ACP relay (frontend ↔ in-pod agent)
+  cmd/harness/writer.go      Out-of-band PR/issue title+body writer model
   Dockerfile                 Harness image (Go binary + Node + Claude Code CLI + git/gh)
   k8s/manifest.yaml          Standalone reference Job for testing the image
+
+gollm/                       Embedded litellm-style LLM proxy + SDK (Go). The harness
+                             runs it in-process to serve every non-Anthropic/Bedrock
+                             provider, translating Claude Code's Anthropic API to the
+                             run's real backend. See gollm/README.md.
 
 self-host/
   Dockerfile                 Dogfooding image: harness + Go/Node toolchains + Chromium/Playwright, for agents that build Bandolier itself
@@ -430,41 +438,61 @@ deploy/
 | `pnpm test`                               | Run the unit-test suite once (Vitest).                                      |
 | `pnpm test:watch`                         | Run Vitest in watch mode.                                                   |
 | `pnpm test:coverage`                      | Run the suite and emit a coverage report under `coverage/`.                 |
+| `pnpm test:integration`                   | Run the integration suite against a real (throwaway) Postgres.              |
 | `pnpm test:e2e`                           | Run the Playwright browser smoke tests against the `/dev/*` harness routes. |
+| `pnpm test:e2e:flow`                      | Run the gated product-flow browser specs (`e2e/*.flow.ts`).                 |
+| `pnpm test:e2e:authflow`                  | Run the signed-in product-flow browser specs (`e2e/*.authflow.ts`).         |
 | `pnpm vapid:generate`                     | Generate a Web Push (VAPID) keypair for the push env vars.                  |
 
 ---
 
 ## Tests
 
-Three suites cover the project. The first two exercise the pure logic — fast,
-hermetic, and free of any database, network, or Kubernetes access; the third
-drives the UI components in a real browser against inert harness routes:
+Several suites cover the project. The unit and Go suites exercise the pure
+logic — fast, hermetic, and free of any database, network, or Kubernetes
+access; the integration suite runs real handlers against a throwaway Postgres;
+and the browser suites drive the UI in a real Chromium against inert harness
+routes:
 
-- **Web app (Vitest).** Unit tests live next to the code they cover as
-  `*.test.ts` files under `src/`. They exercise the parsing, validation,
+- **Web app unit tests (Vitest).** Unit tests live next to the code they cover
+  as `*.test.ts` files under `src/`. They exercise the parsing, validation,
   formatting, and crypto-token helpers — AWS-credential parsing, the password
   gate and artifact-ingest tokens, issue-prompt and branch-name building,
   Kubernetes namespace/label derivation, model selection, and the REST
   response mapping. Run them with `pnpm test` (or `pnpm test:coverage`).
+
+- **Web app integration tests (Vitest).** `*.integration.test.ts` files run the
+  real tRPC procedures, REST/webhook route handlers, and auth/session flow
+  against a **real, migrated Postgres** (a throwaway `DATABASE_URL` you point
+  them at; `globalSetup` migrates it first). They use a separate config so unit
+  runtime and the coverage-badge numbers stay untouched. Run them with
+  `pnpm test:integration`.
 
 - **Agent harness (Go).** `agent-harness/cmd/harness/main_test.go` covers the
   harness's pure helpers — slugging, branch naming, prompt building, PR-content
   parsing, issue-closing keyword handling, provider detection, and tool-use
   rendering. Run them with `go test ./...` from `agent-harness/`.
 
-- **Browser smoke tests (Playwright).** `e2e/*.spec.mjs` drive the UI
-  components — the composer, conversation view, credential UI, effort picker,
-  modal, searchable select, status badge, and task row — in a real Chromium
-  against the `/dev/*` harness routes, which contact no real services.
-  `e2e/run.mjs` boots `next dev`, waits for the routes, then runs each spec.
-  This suite needs a browser, so install one first with
+- **Browser smoke tests (Playwright).** `e2e/*.spec.ts` drive the UI
+  components — cluster deploy, the composer, conversation view, credential UI,
+  the deploy modal, effort picker, interactive scroll, log view, modal,
+  searchable select, settings shell, status badge, task row, and the token
+  readout — in a real Chromium against the `/dev/*` harness routes, which
+  contact no real services. `e2e/run.ts` boots `next dev`, waits for the routes,
+  then runs each spec. Two sibling runners exercise fuller product flows on
+  their own ports: `pnpm test:e2e:flow` (`e2e/*.flow.ts`) boots the app with the
+  shared-password gate enabled to drive that gated surface, and
+  `pnpm test:e2e:authflow` (`e2e/*.authflow.ts`) runs the signed-in surface
+  against a real throwaway Postgres and a fake Kubernetes server. This suite
+  needs a browser, so install one first with
   `pnpm exec playwright install chromium` (add `--with-deps` on Linux to also
   fetch the system libraries), then run `pnpm test:e2e`. Set `E2E_BASE_URL` to
   reuse an already-running server instead of having the runner boot its own.
 
-All three suites run in CI on every push and pull request (see
-`.github/workflows/ci.yml`).
+Every suite runs in CI on each push and pull request (see
+`.github/workflows/ci.yml`) — the unit, integration, browser, and Go harness
+(plus vendored gollm) tests — alongside Helm-chart linting and OpenTofu
+validation.
 
 ---
 
@@ -489,4 +517,4 @@ wire-contract rule and notes on `patches/` and `skills-lock.json`.
 
 ## Tech stack
 
-Next.js (App Router) · React · tRPC · Better Auth (GitHub OAuth) · Drizzle ORM + PostgreSQL · Tailwind CSS · `@kubernetes/client-node` · AWS SDK (Bedrock/STS/S3) · Go (agent harness).
+Next.js (App Router) · React · tRPC · Better Auth (GitHub OAuth) · Drizzle ORM + PostgreSQL · Tailwind CSS · `@kubernetes/client-node` · AWS SDK (Bedrock/STS/S3) · Go (agent harness + embedded gollm LLM proxy).

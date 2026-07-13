@@ -8,11 +8,11 @@
 # repo's build and are normally supplied by the CI workflow, which reads them
 # from agent-harness/go.mod and package.json so they can never drift:
 #   - Go:   agent-harness/go.mod (`go 1.26`) + the golang:1.26 builder image
-#   - Node: package.json `engines.node` ("24.x") + CI's node-version (24)
+#   - Node: package.json `engines.node` ("26.x") + CI's node-version (26)
 # The defaults below mirror those so the image also builds locally without args.
 
 ARG GO_IMAGE=golang:1.26
-ARG NODE_IMAGE=node:24
+ARG NODE_IMAGE=node:26
 
 FROM ${GO_IMAGE} AS go
 FROM ${NODE_IMAGE} AS node
@@ -37,12 +37,13 @@ RUN go install golang.org/x/tools/gopls@latest \
 # ── Node.js (+ npm, corepack) ─────────────────────────────────────────────────
 # Copy the node binary and its bundled modules, then recreate the launcher
 # symlinks the official node image ships (relative, so they resolve under
-# /usr/local). corepack provides pnpm — this repo's package manager.
+# /usr/local). corepack provides pnpm — this repo's package manager; Node 25+
+# no longer bundles it, so install it from npm rather than symlinking it in.
 COPY --from=node /usr/local/bin/node /usr/local/bin/node
 COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
 RUN ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && ln -sf ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
-    && ln -sf ../lib/node_modules/corepack/dist/corepack.js /usr/local/bin/corepack \
+    && npm install -g corepack@latest \
     && corepack enable
 
 # Fail the build loudly if either toolchain (or gopls) can't run on the base image.

@@ -13,14 +13,15 @@
 # .github/workflows/web-app-image.yml; deployed via the Helm chart under
 # deploy/helm/bandolier.
 
-ARG NODE_IMAGE=node:24-slim
+ARG NODE_IMAGE=node:26-slim
 
 # ── deps ──────────────────────────────────────────────────────────────────────
 # Install the full dependency set (incl. dev deps needed to build) with pnpm,
 # honoring the repo's pinned version via corepack and its patched dependencies.
+# Node 25+ no longer bundles corepack, so install it from npm before enabling.
 FROM ${NODE_IMAGE} AS deps
 WORKDIR /app
-RUN corepack enable
+RUN npm install -g corepack@latest && corepack enable
 # Lockfile + manifest + patches first, so this layer caches unless deps change.
 # pnpm-workspace.yaml carries the pnpm settings (patchedDependencies,
 # allowBuilds) that pnpm 11 no longer reads from package.json.
@@ -35,7 +36,7 @@ RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
 # next.config.js.
 FROM ${NODE_IMAGE} AS builder
 WORKDIR /app
-RUN corepack enable
+RUN npm install -g corepack@latest && corepack enable
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV SKIP_ENV_VALIDATION=1

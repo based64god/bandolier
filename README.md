@@ -48,7 +48,7 @@ Browser ──▶ Next.js app ──▶ Kubernetes API ──▶ Job (harness po
 
 ## Prerequisites
 
-- **Node.js 24** and **pnpm 11** (`corepack enable` picks up the pinned version).
+- **Node.js 26** and **pnpm 11**. Node 25+ no longer bundles Corepack, so install and enable it to pick up the pinned pnpm: `npm install -g corepack && corepack enable`.
 - **Docker** or **Podman** — for the local Postgres database (and for building the harness image).
 - **A PostgreSQL database** — the included script starts one in a container.
 - **A Kubernetes cluster** the web app can reach and create Jobs in. For local development, [kind](https://kind.sigs.k8s.io/), [k3d](https://k3d.io/), or minikube all work. The cluster must be able to pull the harness image (see [The agent harness image](#the-agent-harness-image)).

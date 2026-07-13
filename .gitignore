@@ -1,5 +1,7 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-
+#
+# Repo-wide ignores only. The web app's build artifacts (node_modules, .next,
+# coverage, …) live in web/.gitignore.
 # dependencies
 /node_modules
 /.pnp
@@ -11,6 +13,7 @@
 # Go coverage profiles + the CI badge-staging dir (see scripts/badge.mjs)
 *.cov
 /go-cov
+agent-harness/harness
 
 # database
 /prisma/db.sqlite
@@ -39,6 +42,7 @@ yarn-error.log*
 # do not commit any .env files to git, except for the .env.example file. https://create.t3.gg/en/usage/env-variables#using-environment-variables
 .env
 .env*.local
+.env*
 
 # vercel
 .vercel
@@ -48,9 +52,6 @@ yarn-error.log*
 
 # idea files
 .idea
-
-agent-harness/harness
-.env*
 
 # opentofu (deploy/terraform): providers, state, and secret-bearing tfvars.
 # The .terraform.lock.hcl files ARE committed.

@@ -81,7 +81,7 @@ resources:
     memory: 1Gi
 
 # -- Liveness/readiness probes hit /api/health (readiness also checks Postgres).
-# See src/app/api/health/route.ts.
+# See web/src/app/api/health/route.ts.
 probes:
   enabled: true
 
@@ -92,7 +92,7 @@ affinity: {}
 
 # ── Application configuration ─────────────────────────────────────────────────
 # Non-secret values become a ConfigMap; secrets become a Secret. Both are wired
-# into the app's environment. Mirrors src/env.js — see .env.example for the full
+# into the app's environment. Mirrors web/src/env.js — see web/.env.example for the full
 # reference. Leave optional values empty to disable the feature they gate.
 config:
   # -- Public base URL of the app. MUST be the externally reachable URL

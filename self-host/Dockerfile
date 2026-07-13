@@ -63,12 +63,12 @@ RUN go version && gopls version && node --version && npm --version
 # puts pnpm's global bin dir on PATH. CI=1 lets pnpm run non-interactively.
 #
 # Requires the build context to be the repo root (see self-host-image.yml), since
-# these files live above self-host/.
+# these files live under web/, a sibling of self-host/.
 ENV PNPM_HOME=/root/.local/share/pnpm
 ENV PATH="${PNPM_HOME}:${PATH}"
 WORKDIR /opt/pnpm-warm
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
-COPY patches ./patches
+COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml web/.npmrc ./
+COPY web/patches ./patches
 RUN CI=1 pnpm fetch && rm -rf node_modules
 WORKDIR /workspace
 

@@ -1,0 +1,106 @@
+name: Auto-rebase open PRs
+
+# Whenever something lands on main, try to rebase every open PR that targets
+# main onto the new tip. Agent PRs pile up fast, and a stale base is the most
+# common reason they can't auto-merge (branch-protection "require branches to be
+# up to date") — rebasing them here keeps them mergeable without a human.
+#
+# This is best-effort: a PR that conflicts with the new main is left exactly as
+# it was (rebase aborted, nothing pushed) for a human to resolve.
+on:
+  push:
+    branches: [main]
+
+# Serialize runs: two overlapping rebases racing on the same PR branches would
+# fight over force-pushes. Don't cancel a run mid-flight — let it finish so no
+# branch is left half-rebased.
+concurrency:
+  group: auto-rebase-main
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  rebase:
+    name: Rebase open PRs onto main
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Full history so branches can be rebased onto main.
+          fetch-depth: 0
+          # Prefer a PAT so the force-push re-triggers CI on each rebased PR
+          # (pushes made with the default GITHUB_TOKEN do not start new workflow
+          # runs). Falls back to the default token, which still rebases — the PRs
+          # just keep their existing checks until pushed to again.
+          token: ${{ secrets.AUTO_REBASE_TOKEN || github.token }}
+
+      - name: Rebase each open PR onto main
+        env:
+          GH_TOKEN: ${{ secrets.AUTO_REBASE_TOKEN || github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git fetch --quiet origin main
+          base_sha="$(git rev-parse origin/main)"
+
+          # Only same-repo PRs: the workflow token cannot push to a head branch
+          # that lives in a fork, so rebasing one would always fail on push.
+          gh pr list --repo "$REPO" --base main --state open --limit 200 \
+            --json number,headRefName,isCrossRepository \
+            --jq '.[] | select(.isCrossRepository == false) | "\(.number)\t\(.headRefName)"' \
+            > prs.tsv
+
+          if [ ! -s prs.tsv ]; then
+            echo "No same-repo open PRs targeting main; nothing to rebase."
+            exit 0
+          fi
+
+          rebased=0 uptodate=0 conflicted=0 errored=0
+          while IFS=$'\t' read -r number branch; do
+            [ -n "$branch" ] || continue
+            echo "::group::PR #$number ($branch)"
+
+            # Isolate each PR: a failure fetching/checking-out/pushing one branch
+            # must not abort the whole sweep. `git rebase` is handled explicitly
+            # below so a conflict doesn't trip `set -e`.
+            if ! git fetch --quiet origin "$branch" || \
+               ! git checkout -q -B "auto-rebase/$branch" "origin/$branch"; then
+              echo "Could not fetch/checkout $branch; skipping."
+              errored=$((errored + 1))
+              echo "::endgroup::"
+              continue
+            fi
+
+            # Already built on the current main — nothing to rebase.
+            if git merge-base --is-ancestor "$base_sha" HEAD; then
+              echo "PR #$number already contains main; skipping."
+              uptodate=$((uptodate + 1))
+              echo "::endgroup::"
+              continue
+            fi
+
+            if git rebase origin/main; then
+              if git push --force-with-lease "origin" "HEAD:$branch"; then
+                echo "PR #$number rebased onto main and pushed."
+                rebased=$((rebased + 1))
+              else
+                echo "PR #$number rebased but push failed (branch moved?); skipping."
+                errored=$((errored + 1))
+              fi
+            else
+              git rebase --abort || true
+              echo "PR #$number conflicts with main; left untouched for manual resolution."
+              conflicted=$((conflicted + 1))
+            fi
+            echo "::endgroup::"
+          done < prs.tsv
+
+          echo "Auto-rebase summary — rebased: $rebased, already up to date: $uptodate, conflicts: $conflicted, errors: $errored."

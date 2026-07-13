@@ -16,7 +16,7 @@ import { TOKEN_MARKER } from "~/lib/tokens";
 
 const contract = JSON.parse(
   readFileSync(
-    fileURLToPath(new URL("../../wire-contract.json", import.meta.url)),
+    fileURLToPath(new URL("../../../wire-contract.json", import.meta.url)),
     "utf8",
   ),
 ) as {

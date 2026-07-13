@@ -20,8 +20,10 @@ Every agent runs with the **deploying user's own credentials** — their GitHub 
 
 Bandolier has two deployable pieces:
 
-1. **The web app** (this repo, `src/`) — a Next.js + tRPC application. It handles auth, stores per-user credentials, talks to the Kubernetes API, and serves the dashboard.
+1. **The web app** (`web/`) — a Next.js + tRPC application. It handles auth, stores per-user credentials, talks to the Kubernetes API, and serves the dashboard.
 2. **The agent harness** (`agent-harness/`) — a small Go binary baked into a container image alongside the Claude Code CLI, `git`, and `gh`. This is what actually runs inside each agent pod.
+
+The repo is a monorepo: the web app lives in `web/`, the harness in `agent-harness/`, and the embedded LLM proxy in `gollm/` (both Go). All the `pnpm` commands below run from `web/`.
 
 When you deploy an agent, the web app:
 
@@ -59,7 +61,10 @@ Browser ──▶ Next.js app ──▶ Kubernetes API ──▶ Job (harness po
 
 ### 1. Install dependencies
 
+The web app lives in `web/`; run all `pnpm` commands from there.
+
 ```bash
+cd web
 pnpm install
 ```
 
@@ -123,7 +128,7 @@ Open <http://localhost:3000> and sign in with GitHub.
 Open **Settings** in the dashboard and add:
 
 - **A model provider** — AWS Bedrock credentials, an API key, or a subscription login. For Claude Pro/Max, run `claude setup-token` locally and paste the `sk-ant-oat01-…` token; for ChatGPT, run `codex login` locally and paste the contents of `~/.codex/auth.json`. API keys are validated before they're saved and the model picker is populated live from your provider; subscription credentials can't be probed via the API, so they get a static list of current models and are verified on the first run.
-- **A kubeconfig** — the cluster your agents deploy into (a repo can also provide a shared one). Bandolier runs the Kubernetes client on its server, so exec-plugin kubeconfigs (the `aws`/`gcloud` credential plugins EKS/GKE emit) and ones that reference cert/key files on your laptop won't work — the server has neither those binaries nor those files. Generate a self-contained, token-based kubeconfig from your current cluster instead: `curl -fsSL https://<your-host>/setup.sh | bash` (hosted) or `./scripts/create-bandolier-kubeconfig.sh` (local checkout), then paste the output here. Add `--scoped` (e.g. `curl -fsSL https://<your-host>/setup.sh | bash -s -- --scoped`) to bind a least-privilege ClusterRole instead of cluster-admin.
+- **A kubeconfig** — the cluster your agents deploy into (a repo can also provide a shared one). Bandolier runs the Kubernetes client on its server, so exec-plugin kubeconfigs (the `aws`/`gcloud` credential plugins EKS/GKE emit) and ones that reference cert/key files on your laptop won't work — the server has neither those binaries nor those files. Generate a self-contained, token-based kubeconfig from your current cluster instead: `curl -fsSL https://<your-host>/setup.sh | bash` (hosted) or `./web/scripts/create-bandolier-kubeconfig.sh` (local checkout), then paste the output here. Add `--scoped` (e.g. `curl -fsSL https://<your-host>/setup.sh | bash -s -- --scoped`) to bind a least-privilege ClusterRole instead of cluster-admin.
 
 You can now select a repo, deploy an agent, and watch it work.
 
@@ -317,7 +322,7 @@ You must provide a non-empty `task`/`prompt` or an `issueNumber`.
 
 ## Configuration reference
 
-All server configuration is validated in `src/env.js`.
+All server configuration is validated in `web/src/env.js`.
 
 ### Required
 
@@ -401,19 +406,24 @@ This is independent of a run's **structured output** (the PR or issue URL), whic
 ## Project layout
 
 ```
-src/
-  app/                       Next.js App Router
-    dashboard/_components/    The agent dashboard UI (deploy, monitor, settings, webhooks)
-    api/auth/[...all]/        Better Auth handler
-    api/webhooks/github/      GitHub issue → agent webhook
-    api/agent-runs/           Transcript ingest endpoint (harness → S3)
-    api/v1/                   REST API
-  server/
-    api/routers/              tRPC routers (agents, repos, account, models, webhooks, api-keys)
-    agents/                   Job creation, kubeconfig, model listing, credentials, artifacts
-    better-auth/              Auth configuration
-    db/schema.ts              Drizzle schema (users, credentials, task runs, API keys, webhooks)
-  proxy.ts                   Middleware implementing the optional password gate
+web/                         The web app (Next.js + tRPC). Run pnpm commands here.
+  src/
+    app/                       Next.js App Router
+      dashboard/_components/    The agent dashboard UI (deploy, monitor, settings, webhooks)
+      api/auth/[...all]/        Better Auth handler
+      api/webhooks/github/      GitHub issue → agent webhook
+      api/agent-runs/           Transcript ingest endpoint (harness → S3)
+      api/v1/                   REST API
+    server/
+      api/routers/              tRPC routers (agents, repos, account, models, webhooks, api-keys)
+      agents/                   Job creation, kubeconfig, model listing, credentials, artifacts
+      better-auth/              Auth configuration
+      db/schema.ts              Drizzle schema (users, credentials, task runs, API keys, webhooks)
+    proxy.ts                   Middleware implementing the optional password gate
+  drizzle/                   Checked-in SQL migrations
+  e2e/                       Playwright browser specs + runners
+  scripts/                   App scripts (kubeconfig generator served at /setup.sh, VAPID keygen)
+  Dockerfile                 Web-app production image (Next.js standalone + migrator stages)
 
 agent-harness/
   cmd/harness/main.go        The Go binary that runs inside each agent pod
@@ -431,11 +441,12 @@ gollm/                       Embedded litellm-style LLM proxy + SDK (Go). The ha
 self-host/
   Dockerfile                 Dogfooding image: harness + Go/Node toolchains + Chromium/Playwright, for agents that build Bandolier itself
 
-Dockerfile                   Web-app production image (Next.js standalone + migrator stages)
 deploy/
   helm/bandolier/            Helm chart to self-host the web app on Kubernetes
   terraform/digitalocean/    OpenTofu: DOKS + managed Postgres + Spaces + the chart
   README.md                  Self-hosting-on-Kubernetes guide
+
+scripts/                     Repo-level CI tooling (coverage-badge generation)
 ```
 
 ---

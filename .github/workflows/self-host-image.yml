@@ -34,21 +34,21 @@ on:
       - "self-host/**"
       # Dependency inputs baked into the image's warm pnpm store — rebuild so the
       # store stays in sync with the lockfile.
-      - "package.json"
-      - "pnpm-lock.yaml"
-      - "pnpm-workspace.yaml"
-      - ".npmrc"
-      - "patches/**"
+      - "web/package.json"
+      - "web/pnpm-lock.yaml"
+      - "web/pnpm-workspace.yaml"
+      - "web/.npmrc"
+      - "web/patches/**"
       - ".github/workflows/self-host-image.yml"
   pull_request:
     paths:
       - "self-host/**"
       - "agent-harness/**"
-      - "package.json"
-      - "pnpm-lock.yaml"
-      - "pnpm-workspace.yaml"
-      - ".npmrc"
-      - "patches/**"
+      - "web/package.json"
+      - "web/pnpm-lock.yaml"
+      - "web/pnpm-workspace.yaml"
+      - "web/.npmrc"
+      - "web/patches/**"
       - ".github/workflows/self-host-image.yml"
 
 # Serialize main builds so a workflow_run build (fresh harness) supersedes an
@@ -89,7 +89,7 @@ jobs:
           set -euo pipefail
           GO_VERSION="$(grep -E '^go [0-9]' agent-harness/go.mod | awk '{print $2}')"
           # engines.node is like "24.x" / ">=24" — keep the leading major.
-          NODE_VERSION="$(grep -oE '"node"[[:space:]]*:[[:space:]]*"[^"]+"' package.json | grep -oE '[0-9]+' | head -1)"
+          NODE_VERSION="$(grep -oE '"node"[[:space:]]*:[[:space:]]*"[^"]+"' web/package.json | grep -oE '[0-9]+' | head -1)"
           if [ -z "$GO_VERSION" ] || [ -z "$NODE_VERSION" ]; then
             echo "Failed to resolve versions (go='$GO_VERSION' node='$NODE_VERSION')" >&2
             exit 1

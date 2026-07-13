@@ -5,7 +5,7 @@ metadata:
   labels:
     {{- include "bandolier.labels" . | nindent 4 }}
 data:
-  # Non-secret app configuration (mirrors the non-secret half of src/env.js).
+  # Non-secret app configuration (mirrors the non-secret half of web/src/env.js).
   BETTER_AUTH_URL: {{ .Values.config.betterAuthUrl | quote }}
   K8S_LABEL_SELECTOR: {{ .Values.config.k8sLabelSelector | quote }}
   AGENT_NETWORK_POLICY: {{ .Values.config.agentNetworkPolicy | quote }}

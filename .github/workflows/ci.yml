@@ -17,6 +17,9 @@ jobs:
   web:
     name: Web app (lint · typecheck · test)
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -25,12 +28,15 @@ jobs:
       # package.json, so the pnpm version is pinned in exactly one place.
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -58,12 +64,15 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: web-coverage
-          path: coverage/
+          path: web/coverage/
           if-no-files-found: ignore
 
   integration:
     name: Integration tests (tRPC · routes · real Postgres)
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
     # DB-backed integration suite: real tRPC procedures + route handlers against
     # a real, migrated Postgres. Kept separate from the fast hermetic `web` unit
     # job (distinct *.integration.test.ts glob + vitest.integration.config.ts) so
@@ -89,12 +98,15 @@ jobs:
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -141,8 +153,9 @@ jobs:
 
       # Vercel must not deploy this push: vercel.json's git.deploymentEnabled
       # only takes effect if the file exists on the pushed branch (this one is
-      # built from scratch, so copy it in), and "[vercel skip]" in the commit
-      # message skips the deployment regardless.
+      # built from scratch, so copy it in — under web/, the project's Root
+      # Directory), and "[vercel skip]" in the commit message skips the
+      # deployment regardless.
       - name: Publish badge JSON to the badges branch
         run: |
           set -euo pipefail
@@ -153,10 +166,11 @@ jobs:
           node scripts/badge.mjs "gollm proxy" "$(cat go-cov/gollm-proxy.pct)" \
             > /tmp/badges/gollm-proxy-coverage.json
           cat /tmp/badges/*.json
-          cp vercel.json /tmp/badges/vercel.json
+          mkdir -p /tmp/badges/web
+          cp web/vercel.json /tmp/badges/web/vercel.json
           cd /tmp/badges
           git init -q -b badges
-          git add coverage.json agent-harness-coverage.json gollm-proxy-coverage.json vercel.json
+          git add coverage.json agent-harness-coverage.json gollm-proxy-coverage.json web/vercel.json
           git -c user.name="github-actions[bot]" \
               -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
               commit -qm "Update coverage badges [vercel skip]"
@@ -169,6 +183,9 @@ jobs:
   e2e:
     name: Browser smoke tests (playwright)
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -177,12 +194,15 @@ jobs:
       # package.json, so the pnpm version is pinned in exactly one place.
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -207,6 +227,9 @@ jobs:
   e2e-flow:
     name: Browser product-flow tests (playwright)
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
     # The authenticated flows migrate + drive a real Postgres (the gate flow is
     # hermetic and ignores it).
     services:
@@ -229,12 +252,15 @@ jobs:
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -433,6 +459,9 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [web, e2e]
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -441,12 +470,15 @@ jobs:
       # package.json, so the pnpm version is pinned in exactly one place.
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile

@@ -9,11 +9,12 @@ Run all of these locally before you push — CI runs the same checks on every pu
 and pull request (see `.github/workflows/ci.yml`):
 
 ```bash
+cd web          # the web app lives here; run pnpm commands from web/
 pnpm check      # ESLint + tsc --noEmit
 pnpm test       # Vitest unit suite (once)
 pnpm test:e2e   # Playwright browser smoke tests over the /dev/* routes
 
-cd agent-harness && go test ./...   # the Go harness suite
+cd ../agent-harness && go test ./...   # the Go harness suite
 ```
 
 `pnpm check` and `pnpm test` cover the web app; `pnpm test:e2e` boots a dev
@@ -36,17 +37,17 @@ sentinels, the effort allow-list). Because the two languages can't share a
 package, each side re-declares these constants in code and asserts them against
 the JSON:
 
-- TypeScript: `src/lib/wire-contract.test.ts`
+- TypeScript: `web/src/lib/wire-contract.test.ts`
 - Go: `agent-harness/cmd/harness/wire_contract_test.go`
 
 **If you change `wire-contract.json`, you must update the constants on both
 sides** so both suites keep passing. Drift is caught in CI, not in production —
 keep it that way.
 
-## `patches/`
+## `web/patches/`
 
-`patches/kysely@0.29.2.patch` is a pnpm patch (declared under
-`patchedDependencies` in `pnpm-workspace.yaml`). It re-exports
+`web/patches/kysely@0.29.2.patch` is a pnpm patch (declared under
+`patchedDependencies` in `web/pnpm-workspace.yaml`). It re-exports
 `DEFAULT_MIGRATION_TABLE` / `DEFAULT_MIGRATION_LOCK_TABLE` from `kysely` so the
 drizzle-kit tooling can reach them. It's applied automatically on
 `pnpm install`.

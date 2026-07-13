@@ -1,6 +1,6 @@
 name: web app image
 
-# Build the Bandolier web-app container (the Next.js + tRPC server in `src/`) and
+# Build the Bandolier web-app container (the Next.js + tRPC server in `web/`) and
 # publish it to GitHub Container Registry (ghcr.io). This is the image you run to
 # self-host Bandolier itself — distinct from the agent-side harness/self-host
 # images. The migrator image (drizzle-kit + the SQL under drizzle/) is built from
@@ -16,31 +16,31 @@ on:
     paths:
       # The app image bakes the whole repo, so any app source change can affect
       # it. Ignore paths that never do to avoid needless rebuilds.
-      - "src/**"
-      - "public/**"
-      - "drizzle/**"
-      - "package.json"
-      - "pnpm-lock.yaml"
-      - "pnpm-workspace.yaml"
-      - "patches/**"
-      - "next.config.js"
-      - "drizzle.config.ts"
-      - "tsconfig.json"
-      - "Dockerfile"
+      - "web/src/**"
+      - "web/public/**"
+      - "web/drizzle/**"
+      - "web/package.json"
+      - "web/pnpm-lock.yaml"
+      - "web/pnpm-workspace.yaml"
+      - "web/patches/**"
+      - "web/next.config.js"
+      - "web/drizzle.config.ts"
+      - "web/tsconfig.json"
+      - "web/Dockerfile"
       - ".github/workflows/web-app-image.yml"
   pull_request:
     paths:
-      - "src/**"
-      - "public/**"
-      - "drizzle/**"
-      - "package.json"
-      - "pnpm-lock.yaml"
-      - "pnpm-workspace.yaml"
-      - "patches/**"
-      - "next.config.js"
-      - "drizzle.config.ts"
-      - "tsconfig.json"
-      - "Dockerfile"
+      - "web/src/**"
+      - "web/public/**"
+      - "web/drizzle/**"
+      - "web/package.json"
+      - "web/pnpm-lock.yaml"
+      - "web/pnpm-workspace.yaml"
+      - "web/patches/**"
+      - "web/next.config.js"
+      - "web/drizzle.config.ts"
+      - "web/tsconfig.json"
+      - "web/Dockerfile"
       - ".github/workflows/web-app-image.yml"
 
 env:
@@ -103,8 +103,8 @@ jobs:
       - name: Build and push web app (runner stage)
         uses: docker/build-push-action@v6
         with:
-          context: .
-          file: ./Dockerfile
+          context: web
+          file: ./web/Dockerfile
           target: runner
           platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' }}
@@ -118,8 +118,8 @@ jobs:
       - name: Build and push migrator (migrator stage)
         uses: docker/build-push-action@v6
         with:
-          context: .
-          file: ./Dockerfile
+          context: web
+          file: ./web/Dockerfile
           target: migrator
           platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' }}

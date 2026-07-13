@@ -4,6 +4,7 @@ import {
   groupHarnessBlocks,
   harnessOutputText,
   harnessSubagentText,
+  isToolCallLine,
   parseSegments,
   SUBAGENT_MARKER,
   SUBAGENT_SEP,
@@ -200,6 +201,27 @@ describe("groupHarnessBlocks", () => {
       { kind: "line", text: "[harness] → Bash: git status" },
       { kind: "output", lines: ["On branch main"] },
     ]);
+  });
+});
+
+describe("isToolCallLine", () => {
+  it("recognizes a → tool-call line, with or without the harness prefix", () => {
+    expect(isToolCallLine("15:04:05 [harness] → Bash: git status")).toBe(true);
+    // A subagent block's body carries no [harness] tag but still leads with →.
+    expect(isToolCallLine("→ Grep: login")).toBe(true);
+    expect(isToolCallLine("  → Read a.ts")).toBe(true);
+  });
+
+  it("rejects plain diagnostics, output, and argument continuations", () => {
+    // System prompt / setup / lifecycle lines are not tool calls.
+    expect(isToolCallLine("12:00:01 [harness] cloning repo")).toBe(false);
+    expect(isToolCallLine("[harness]   You are Claude Code")).toBe(false);
+    expect(isToolCallLine("[harness] claude finished (turns=1)")).toBe(false);
+    // A multi-line call's argument continuation (indented, no →).
+    expect(isToolCallLine("[harness]     export const x = 1;")).toBe(false);
+    // Captured output (← marker), not a call.
+    expect(isToolCallLine("[harness]   ← On branch main")).toBe(false);
+    expect(isToolCallLine("  ← src/auth.ts")).toBe(false);
   });
 });
 

@@ -93,6 +93,27 @@ export function harnessOutputText(line: string): string | null {
   return after.slice(OUTPUT_MARKER.length).replace(/^ /, "");
 }
 
+// The → marker the harness prefixes onto a tool invocation, written immediately
+// after the [harness] tag (logToolUse in providers_claude.go) — the input
+// counterpart to the ← output marker. Kept byte-identical to the harness.
+export const TOOL_MARKER = "→";
+
+// Whether a line is a tool invocation: after any [harness] tag and the harness's
+// indentation, it begins with the → marker. Works on both a full harness line
+// and a subagent block's already-unwrapped body (which carries no tag). Used to
+// count real tool calls for a segment's summary, so plain diagnostics — the
+// system prompt, setup, thinking, lifecycle notes, a multi-line call's argument
+// continuations — and a call's ← output don't inflate (or, for a subagent-only
+// run, zero out) the count.
+export function isToolCallLine(line: string): boolean {
+  const tag = line.indexOf(HARNESS_TAG);
+  const body = (tag < 0 ? line : line.slice(tag + HARNESS_TAG.length)).replace(
+    /^\s+/,
+    "",
+  );
+  return body.startsWith(TOOL_MARKER);
+}
+
 // A harness segment renders as a run of blocks: plain diagnostic lines pass
 // through, while consecutive tool-output lines collapse into a single `output`
 // block the modal hides behind a nested expander — so a call's result doesn't

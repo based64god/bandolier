@@ -6,6 +6,7 @@ import { resolveKubeconfig } from "~/server/agents/kubeconfig";
 import {
   fuzzyPickModel,
   listModelsForUser,
+  matchProviderQuery,
   pickDefaultModel,
   pickPrWriterModel,
 } from "~/server/agents/models";
@@ -24,6 +25,7 @@ import {
   labelQuery,
   MEMORY_LABEL_PREFIX,
   MODEL_LABEL_PREFIX,
+  PROVIDER_LABEL_PREFIX,
 } from "./labels";
 
 /**
@@ -75,7 +77,7 @@ export interface ResolvedWebhookRun {
 export async function resolveWebhookRun(opts: {
   sender: { id: number; login: string };
   repoFullName: string;
-  /** Labels considered for `model:` / `effort:` selection (the issue's). */
+  /** Labels considered for `model:` / `provider:` / `effort:` selection. */
   labels: { name: string }[];
   defaultModel: string | null;
   defaultEffort: string | null;
@@ -111,7 +113,33 @@ export async function resolveWebhookRun(opts: {
     return null;
   }
 
-  // Choose the model. Precedence:
+  // An optional `provider:<value>` issue label pins which provider (and thus
+  // which credentials) serves the run — the webhook analogue of the REST
+  // modelProvider field. It scopes model selection to that provider's models,
+  // so e.g. `provider:bedrock` runs on Bedrock even when the repo default model
+  // is an Anthropic id. A value matching no available provider is ignored (a
+  // log, then the normal cross-provider selection below).
+  const providerQuery = labelQuery(labels, PROVIDER_LABEL_PREFIX);
+  const providerOverride = providerQuery
+    ? matchProviderQuery(providerQuery, models)
+    : undefined;
+  if (providerQuery) {
+    console.log(
+      providerOverride
+        ? "[bandolier:webhook] provider pinned by issue label"
+        : "[bandolier:webhook] no provider matched issue label",
+      {
+        ...logCtx,
+        label: `${PROVIDER_LABEL_PREFIX}${providerQuery}`,
+        provider: providerOverride,
+      },
+    );
+  }
+  const selectableModels = providerOverride
+    ? models.filter((m) => m.provider === providerOverride)
+    : models;
+
+  // Choose the model, among the provider-scoped set. Precedence:
   //   1. An issue label like `model:<query>` fuzzy-selects (e.g. model:opus →
   //      the latest Claude Opus), letting the author pick per issue.
   //   2. The repo's configured default webhook model, when still available.
@@ -119,7 +147,7 @@ export async function resolveWebhookRun(opts: {
   const modelQuery = labelQuery(labels, MODEL_LABEL_PREFIX);
   let model: string | undefined;
   if (modelQuery) {
-    model = fuzzyPickModel(modelQuery, models);
+    model = fuzzyPickModel(modelQuery, selectableModels);
     console.log(
       model
         ? "[bandolier:webhook] model selected from issue label"
@@ -128,7 +156,7 @@ export async function resolveWebhookRun(opts: {
     );
   }
   if (!model && opts.defaultModel) {
-    model = models.find((m) => m.id === opts.defaultModel)?.id;
+    model = selectableModels.find((m) => m.id === opts.defaultModel)?.id;
     if (model) {
       console.log("[bandolier:webhook] model selected from repo default", {
         ...logCtx,
@@ -136,7 +164,7 @@ export async function resolveWebhookRun(opts: {
       });
     }
   }
-  model ??= pickDefaultModel(models);
+  model ??= pickDefaultModel(selectableModels);
   if (!model) {
     console.log("[bandolier:webhook] skipped — no models available", {
       ...logCtx,
@@ -145,11 +173,12 @@ export async function resolveWebhookRun(opts: {
     return null;
   }
 
-  // Route credentials by the chosen model's provider (mirrors the deploy path).
-  // A model is only ever listed when its provider's credentials resolved, so the
-  // matching set is present here.
-  const selectedModel = models.find((m) => m.id === model);
-  const provider = selectedModel?.provider;
+  // Route credentials by the chosen model's provider (mirrors the deploy path),
+  // or the pinned provider when a `provider:` label set one. A model is only
+  // ever listed when its provider's credentials resolved, so the matching set is
+  // present here.
+  const selectedModel = selectableModels.find((m) => m.id === model);
+  const provider = providerOverride ?? selectedModel?.provider;
 
   // Resolve the reasoning effort, but only for a Claude provider — the OpenAI and
   // Gemini CLIs don't take it. Precedence mirrors the model's: an `effort:<level>`

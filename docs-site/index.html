@@ -4,15 +4,23 @@
   change a feature description here, update the matching section in README.md
   (and vice versa). The docs-site deploy workflow only triggers on
   docs-site/** changes, so a README edit will not remind you to sync this file.
+
+  The page is split by audience. Everything up to and including "Reference" is
+  for USERS — people running Bandolier for their own projects (set up, launch,
+  operate, self-host). The "Developing Bandolier" track and the developer half
+  of the FAQ are for DEVS — people hacking on Bandolier's own codebase, sourced
+  from CONTRIBUTING.md and the README's Tests/Project-layout sections. Keep that
+  split intact when editing: user-facing workflow docs stay in the first three
+  tracks, contributor workflow docs stay in Track 04.
 -->
 <html lang="en" data-theme="dark">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Bandolier — Setup, Workflows &amp; Self-Hosting</title>
+    <title>Bandolier — Docs for Users &amp; Developers</title>
     <meta
       name="description"
-      content="Get Bandolier running for your own projects: local setup, GitHub App and webhook workflows, and self-hosting on Kubernetes."
+      content="Bandolier docs split by audience: users running it for their own projects (setup, workflows, self-hosting) and developers hacking on Bandolier itself (verification loop, tests, project layout)."
     />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -57,11 +65,12 @@
         <div class="sidebar-inner">
           <p class="nav-heading">Start here</p>
           <ul>
+            <li><a href="#audience">Who is this for?</a></li>
             <li><a href="#overview">What is Bandolier?</a></li>
             <li><a href="#how-it-works">How it works</a></li>
             <li><a href="#prerequisites">Prerequisites</a></li>
           </ul>
-          <p class="nav-heading">Project setup</p>
+          <p class="nav-heading">For users · Project setup</p>
           <ul>
             <li><a href="#install">1 · Install</a></li>
             <li><a href="#oauth-app">2 · GitHub OAuth app</a></li>
@@ -70,7 +79,7 @@
             <li><a href="#run">5 · Run &amp; sign in</a></li>
             <li><a href="#configure-account">6 · Configure account</a></li>
           </ul>
-          <p class="nav-heading">Workflow configuration</p>
+          <p class="nav-heading">For users · Workflows</p>
           <ul>
             <li><a href="#github-app">GitHub App &amp; webhooks</a></li>
             <li><a href="#resuming">Resuming runs</a></li>
@@ -80,7 +89,7 @@
             <li><a href="#artifacts">Run artifacts</a></li>
             <li><a href="#rest-api">REST API</a></li>
           </ul>
-          <p class="nav-heading">Self-hosting</p>
+          <p class="nav-heading">For users · Self-hosting</p>
           <ul>
             <li><a href="#selfhost-overview">Overview &amp; images</a></li>
             <li><a href="#helm-quickstart">Helm quick start</a></li>
@@ -89,17 +98,30 @@
             <li><a href="#terraform">One-click DigitalOcean</a></li>
             <li><a href="#harness-image">Harness image</a></li>
           </ul>
-          <p class="nav-heading">Reference</p>
+          <p class="nav-heading">For users · Reference</p>
           <ul>
             <li><a href="#config-reference">Config reference</a></li>
             <li><a href="#security">Security notes</a></li>
+          </ul>
+          <p class="nav-heading">For developers</p>
+          <ul>
+            <li><a href="#dev-setup">Get the code running</a></li>
+            <li><a href="#dev-verify">Verification loop</a></li>
+            <li><a href="#dev-wire-contract">Wire-contract rule</a></li>
+            <li><a href="#dev-tests">Test suites</a></li>
+            <li><a href="#dev-layout">Project layout</a></li>
+          </ul>
+          <p class="nav-heading">FAQ</p>
+          <ul>
+            <li><a href="#faq-users">For users</a></li>
+            <li><a href="#faq-devs">For developers</a></li>
           </ul>
         </div>
       </nav>
 
       <main id="content" class="content">
         <section id="top" class="hero">
-          <p class="eyebrow">Own it. Operate it. For your own projects.</p>
+          <p class="eyebrow">For teams running it — and developers building it.</p>
           <h1>Run Claude Code agents on your&nbsp;own&nbsp;terms</h1>
           <p class="lede">
             Bandolier is a web app for running
@@ -109,26 +131,83 @@
             the code, runs the agent, and opens a pull request — while you watch
             live from a dashboard.
           </p>
+          <p class="lede">
+            These docs serve <strong>two audiences</strong>. If you want to
+            <strong>run and operate</strong> Bandolier for your own projects,
+            start with the user tracks below. If you want to
+            <strong>hack on Bandolier itself</strong>, jump to
+            <a href="#dev-setup">Developing Bandolier</a>.
+          </p>
           <div class="hero-cta">
             <a class="btn primary" href="#install">Set it up locally</a>
             <a class="btn" href="#selfhost-overview">Self-host it</a>
+            <a class="btn" href="#dev-setup">Develop it</a>
           </div>
           <div class="hero-tracks">
             <a class="track-card" href="#install">
-              <span class="track-num">01</span>
+              <span class="track-num">01 · Users</span>
               <h3>Project setup</h3>
               <p>Get Bandolier running on your machine in six steps.</p>
             </a>
             <a class="track-card" href="#github-app">
-              <span class="track-num">02</span>
+              <span class="track-num">02 · Users</span>
               <h3>Workflow config</h3>
               <p>Webhooks, system prompts, isolation, artifacts, REST API.</p>
             </a>
             <a class="track-card" href="#selfhost-overview">
-              <span class="track-num">03</span>
+              <span class="track-num">03 · Users</span>
               <h3>Self-hosting</h3>
               <p>Ship the whole stack to Kubernetes — Helm or one-click DO.</p>
             </a>
+            <a class="track-card" href="#dev-setup">
+              <span class="track-num">04 · Devs</span>
+              <h3>Develop Bandolier</h3>
+              <p>Dev routes, the verification loop, tests, project layout.</p>
+            </a>
+          </div>
+        </section>
+
+        <section id="audience">
+          <h2>Who is this for?</h2>
+          <p>
+            Bandolier has two kinds of reader. Pick the one that matches what
+            you're trying to do — the docs are grouped the same way, and the
+            sidebar is labelled <em>For users</em> vs <em>For developers</em>.
+          </p>
+          <div class="audience-split">
+            <div class="audience-card">
+              <span class="audience-tag">For users</span>
+              <h3>Running Bandolier for your projects</h3>
+              <p>
+                You want to stand up an instance, launch agents, and operate it
+                for your team — install and configure it, wire up GitHub
+                triggers, and self-host on Kubernetes. You don't touch
+                Bandolier's source.
+              </p>
+              <ul class="audience-links">
+                <li><a href="#install">Project setup — six steps to a local instance</a></li>
+                <li><a href="#github-app">Workflow configuration — triggers &amp; guardrails</a></li>
+                <li><a href="#selfhost-overview">Self-hosting on Kubernetes</a></li>
+                <li><a href="#config-reference">Configuration reference</a></li>
+                <li><a href="#faq-users">User FAQ</a></li>
+              </ul>
+            </div>
+            <div class="audience-card">
+              <span class="audience-tag">For developers</span>
+              <h3>Working on Bandolier itself</h3>
+              <p>
+                You want to change Bandolier's code — the Next.js web app, the Go
+                agent harness, the Helm chart. You need the dev routes, the
+                verification loop CI enforces, and where things live.
+              </p>
+              <ul class="audience-links">
+                <li><a href="#dev-setup">Get the code running (with dev routes)</a></li>
+                <li><a href="#dev-verify">The verification loop</a></li>
+                <li><a href="#dev-wire-contract">The wire-contract rule</a></li>
+                <li><a href="#dev-tests">Test suites</a></li>
+                <li><a href="#faq-devs">Developer FAQ</a></li>
+              </ul>
+            </div>
           </div>
         </section>
 
@@ -235,7 +314,7 @@ Browser ──▶ Next.js app ──▶ Kubernetes API ──▶ Job (harness po
 
         <!-- ===================== PROJECT SETUP ===================== -->
         <div class="track-divider">
-          <span class="track-badge">Track 01</span>
+          <span class="track-badge">For users · Track 01</span>
           <h2 class="track-title">Project setup</h2>
           <p>Six steps to a running local instance.</p>
         </div>
@@ -358,7 +437,7 @@ curl -fsSL https://&lt;your-host&gt;/setup.sh | bash -s -- --scoped</code></pre>
 
         <!-- ===================== WORKFLOW CONFIG ===================== -->
         <div class="track-divider">
-          <span class="track-badge">Track 02</span>
+          <span class="track-badge">For users · Track 02</span>
           <h2 class="track-title">Workflow configuration</h2>
           <p>Optional pieces that shape how agents get triggered and constrained.</p>
         </div>
@@ -620,7 +699,7 @@ curl -X DELETE -H "Authorization: Bearer bnd_…" \
 
         <!-- ===================== SELF-HOSTING ===================== -->
         <div class="track-divider">
-          <span class="track-badge">Track 03</span>
+          <span class="track-badge">For users · Track 03</span>
           <h2 class="track-title">Self-hosting on Kubernetes</h2>
           <p>Own and operate the whole stack for your team.</p>
         </div>
@@ -796,7 +875,7 @@ docker push &lt;your-registry&gt;/bandolier-agent-harness:latest</code></pre>
 
         <!-- ===================== REFERENCE ===================== -->
         <div class="track-divider">
-          <span class="track-badge">Reference</span>
+          <span class="track-badge">For users · Reference</span>
           <h2 class="track-title">Configuration &amp; security</h2>
         </div>
 
@@ -843,14 +922,385 @@ docker push &lt;your-registry&gt;/bandolier-agent-harness:latest</code></pre>
           </ul>
         </section>
 
+        <!-- ===================== DEVELOPING BANDOLIER ===================== -->
+        <div class="track-divider">
+          <span class="track-badge">For developers · Track 04</span>
+          <h2 class="track-title">Developing Bandolier</h2>
+          <p>Working on Bandolier's own codebase — not just running it.</p>
+        </div>
+
+        <div class="callout info">
+          Everything above is for <strong>running</strong> Bandolier. This track
+          is for <strong>contributing to it</strong>: the Next.js web app under
+          <code>src/</code>, the Go agent harness under
+          <code>agent-harness/</code>, the embedded <code>gollm</code> proxy, and
+          the Helm chart. The canonical reference is
+          <a href="https://github.com/based64god/bandolier/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">CONTRIBUTING.md</a>.
+        </div>
+
+        <section id="dev-setup">
+          <h2>Get the code running</h2>
+          <p>
+            Local development uses the same six steps as
+            <a href="#install">Project setup</a> — <code>pnpm install</code>, a
+            GitHub OAuth app, <code>.env</code>, <code>./start-database.sh</code>,
+            <code>pnpm db:push</code>, then <code>pnpm dev</code>. Two things
+            matter specifically when you're changing code:
+          </p>
+          <ul class="feature-list">
+            <li>
+              <strong>The <code>/dev/*</code> harness routes.</strong> The UI
+              components render against fake data on inert
+              <code>/dev/*</code> routes that contact no real services — no
+              cluster, no model provider, no GitHub. That's what the browser
+              smoke tests drive, and it's the fastest way to iterate on UI
+              without wiring up credentials.
+            </li>
+            <li>
+              <strong><code>db:push</code> vs migrations.</strong>
+              <code>pnpm db:push</code> syncs the schema straight to your local
+              database for development. After changing
+              <code>src/server/db/schema.ts</code>, run
+              <code>pnpm db:generate</code> to emit a new SQL migration under
+              <code>drizzle/</code> and commit it — that's what self-host deploys
+              apply, and CI checks it exists.
+            </li>
+          </ul>
+        </section>
+
+        <section id="dev-verify">
+          <h2>The verification loop</h2>
+          <p>
+            Run all of these locally before you push — CI runs the same checks on
+            every push and pull request (see
+            <code>.github/workflows/ci.yml</code>):
+          </p>
+          <div class="code-block" data-lang="bash">
+            <pre><code>pnpm check      # ESLint + tsc --noEmit
+pnpm test       # Vitest unit suite (once)
+pnpm test:e2e   # Playwright browser smoke tests over the /dev/* routes
+
+cd agent-harness &amp;&amp; go test ./...   # the Go harness suite</code></pre>
+          </div>
+          <p>
+            <code>pnpm check</code> and <code>pnpm test</code> cover the web app;
+            <code>pnpm test:e2e</code> boots a dev server and drives the UI
+            harness routes; <code>go test ./...</code> (from
+            <code>agent-harness/</code>) covers the Go binary that runs inside
+            each agent pod, plus the vendored <code>gollm</code> module it embeds.
+          </p>
+          <div class="callout">
+            CI runs a few more suites that need a throwaway Postgres, so they're
+            not in the loop above but will still gate your PR: the DB-backed
+            integration tests (<code>pnpm test:integration</code>) and the
+            product-flow browser specs (<code>pnpm test:e2e:flow</code> /
+            <code>pnpm test:e2e:authflow</code>), plus Helm-chart linting and
+            OpenTofu validation.
+          </div>
+        </section>
+
+        <section id="dev-wire-contract">
+          <h2>The wire-contract rule</h2>
+          <p>
+            <code>wire-contract.json</code> is the single source of truth for the
+            constants that cross the TypeScript-server ↔ Go-harness process
+            boundary (log markers, control sentinels, the effort allow-list).
+            Because the two languages can't share a package, each side
+            re-declares these constants in code and asserts them against the
+            JSON:
+          </p>
+          <ul class="feature-list">
+            <li>TypeScript: <code>src/lib/wire-contract.test.ts</code></li>
+            <li>Go: <code>agent-harness/cmd/harness/wire_contract_test.go</code></li>
+          </ul>
+          <div class="callout warn">
+            <strong>If you change <code>wire-contract.json</code>, update the
+            constants on both sides</strong> so both suites keep passing. Drift is
+            caught in CI, not in production — keep it that way.
+          </div>
+          <p>
+            Two more vendored bits worth knowing:
+            <code>patches/kysely@0.29.2.patch</code> is a pnpm patch (applied
+            automatically on <code>pnpm install</code>) that re-exports migration
+            constants drizzle-kit needs, and <code>skills-lock.json</code> pins
+            the vendored <code>neon-postgres</code> skill to a specific upstream
+            commit by content hash.
+          </p>
+        </section>
+
+        <section id="dev-tests">
+          <h2>Test suites</h2>
+          <p>
+            Several suites cover the project. The unit and Go suites exercise the
+            pure logic — fast, hermetic, and free of any database, network, or
+            Kubernetes access; the integration suite runs real handlers against a
+            throwaway Postgres; and the browser suites drive the UI in a real
+            Chromium against inert harness routes.
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Suite</th><th>Command</th><th>What it exercises</th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Web app unit</td>
+                  <td><code>pnpm test</code></td>
+                  <td><code>*.test.ts</code> next to the code — parsing, validation, formatting, and crypto-token helpers.</td>
+                </tr>
+                <tr>
+                  <td>Web app integration</td>
+                  <td><code>pnpm test:integration</code></td>
+                  <td><code>*.integration.test.ts</code> — real tRPC procedures, REST/webhook handlers, and auth flow against a real, migrated Postgres.</td>
+                </tr>
+                <tr>
+                  <td>Agent harness (Go)</td>
+                  <td><code>go test ./...</code></td>
+                  <td>The harness's pure helpers — slugging, branch naming, prompt building, PR-content parsing, provider detection.</td>
+                </tr>
+                <tr>
+                  <td>Browser smoke</td>
+                  <td><code>pnpm test:e2e</code></td>
+                  <td><code>e2e/*.spec.ts</code> drive UI components in Chromium against the <code>/dev/*</code> routes (no real services).</td>
+                </tr>
+                <tr>
+                  <td>Product-flow browser</td>
+                  <td><code>pnpm test:e2e:flow</code> / <code>:authflow</code></td>
+                  <td>Fuller flows — the gated (shared-password) surface and the signed-in surface against a throwaway Postgres + fake Kubernetes.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="callout">
+            The browser suites need a browser: install one first with
+            <code>pnpm exec playwright install chromium</code> (add
+            <code>--with-deps</code> on Linux). Set <code>E2E_BASE_URL</code> to
+            reuse an already-running server instead of booting a fresh one.
+          </div>
+        </section>
+
+        <section id="dev-layout">
+          <h2>Project layout</h2>
+          <p>Where the pieces you'll touch live:</p>
+          <figure class="diagram">
+            <pre>
+src/
+  app/                       Next.js App Router (dashboard UI, auth, webhooks, REST /api/v1)
+  server/api/routers/        tRPC routers (agents, repos, account, models, webhooks, api-keys)
+  server/agents/             Job creation, kubeconfig, model listing, credentials, artifacts
+  server/db/schema.ts        Drizzle schema (users, credentials, task runs, API keys, webhooks)
+  proxy.ts                   Middleware for the optional password gate
+
+agent-harness/
+  cmd/harness/main.go        The Go binary that runs inside each agent pod
+  cmd/harness/modelproxy.go  Starts the embedded gollm proxy for non-native providers
+  cmd/harness/acp_proxy.go   Interactive-session relay (frontend ↔ in-pod agent)
+
+gollm/                       Embedded litellm-style LLM proxy + SDK (Go), run in-process
+                             by the harness to serve every non-Anthropic/Bedrock provider
+
+deploy/
+  helm/bandolier/            Helm chart to self-host the web app on Kubernetes
+  terraform/digitalocean/    OpenTofu: DOKS + managed Postgres + Spaces + the chart</pre>
+          </figure>
+          <div class="callout info">
+            The full annotated tree lives in the README's
+            <a href="https://github.com/based64god/bandolier/blob/main/README.md" target="_blank" rel="noopener">Project layout</a>
+            section.
+          </div>
+        </section>
+
+        <!-- ===================== FAQ ===================== -->
+        <div class="track-divider">
+          <span class="track-badge">FAQ</span>
+          <h2 class="track-title">Frequently asked questions</h2>
+          <p>Split the same way as the docs — users first, developers second.</p>
+        </div>
+
+        <section id="faq-users">
+          <h2>For users</h2>
+          <p class="faq-group-label">Running and operating a Bandolier instance.</p>
+
+          <details class="faq-item">
+            <summary>Do I need to self-host to use Bandolier?</summary>
+            <div class="faq-body">
+              <p>
+                To <em>use</em> Bandolier you need access to a running instance —
+                whoever operates it self-hosts it. If you're evaluating or
+                standing one up yourself, follow
+                <a href="#install">Project setup</a> for a local instance or
+                <a href="#selfhost-overview">Self-hosting</a> for a shared one.
+              </p>
+            </div>
+          </details>
+
+          <details class="faq-item">
+            <summary>Whose credentials do my agents run with?</summary>
+            <div class="faq-body">
+              <p>
+                Always your own. Every agent runs with the deploying user's GitHub
+                OAuth token, their model-provider credentials, and the cluster
+                from their kubeconfig. There are no shared, server-side provider
+                credentials — see <a href="#security">Security notes</a>.
+              </p>
+            </div>
+          </details>
+
+          <details class="faq-item">
+            <summary>Which model providers are supported?</summary>
+            <div class="faq-body">
+              <p>
+                AWS Bedrock, an Anthropic/OpenAI/Gemini API key, or a Claude
+                Pro/Max &middot; ChatGPT subscription login — each user supplies
+                their own in <a href="#configure-account">Settings</a>. The
+                <code>claude</code> CLI speaks Anthropic and Bedrock natively;
+                every other provider is served through the in-process gollm proxy.
+              </p>
+            </div>
+          </details>
+
+          <details class="faq-item">
+            <summary>How do I launch an agent without opening the dashboard?</summary>
+            <div class="faq-body">
+              <p>
+                Two ways: open a GitHub issue on a
+                <a href="#github-app">configured repo</a> and Bandolier launches
+                an agent automatically, or POST to the
+                <a href="#rest-api">REST API</a> with an API key.
+              </p>
+            </div>
+          </details>
+
+          <details class="faq-item">
+            <summary>My kubeconfig won't save, or agents won't deploy.</summary>
+            <div class="faq-body">
+              <p>
+                Bandolier runs the Kubernetes client on its server, so
+                exec-plugin kubeconfigs (the <code>aws</code>/<code>gcloud</code>
+                credential plugins EKS/GKE emit) and ones that reference cert/key
+                files on your laptop won't work. Generate a self-contained,
+                token-based kubeconfig with <code>setup.sh</code> or
+                <code>./scripts/create-bandolier-kubeconfig.sh</code> — see
+                <a href="#configure-account">Configure your account</a>.
+              </p>
+            </div>
+          </details>
+
+          <details class="faq-item">
+            <summary>Can I keep iterating on an agent's PR?</summary>
+            <div class="faq-body">
+              <p>
+                Yes. Commenting on the issue or pull request a run worked on
+                <a href="#resuming">resumes it</a> under your credentials, seeded
+                with the parent run's transcript. Inline review comments hand the
+                agent the exact file, line range, and diff hunk.
+              </p>
+            </div>
+          </details>
+
+          <details class="faq-item">
+            <summary>Why is my webhook run "held for approval"?</summary>
+            <div class="faq-body">
+              <p>
+                Because it would use the repo's shared credentials and you're not
+                a maintainer. Shared credentials are gated — a maintainer approves
+                by reacting 👍 to the bot comment or replying
+                <code>/bando approve</code>. See the
+                <a href="#maintainer-gate">maintainer gate</a>.
+              </p>
+            </div>
+          </details>
+        </section>
+
+        <section id="faq-devs">
+          <h2>For developers</h2>
+          <p class="faq-group-label">Contributing to Bandolier's codebase.</p>
+
+          <details class="faq-item">
+            <summary>What should I run before pushing?</summary>
+            <div class="faq-body">
+              <p>
+                The <a href="#dev-verify">verification loop</a>:
+                <code>pnpm check</code>, <code>pnpm test</code>,
+                <code>pnpm test:e2e</code>, and <code>go test ./...</code> from
+                <code>agent-harness/</code>. CI runs the same checks plus the
+                DB-backed and product-flow suites.
+              </p>
+            </div>
+          </details>
+
+          <details class="faq-item">
+            <summary>Do I need a cluster or a model provider to work on the UI?</summary>
+            <div class="faq-body">
+              <p>
+                No. The <code>/dev/*</code> harness routes render the UI
+                components against fake data and contact no real services — no
+                cluster, no provider, no GitHub. That's what the browser smoke
+                tests drive. See <a href="#dev-setup">Get the code running</a>.
+              </p>
+            </div>
+          </details>
+
+          <details class="faq-item">
+            <summary>I changed <code>wire-contract.json</code> — what else must I update?</summary>
+            <div class="faq-body">
+              <p>
+                Both re-declarations of the constants:
+                <code>src/lib/wire-contract.test.ts</code> (TypeScript) and
+                <code>agent-harness/cmd/harness/wire_contract_test.go</code> (Go).
+                CI catches drift. See the
+                <a href="#dev-wire-contract">wire-contract rule</a>.
+              </p>
+            </div>
+          </details>
+
+          <details class="faq-item">
+            <summary>I changed the schema — <code>db:push</code> or a migration?</summary>
+            <div class="faq-body">
+              <p>
+                <code>pnpm db:push</code> is for your local database only. To ship
+                a schema change, run <code>pnpm db:generate</code> to emit a SQL
+                migration under <code>drizzle/</code> and commit it — that's what
+                self-host deploys apply via the migrator image.
+              </p>
+            </div>
+          </details>
+
+          <details class="faq-item">
+            <summary>Which test suite covers what?</summary>
+            <div class="faq-body">
+              <p>
+                Unit (<code>pnpm test</code>) for pure helpers, integration
+                (<code>pnpm test:integration</code>) for handlers against
+                Postgres, Go (<code>go test ./...</code>) for the harness, and the
+                browser suites for the UI. Full breakdown in
+                <a href="#dev-tests">Test suites</a>.
+              </p>
+            </div>
+          </details>
+
+          <details class="faq-item">
+            <summary>What is gollm?</summary>
+            <div class="faq-body">
+              <p>
+                An embedded litellm-style LLM proxy and SDK written in Go, vendored
+                under <code>gollm/</code>. The harness runs it in-process to serve
+                every non-Anthropic/Bedrock provider, translating Claude Code's
+                Anthropic-format traffic to the run's real backend.
+              </p>
+            </div>
+          </details>
+        </section>
+
         <footer class="site-footer">
           <p>
             This site is a companion to the
             <a href="https://github.com/based64god/bandolier" target="_blank" rel="noopener">Bandolier repository</a>.
             For the authoritative reference, see the repo's
-            <a href="https://github.com/based64god/bandolier/blob/main/README.md" target="_blank" rel="noopener">README</a>
-            and
-            <a href="https://github.com/based64god/bandolier/blob/main/deploy/README.md" target="_blank" rel="noopener">deploy guide</a>.
+            <a href="https://github.com/based64god/bandolier/blob/main/README.md" target="_blank" rel="noopener">README</a>,
+            <a href="https://github.com/based64god/bandolier/blob/main/deploy/README.md" target="_blank" rel="noopener">deploy guide</a>,
+            and — if you're working on Bandolier itself —
+            <a href="https://github.com/based64god/bandolier/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">CONTRIBUTING.md</a>.
           </p>
         </footer>
       </main>

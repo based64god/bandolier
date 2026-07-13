@@ -327,7 +327,7 @@ a:hover {
 
 .hero-tracks {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 16px;
 }
 .track-card {
@@ -633,6 +633,109 @@ tr:last-child td {
   color: var(--text-dim);
 }
 
+/* ============ Audience split ============ */
+.audience-split {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+}
+.audience-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  padding: 22px 24px 24px;
+}
+.audience-tag {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--accent);
+  background: var(--accent-soft);
+  padding: 4px 12px;
+  border-radius: 100px;
+  letter-spacing: 0.04em;
+  margin-bottom: 12px;
+}
+.audience-card h3 {
+  margin: 0 0 8px;
+  font-size: 19px;
+}
+.audience-card > p {
+  margin: 0 0 14px;
+  font-size: 14.5px;
+  color: var(--text-dim);
+}
+.audience-links {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.audience-links li {
+  padding: 4px 0;
+}
+.audience-links a {
+  font-size: 14px;
+  color: var(--text-dim);
+}
+.audience-links a::before {
+  content: "→";
+  color: var(--accent);
+  margin-right: 8px;
+}
+.audience-links a:hover {
+  color: var(--text);
+  text-decoration: none;
+}
+
+/* ============ FAQ ============ */
+.faq-group-label {
+  color: var(--text-faint);
+  font-size: 14px;
+  margin: -6px 0 18px;
+}
+.faq-item {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev);
+  margin: 0 0 10px;
+}
+.faq-item summary {
+  cursor: pointer;
+  padding: 14px 18px;
+  font-weight: 600;
+  color: var(--text);
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.faq-item summary::-webkit-details-marker {
+  display: none;
+}
+.faq-item summary::after {
+  content: "+";
+  color: var(--accent);
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+}
+.faq-item[open] summary::after {
+  content: "–";
+}
+.faq-item summary:hover {
+  color: var(--accent);
+}
+.faq-body {
+  padding: 0 18px 4px;
+  color: var(--text-dim);
+  font-size: 14.5px;
+}
+.faq-body code {
+  font-size: 0.82em;
+}
+
 /* ============ Footer ============ */
 .site-footer {
   padding: 40px 0 0;
@@ -647,6 +750,9 @@ tr:last-child td {
     padding: 32px 32px 100px;
   }
   .hero-tracks {
+    grid-template-columns: 1fr 1fr;
+  }
+  .audience-split {
     grid-template-columns: 1fr;
   }
 }

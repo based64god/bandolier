@@ -186,9 +186,13 @@
           </ol>
           <p>
             The harness then clones the repo, runs <code>claude --print</code>,
-            commits the work, pushes a branch, and opens a PR. Logs stream back to
-            the dashboard; if artifact storage is configured, the full transcript
-            is uploaded to S3 so it outlives the Job's TTL.
+            commits the work, pushes a branch, and opens a PR. The <code>claude</code>
+            CLI speaks Anthropic and Bedrock natively; every other provider
+            (OpenAI, Gemini, a subscription login, and more) is served through a
+            <strong>gollm proxy the harness runs in-process</strong>, translating
+            Claude Code's Anthropic-format traffic to the real backend. Logs stream
+            back to the dashboard; if artifact storage is configured, the full
+            transcript is uploaded to S3 so it outlives the Job's TTL.
           </p>
           <figure class="diagram">
             <pre>
@@ -376,10 +380,13 @@ curl -fsSL https://&lt;your-host&gt;/setup.sh | bash -s -- --scoped</code></pre>
               write), <strong>Contents</strong> (read),
               <strong>Actions</strong> (read), and
               <strong>Metadata</strong> (read). Subscribe to the
-              <strong>Issues</strong>, <strong>Issue comment</strong>, and
-              <strong>Workflow run</strong> events (the last powers auto-resuming
-              a run when a CI pipeline fails on the pull request it produced, for
-              repos that opt in). Generate a private key.
+              <strong>Issues</strong>, <strong>Issue comment</strong>,
+              <strong>Pull request review comment</strong>, and
+              <strong>Workflow run</strong> events. Issue comment and pull request
+              review comment power <a href="#resuming">resuming a run</a> by
+              commenting; Workflow run powers auto-resuming a run when a CI
+              pipeline fails on the pull request it produced, for repos that opt
+              in. Generate a private key.
             </li>
             <li>
               Set <code>GITHUB_APP_ID</code>,
@@ -416,6 +423,13 @@ curl -fsSL https://&lt;your-host&gt;/setup.sh | bash -s -- --scoped</code></pre>
             follow-up works directly on its branch; otherwise it starts fresh.
             Resumed tasks carry a "↻ resumed" chip in the dashboard.
           </p>
+          <p>
+            This works for both a pull request's vanilla conversation comments and
+            its inline <strong>review comments</strong> (left on a specific line of
+            the diff). A review-comment resume additionally hands the agent the
+            file, line range, and diff hunk the comment is anchored to, so it knows
+            exactly which code the reviewer is pointing at.
+          </p>
           <div class="callout">
             Comments from bots are ignored (including Bando's own), a comment only
             ever <em>resumes</em> — one with no prior run does nothing — and a
@@ -443,23 +457,26 @@ curl -fsSL https://&lt;your-host&gt;/setup.sh | bash -s -- --scoped</code></pre>
         <section id="auto-merge">
           <h2>Auto-merging Bandolier PRs</h2>
           <p>
-            A repo admin can toggle <strong>Auto-merge Bandolier PRs</strong> in
-            the repo-config UI. When on, every pull request a Bandolier run
-            reports as its output has GitHub's native auto-merge enabled the
-            moment the run finishes, so the PR merges itself once its required
-            checks pass and it's mergeable — no human click. The merge method is
-            the first of merge / squash / rebase the repo permits.
+            Auto-merge lives in the repo as a <strong>GitHub Action</strong>, not
+            in the app. <code>.github/workflows/auto-merge.yml</code> triggers when
+            the <code>CI</code> workflow finishes <strong>successfully</strong> on a
+            <code>bandolier/*</code> head branch, resolves the open PR for that
+            branch, and enables GitHub's native auto-merge
+            (<code>gh pr merge --auto --merge</code>). The PR then lands on its own
+            once every required check has passed and it's mergeable — no human
+            click.
           </p>
           <p>
             Auto-merge still honors the branch's protection rules (required
             reviews / status checks), so this only lands what the repo's own
             gates already allow; a branch with no protection would merge right
-            away.
+            away. It's scoped to <code>bandolier/*</code> branches, so agent PRs
+            auto-merge while human PRs still need a manual merge.
           </p>
           <div class="callout">
-            <strong>Off by default.</strong> It lets an agent's work merge
-            without a human pressing the button, so enable it only when your
-            branch protection is the gate you trust.
+            <strong>Change the policy in the workflow.</strong> Drop
+            <code>auto-merge.yml</code> (or narrow its <code>if:</code> condition)
+            to turn auto-merge off or scope it differently.
           </div>
         </section>
 

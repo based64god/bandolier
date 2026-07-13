@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 
 import {
-  collectSubagentNarration,
+  collectSubagentCards,
   isSubagentDone,
   type SubagentNarration,
   type TimelineItem,
@@ -20,8 +20,10 @@ import { Modal } from "./modal";
 export function SubagentPanel({ items }: { items: TimelineItem[] }) {
   // Recompute only when the timeline changes, not on every parent poll re-render
   // (the interactive row re-renders on each 1.5s frame pull and on scroll/focus
-  // bumps); collecting narration is O(n) over the whole timeline.
-  const narration = useMemo(() => collectSubagentNarration(items), [items]);
+  // bumps); collecting the cards is O(n) over the whole timeline. Cards (not raw
+  // narration) so a spawned-but-silent subagent is counted and the card doesn't
+  // flicker as narration trickles in.
+  const narration = useMemo(() => collectSubagentCards(items), [items]);
   const [open, setOpen] = useState(false);
 
   const running = narration.filter((n) => !isSubagentDone(n.status));

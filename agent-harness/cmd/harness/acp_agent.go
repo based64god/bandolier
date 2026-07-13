@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/bandolier/agent-harness/internal/acp"
 )
@@ -177,6 +178,25 @@ type claudeDriver struct {
 	// abnormally (a session/cancel while a task is still in flight) must not leave a
 	// stale count that suppresses the next turn's completion.
 	bgActive atomic.Int32
+	// bgSeen records that background subagents ran at some point in the current
+	// turn. Once true, a bgActive==0 result can't be trusted as the turn's end:
+	// when several parallel subagents drain to empty the CLI auto-resumes the main
+	// agent once per finished task and ends each resume with its OWN result event
+	// (bgActive already 0), the first carrying an acknowledgement rather than the
+	// user's answer. Reset with bgActive at each turn start.
+	bgSeen atomic.Bool
+
+	// Debounce for the turn-end decision. No result field distinguishes a
+	// premature auto-resume result from the true final one, so once bgSeen a
+	// candidate result doesn't complete the turn immediately: it arms a timer, and
+	// any further stream event (a fresh system/init before the next auto-resume,
+	// more text, another result) supersedes it. The turn completes only when the
+	// stream goes quiet — the genuine final result is the last thing before the
+	// CLI blocks on stdin. quietWindow is a field so tests can shrink it.
+	quietWindow time.Duration
+	dmu         sync.Mutex
+	debounceGen int
+	debouncing  bool
 }
 
 // claudeDriverArgs builds the claude CLI arguments for an interactive ACP
@@ -219,7 +239,7 @@ func startClaudeDriver(a *acpAgent) (*claudeDriver, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	d := &claudeDriver{stdin: stdin, turnDone: make(chan acp.PromptResult, 1), agent: a}
+	d := &claudeDriver{stdin: stdin, turnDone: make(chan acp.PromptResult, 1), agent: a, quietWindow: backgroundQuietWindow}
 	go d.read(stdout)
 	return d, nil
 }
@@ -229,16 +249,23 @@ func (d *claudeDriver) read(stdout io.Reader) {
 	// sink; the one-shot log path uses the same parser with a log sink, so the two
 	// can't drift on which events they understand.
 	forEachLine(stdout, d.handle)
-	// Process exited: unblock any turn still waiting on a result event.
-	select {
-	case d.turnDone <- acp.PromptResult{StopReason: acp.StopEndTurn}:
-	default:
-	}
+	// Process exited: the turn is over regardless of any pending debounce — cancel
+	// it and unblock a turn still waiting on a result event.
+	d.supersedePending()
+	d.completeTurn(acp.PromptResult{StopReason: acp.StopEndTurn})
 }
 
 // handle parses one Claude stream-json line and drives the driver as the ACP
 // sink — the same dispatchClaudeEvent the one-shot log path uses.
-func (d *claudeDriver) handle(raw []byte) { dispatchClaudeEvent(raw, d) }
+func (d *claudeDriver) handle(raw []byte) {
+	// A new stream event means the turn isn't quiescent: cancel any debounced
+	// completion armed by an earlier candidate result before dispatching this
+	// event (which may re-arm it). This is what lets a fresh system/init — the
+	// CLI's "auto-resuming to acknowledge a finished task" tell — reliably veto a
+	// premature turn-end without the driver having to model init explicitly.
+	d.supersedePending()
+	dispatchClaudeEvent(raw, d)
+}
 
 // claudeDriver implements claudeEventSink, forwarding each normalized event to
 // the ACP client as a session/update frame.
@@ -249,8 +276,15 @@ func (d *claudeDriver) onSlashCommands(names []string) { d.agent.emitAvailableCo
 
 // onBackgroundTasks records how many background subagent tasks are in flight so
 // onResult can tell a mid-turn yield (the agent auto-resumes when a task finishes)
-// from the real end of the user's turn.
-func (d *claudeDriver) onBackgroundTasks(active int) { d.bgActive.Store(int32(active)) }
+// from the real end of the user's turn. Any non-empty set also latches bgSeen for
+// the turn, so a later bgActive==0 result is debounced rather than trusted (a
+// drained set is followed by per-task auto-resume results, not just the answer).
+func (d *claudeDriver) onBackgroundTasks(active int) {
+	d.bgActive.Store(int32(active))
+	if active > 0 {
+		d.bgSeen.Store(true)
+	}
+}
 
 // onText and onThinking carry parentID (the spawning Agent/Task id when the
 // message came from a subagent). Subagent narration is tagged with
@@ -290,16 +324,19 @@ func (d *claudeDriver) onToolUse(id, name, parentID string, input json.RawMessag
 
 // onToolResult forwards a tool's output as a tool_call_update so the transcript
 // (and the UI) can attach it — expandable — to the originating tool call. The
-// result is matched by tool-call id, so parentID isn't needed here.
-func (d *claudeDriver) onToolResult(id, _ string, isError bool, content json.RawMessage) {
+// live client matches the result to its call by tool-call id; parentID is
+// forwarded too so a receiver that only sees updates (the pod-log mirror) can
+// attribute a subagent's output without tracking the earlier tool_call frame.
+func (d *claudeDriver) onToolResult(id, parentID string, isError bool, content json.RawMessage) {
 	status := acp.ToolStatusCompleted
 	if isError {
 		status = acp.ToolStatusFailed
 	}
 	up := acp.ToolCallUpdate{
-		SessionUpdate: acp.UpdateToolCallUpdate,
-		ToolCallID:    id,
-		Status:        status,
+		SessionUpdate:    acp.UpdateToolCallUpdate,
+		ToolCallID:       id,
+		ParentToolCallID: parentID,
+		Status:           status,
 	}
 	if t := toolResultText(content); t != "" {
 		up.Content = []acp.ToolCallContent{{Type: "content", Content: acp.TextBlock(t)}}
@@ -324,8 +361,8 @@ func (d *claudeDriver) onResult(ev claudeEvent) {
 	// agent (with no user message) when the task finishes and emits a later result
 	// once the background set drains. Completing the turn here would end the ACP
 	// prompt early and fire a spurious "waiting for input" notification while the
-	// agent is really just waiting on its subagents — so hold the turn open for the
-	// result that arrives once no background tasks remain.
+	// agent is really just waiting on its subagents — so hold the turn open while
+	// any background tasks remain.
 	if d.bgActive.Load() > 0 {
 		return
 	}
@@ -333,10 +370,77 @@ func (d *claudeDriver) onResult(ev claudeEvent) {
 	if ev.IsError {
 		reason = acp.StopRefusal
 	}
+	result := acp.PromptResult{StopReason: reason}
+	// A turn that never ran background subagents ends on its first result — complete
+	// immediately so ordinary turns get no added latency. But once background tasks
+	// have run this turn, a bgActive==0 result is ambiguous: when several parallel
+	// subagents drain together the CLI auto-resumes once per finished task and ends
+	// each resume with its own result, the first of which is an acknowledgement, not
+	// the user's answer. No result field distinguishes it from the genuine final
+	// one, so debounce: defer completion and let the next stream event (a fresh
+	// system/init, more text, another result) veto it — the true final result is the
+	// last thing before the CLI blocks on stdin.
+	if !d.bgSeen.Load() {
+		d.completeTurn(result)
+		return
+	}
+	d.deferCompletion(result)
+}
+
+// backgroundQuietWindow is how long, after background subagents have run this
+// turn, onResult waits for further stream activity before treating a result as
+// the turn's end. Long enough to catch the CLI's next auto-resume (a fresh
+// system/init lands within milliseconds of a task-notification result), short
+// enough that end-of-turn latency stays negligible for a turn that already ran
+// subagents for seconds.
+const backgroundQuietWindow = 1500 * time.Millisecond
+
+// completeTurn hands the result to the waiting prompt. Non-blocking: turnDone is
+// buffered, and a stale completion from a superseded turn must never block the
+// reader goroutine.
+func (d *claudeDriver) completeTurn(r acp.PromptResult) {
 	select {
-	case d.turnDone <- acp.PromptResult{StopReason: reason}:
+	case d.turnDone <- r:
 	default:
 	}
+}
+
+// deferCompletion schedules completeTurn(result) after the quiet window unless a
+// later stream event supersedes it first (see supersedePending). Called on the
+// reader goroutine; the timer fires on its own goroutine, so a generation guard
+// makes a superseded timer a no-op even if it fires between Stop's window.
+func (d *claudeDriver) deferCompletion(result acp.PromptResult) {
+	window := d.quietWindow
+	if window <= 0 {
+		window = backgroundQuietWindow
+	}
+	d.dmu.Lock()
+	d.debounceGen++
+	gen := d.debounceGen
+	d.debouncing = true
+	d.dmu.Unlock()
+	time.AfterFunc(window, func() {
+		d.dmu.Lock()
+		fire := d.debouncing && d.debounceGen == gen
+		if fire {
+			d.debouncing = false
+		}
+		d.dmu.Unlock()
+		if fire {
+			d.completeTurn(result)
+		}
+	})
+}
+
+// supersedePending cancels a scheduled debounced completion: a further stream
+// event means the turn isn't over (the CLI is auto-resuming to acknowledge a
+// finished background task, not awaiting the user). Bumping the generation
+// invalidates any in-flight AfterFunc.
+func (d *claudeDriver) supersedePending() {
+	d.dmu.Lock()
+	d.debounceGen++
+	d.debouncing = false
+	d.dmu.Unlock()
 }
 
 func (a *acpAgent) promptClaude(ctx context.Context, text string) (any, error) {
@@ -349,12 +453,16 @@ func (a *acpAgent) promptClaude(ctx context.Context, text string) (any, error) {
 	case <-d.turnDone:
 	default:
 	}
-	// Start this turn with a clean background-task count: the previous turn may
+	// Start this turn with a clean background-task state: the previous turn may
 	// have ended abnormally (a session/cancel while a background subagent was still
 	// in flight), which would otherwise leave bgActive non-zero and wrongly cause
-	// this turn's own end-of-turn result to be held open. The turn's own
-	// background_tasks_changed events repopulate it as needed.
+	// this turn's own end-of-turn result to be held open, or leave bgSeen set so an
+	// ordinary turn's result is needlessly debounced. Cancel any pending debounced
+	// completion left by the prior turn too. The turn's own background_tasks_changed
+	// events repopulate this as needed.
 	d.bgActive.Store(0)
+	d.bgSeen.Store(false)
+	d.supersedePending()
 	if err := writeUserMessage(d.stdin, text); err != nil {
 		return nil, &acp.RPCError{Code: acp.CodeInternalError, Message: "write message: " + err.Error()}
 	}

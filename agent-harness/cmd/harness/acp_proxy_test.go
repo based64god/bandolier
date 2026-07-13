@@ -450,13 +450,39 @@ func TestRenderFrameToTranscript(t *testing.T) {
 	cases := []struct {
 		name       string
 		frame      string
-		wantStdout string // trimmed stdoutTee content
-		wantLog    string // substring expected in the log output ("" = expect empty)
+		labels     map[string]string // spawn id → label, as recorded from earlier frames
+		wantStdout string            // trimmed stdoutTee content
+		wantLog    string            // substring expected in the log output ("" = expect empty)
 	}{
 		{
 			name:       "agent_message_chunk to stdout",
 			frame:      `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"assistant reply"}}}}`,
 			wantStdout: "assistant reply",
+		},
+		{
+			name:       "subagent message chunk is attributed and kept out of stdout",
+			frame:      `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","parentToolCallId":"agent1","content":{"type":"text","text":"found it"}}}}`,
+			labels:     map[string]string{"agent1": "Agent(Explore): find auth"},
+			wantStdout: "",
+			wantLog:    "⇉ Agent(Explore): find auth ⟫ found it",
+		},
+		{
+			name:    "subagent thought is logged, never to stdout",
+			frame:   `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_thought_chunk","parentToolCallId":"agent1","content":{"type":"text","text":"considering"}}}}`,
+			labels:  map[string]string{"agent1": "Agent(Explore): find auth"},
+			wantLog: "⇉ Agent(Explore): find auth ⟫ (thinking) considering",
+		},
+		{
+			name:    "subagent tool_call is prefixed with its subagent",
+			frame:   `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call","toolCallId":"sub1","parentToolCallId":"agent1","kind":"read","title":"Read a.go"}}}`,
+			labels:  map[string]string{"agent1": "Agent(Explore): find auth"},
+			wantLog: "⇉ Agent(Explore): find auth ⟫ → Read a.go",
+		},
+		{
+			name:    "subagent tool_call_update output is prefixed with its subagent",
+			frame:   `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call_update","parentToolCallId":"agent1","content":[{"content":{"type":"text","text":"the output"}}]}}}`,
+			labels:  map[string]string{"agent1": "Agent(Explore): find auth"},
+			wantLog: "⇉ Agent(Explore): find auth ⟫ ← the output",
 		},
 		{
 			name:    "user_message_chunk logged as user input",
@@ -504,7 +530,11 @@ func TestRenderFrameToTranscript(t *testing.T) {
 				log.SetFlags(origFlags)
 			}()
 
-			renderFrameToTranscript([]byte(tc.frame))
+			labels := tc.labels
+			if labels == nil {
+				labels = map[string]string{}
+			}
+			renderFrameToTranscript([]byte(tc.frame), labels)
 
 			if got := strings.TrimSpace(out.String()); got != tc.wantStdout {
 				t.Errorf("stdoutTee = %q, want %q", got, tc.wantStdout)
@@ -517,6 +547,37 @@ func TestRenderFrameToTranscript(t *testing.T) {
 				t.Errorf("log output = %q, want to contain %q", logBuf.String(), tc.wantLog)
 			}
 		})
+	}
+}
+
+// A subagent spawn frame (kind "subagent", no parent) must record its label so a
+// later subagent frame carrying that spawn's id resolves to it, and the spawn's
+// own line stays unprefixed (it's a main-agent call). This is the stateful glue
+// the mirror needs to attribute a subagent's activity across frames.
+func TestRenderFrameRecordsSpawnLabel(t *testing.T) {
+	origWriter := log.Writer()
+	origFlags := log.Flags()
+	log.SetOutput(&bytes.Buffer{})
+	log.SetFlags(0)
+	defer func() {
+		log.SetOutput(origWriter)
+		log.SetFlags(origFlags)
+	}()
+
+	labels := map[string]string{}
+	spawn := `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call","toolCallId":"agent1","parentToolCallId":"","kind":"subagent","title":"Agent(Explore): find auth"}}}`
+	renderFrameToTranscript([]byte(spawn), labels)
+	if labels["agent1"] != "Agent(Explore): find auth" {
+		t.Fatalf("spawn label = %q, want it recorded", labels["agent1"])
+	}
+
+	// A child frame now resolves to that spawn's label without the caller re-supplying it.
+	var logBuf bytes.Buffer
+	log.SetOutput(&logBuf)
+	child := `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call","toolCallId":"sub1","parentToolCallId":"agent1","kind":"read","title":"Read a.go"}}}`
+	renderFrameToTranscript([]byte(child), labels)
+	if !strings.Contains(logBuf.String(), "⇉ Agent(Explore): find auth ⟫ → Read a.go") {
+		t.Errorf("child log = %q, want it attributed to the recorded spawn", logBuf.String())
 	}
 }
 

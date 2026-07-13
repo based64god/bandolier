@@ -152,6 +152,55 @@ describe("groupHarnessBlocks", () => {
       { kind: "subagent", label: "Agent(Plan): b", lines: ["→ Read b.ts"] },
     ]);
   });
+
+  it("gathers interleaved parallel subagents into one block each (not per line)", () => {
+    // Two background subagents whose lines alternate on the stream — the shape a
+    // wide ultracode fan-out produces. Adjacency-only grouping (the old behaviour)
+    // would fragment this into five separate blocks; first-seen bucketing keeps
+    // each subagent's lines together in the block at its first-seen position.
+    const lines = [
+      subLine("Agent(Explore): a", "→ Read a.ts"),
+      subLine("Agent(Plan): b", "→ Read b.ts"),
+      subLine("Agent(Explore): a", "  ← alpha"),
+      subLine("Agent(Plan): b", "  ← beta"),
+      subLine("Agent(Explore): a", "done exploring"),
+    ];
+    expect(
+      groupHarnessBlocks(lines).filter((b) => b.kind === "subagent"),
+    ).toEqual([
+      {
+        kind: "subagent",
+        label: "Agent(Explore): a",
+        lines: ["→ Read a.ts", "  ← alpha", "done exploring"],
+      },
+      {
+        kind: "subagent",
+        label: "Agent(Plan): b",
+        lines: ["→ Read b.ts", "  ← beta"],
+      },
+    ]);
+  });
+
+  it("keeps a main-agent line/output run between two runs of the same subagent in order", () => {
+    // A subagent line, then a main-agent tool call + output, then more of the same
+    // subagent: the subagent's lines still gather into its first-seen block while
+    // the main-agent line and output block keep their stream position.
+    const lines = [
+      subLine("Agent(Explore): a", "→ Grep: login"),
+      "[harness] → Bash: git status",
+      "[harness]   ← On branch main",
+      subLine("Agent(Explore): a", "  ← src/auth.ts"),
+    ];
+    expect(groupHarnessBlocks(lines)).toEqual([
+      {
+        kind: "subagent",
+        label: "Agent(Explore): a",
+        lines: ["→ Grep: login", "  ← src/auth.ts"],
+      },
+      { kind: "line", text: "[harness] → Bash: git status" },
+      { kind: "output", lines: ["On branch main"] },
+    ]);
+  });
 });
 
 describe("harnessSubagentText", () => {

@@ -105,16 +105,32 @@ export type HarnessBlock =
 
 export function groupHarnessBlocks(lines: string[]): HarnessBlock[] {
   const blocks: HarnessBlock[] = [];
+  // A subagent's lines hoist into the block created at its first-seen position,
+  // keyed by label — not merged only with the immediately-preceding block. That
+  // matters for background subagents (the default since Claude Code v2.1.198),
+  // whose lines physically interleave on the one pod-log stream as several run at
+  // once: adjacency-only grouping fragments each into a block per line. Main-agent
+  // line/output blocks keep stream order. (Two subagents sharing a byte-identical
+  // label merge — a rare edge; distinct spawns almost always differ by their
+  // description, so the label separates them.)
+  const subagentByLabel = new Map<
+    string,
+    Extract<HarnessBlock, { kind: "subagent" }>
+  >();
   for (const line of lines) {
-    // A subagent line folds into a block keyed by its label, so one subagent's
-    // run of activity groups together and distinct subagents stay separate.
     const sub = harnessSubagentText(line);
     if (sub) {
-      const last = blocks[blocks.length - 1];
-      if (last?.kind === "subagent" && last.label === sub.label) {
-        last.lines.push(sub.text);
+      const existing = subagentByLabel.get(sub.label);
+      if (existing) {
+        existing.lines.push(sub.text);
       } else {
-        blocks.push({ kind: "subagent", label: sub.label, lines: [sub.text] });
+        const block: Extract<HarnessBlock, { kind: "subagent" }> = {
+          kind: "subagent",
+          label: sub.label,
+          lines: [sub.text],
+        };
+        subagentByLabel.set(sub.label, block);
+        blocks.push(block);
       }
       continue;
     }

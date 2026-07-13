@@ -4,7 +4,9 @@ import {
   applyFrames,
   batchAwaitsInput,
   buildToolTree,
+  collectSubagentCards,
   collectSubagentNarration,
+  collectSubagentStatuses,
   END_SESSION_FRAME,
   isSubagentDone,
   groupTimeline,
@@ -654,6 +656,133 @@ describe("groupTimeline", () => {
     if (g?.type !== "tools") throw new Error("expected tools group");
     expect(g.nodes).toHaveLength(1);
     expect(g.nodes[0]!.item.toolCallId).toBe("sub1");
+  });
+
+  it("nests a subagent's child under its spawn across an interleaved main-agent message", () => {
+    // The background/ultracode shape: the main agent narrates (a message) between
+    // the Agent spawn and the subagent's later tool call, splitting the adjacency
+    // run. The child must still nest under its spawn, not re-root as a top-level
+    // call — the failure the whole-timeline forest fixes. (The parallel-subagent
+    // test above has no interleaved message, so it never exercised this.)
+    const groups = groupTimeline([
+      toolWith("t1", "agent1"),
+      msg("a1", "dispatched an explorer"),
+      toolWith("t2", "sub1", "agent1"),
+    ]);
+    // The message still splits the flow into its own group, in stream order…
+    expect(groups.map((g) => g.type)).toEqual(["tools", "message"]);
+    const g = groups[0];
+    if (g?.type !== "tools") throw new Error("expected tools group");
+    // …but the child nests under its spawn (which streamed before the message)
+    // rather than orphaning into a second top-level tool run after it.
+    expect(g.nodes).toHaveLength(1);
+    expect(g.nodes[0]!.item.toolCallId).toBe("agent1");
+    expect(g.nodes[0]!.children.map((c) => c.item.toolCallId)).toEqual([
+      "sub1",
+    ]);
+  });
+
+  it("gathers a subagent's calls under one spawn across several interleaved messages", () => {
+    // Two background subagents, each interrupted by main-agent narration and the
+    // other's calls — the calls scatter across runs but must gather under the
+    // right spawn, and the messages keep their own groups in order.
+    const groups = groupTimeline([
+      toolWith("t1", "agentA"),
+      toolWith("t2", "agentB"),
+      msg("m1", "both dispatched"),
+      toolWith("t3", "a1", "agentA"),
+      toolWith("t4", "b1", "agentB"),
+      msg("m2", "still going"),
+      toolWith("t5", "a2", "agentA"),
+    ]);
+    expect(groups.map((g) => g.type)).toEqual(["tools", "message", "message"]);
+    const g = groups[0];
+    if (g?.type !== "tools") throw new Error("expected tools group");
+    const byId = new Map(g.nodes.map((n) => [n.item.toolCallId, n]));
+    expect(byId.get("agentA")!.children.map((c) => c.item.toolCallId)).toEqual([
+      "a1",
+      "a2",
+    ]);
+    expect(byId.get("agentB")!.children.map((c) => c.item.toolCallId)).toEqual([
+      "b1",
+    ]);
+  });
+});
+
+describe("collectSubagentStatuses / collectSubagentCards", () => {
+  const spawn = (
+    toolCallId: string,
+    title: string,
+    status: string,
+  ): TimelineItem => ({
+    type: "tool",
+    id: `t-${toolCallId}`,
+    toolCallId,
+    kind: "subagent",
+    title,
+    status,
+  });
+  const narrate = (parentToolCallId: string, text: string): TimelineItem => ({
+    type: "subagent-log",
+    id: `s-${parentToolCallId}-${text}`,
+    parentToolCallId,
+    variant: "message",
+    text,
+  });
+
+  it("counts a spawned-but-silent subagent that narration alone would miss", () => {
+    const items: TimelineItem[] = [
+      spawn("agentA", "Agent(Explore): find auth", "pending"),
+      spawn("agentB", "Agent(Plan): sketch fix", "pending"),
+    ];
+    expect(collectSubagentStatuses(items)).toEqual([
+      {
+        toolCallId: "agentA",
+        label: "Agent(Explore): find auth",
+        status: "pending",
+      },
+      {
+        toolCallId: "agentB",
+        label: "Agent(Plan): sketch fix",
+        status: "pending",
+      },
+    ]);
+    // The under-count the card fix addresses: no narration ⇒ no cards, the old way.
+    expect(collectSubagentNarration(items)).toEqual([]);
+  });
+
+  it("reflects the spawn's latest status", () => {
+    const items: TimelineItem[] = [
+      spawn("agentA", "Agent(Explore)", "completed"),
+    ];
+    expect(collectSubagentStatuses(items)[0]!.status).toBe("completed");
+  });
+
+  it("merges spawn status with narration entries, silent spawns included", () => {
+    const items: TimelineItem[] = [
+      spawn("agentA", "Agent(Explore): find auth", "pending"),
+      spawn("agentB", "Agent(Plan): sketch fix", "pending"),
+      narrate("agentA", "found it"),
+    ];
+    const cards = collectSubagentCards(items);
+    expect(cards).toHaveLength(2);
+    expect(cards[0]).toMatchObject({
+      toolCallId: "agentA",
+      status: "pending",
+      entries: [{ variant: "message", text: "found it" }],
+    });
+    expect(cards[1]).toMatchObject({ toolCallId: "agentB", entries: [] });
+  });
+
+  it("keeps an orphan subagent that narrated with no spawn in view", () => {
+    const cards = collectSubagentCards([narrate("ghost", "orphan narration")]);
+    expect(cards).toHaveLength(1);
+    expect(cards[0]).toMatchObject({ toolCallId: "ghost", label: "subagent" });
+  });
+
+  it("returns nothing for a session with no subagents", () => {
+    expect(collectSubagentStatuses([])).toEqual([]);
+    expect(collectSubagentCards([])).toEqual([]);
   });
 });
 

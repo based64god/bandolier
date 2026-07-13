@@ -310,26 +310,41 @@ export type TimelineGroup =
  */
 const MAX_TOOL_TREE_DEPTH = 25;
 
+/** A tool forest plus which input items ended up as its roots (see buildToolForest). */
+interface ToolForest {
+  roots: ToolNode[];
+  /**
+   * The `id` of every tool item that is a forest root — main-agent calls, orphans
+   * whose parent isn't present, and calls re-rooted at the depth cap. groupTimeline
+   * uses this to place runs: a root anchors a visible run at its timeline
+   * position, while a child is skipped there (it renders nested under its spawn).
+   */
+  rootItemIds: Set<string>;
+}
+
 /**
- * Nests a run of tool calls into a forest: a call whose parentToolCallId matches
- * an earlier call's toolCallId becomes that call's child (a subagent's calls
- * under their spawn), up to MAX_TOOL_TREE_DEPTH. Calls with no in-run parent — main
- * agent calls, and orphans whose parent isn't in this run — stay roots, so
- * nothing is dropped. Grouping by id (not adjacency) is what survives parallel
- * subagents interleaving their calls on one stream.
+ * Nests tool calls into a forest: a call whose parentToolCallId matches an
+ * earlier call's toolCallId becomes that call's child (a subagent's calls under
+ * their spawn), up to MAX_TOOL_TREE_DEPTH. Calls with no present parent — main
+ * agent calls, and orphans whose parent isn't in `items` — stay roots, so nothing
+ * is dropped. Grouping by id (not adjacency) is what survives parallel subagents
+ * interleaving their calls, and — when run over the whole timeline (see
+ * groupTimeline) — what keeps a subagent's calls under their spawn even when the
+ * main agent's messages split them across adjacency runs.
  */
-export function buildToolTree(items: ToolItem[]): ToolNode[] {
+function buildToolForest(items: ToolItem[]): ToolForest {
   const byId = new Map<string, ToolNode>();
   // Each node's depth from its root, so the nesting can be depth-capped below.
   const depthOf = new Map<ToolNode, number>();
   const roots: ToolNode[] = [];
+  const rootItemIds = new Set<string>();
   for (const item of items) {
     const node: ToolNode = { item, children: [] };
     if (item.toolCallId) byId.set(item.toolCallId, node);
     const parent = item.parentToolCallId
       ? byId.get(item.parentToolCallId)
       : undefined;
-    // Nest under an in-run parent, but never past MAX_TOOL_TREE_DEPTH: reused
+    // Nest under a known parent, but never past MAX_TOOL_TREE_DEPTH: reused
     // tool-call ids that chain parent→child would otherwise build a tree
     // thousands deep, and the recursive walk that renders it (ToolNodeRow) and
     // counts it (countNodes) would overflow the stack and crash the whole
@@ -341,36 +356,64 @@ export function buildToolTree(items: ToolItem[]): ToolNode[] {
       depthOf.set(node, parentDepth + 1);
     } else {
       roots.push(node);
+      rootItemIds.add(item.id);
       depthOf.set(node, 0);
     }
   }
-  return roots;
+  return { roots, rootItemIds };
+}
+
+/**
+ * Nests a set of tool calls into a forest (the roots of buildToolForest). Exposed
+ * for the conversation renderer and unit tests; groupTimeline uses the fuller
+ * buildToolForest so it also knows which calls are roots.
+ */
+export function buildToolTree(items: ToolItem[]): ToolNode[] {
+  return buildToolForest(items).roots;
 }
 
 /**
  * Collapses runs of consecutive tool calls in the timeline into `tools` groups,
- * leaving messages as standalone groups. Within each group, subagent calls nest
- * under their spawn (buildToolTree). Keeps the folding pure and unit-testable,
- * mirroring parseSegments for the non-interactive log.
+ * leaving messages as standalone groups — but builds the tool forest over the
+ * WHOLE timeline first, not per adjacency-run. That decoupling is the fix for
+ * background/ultracode subagents: the main agent narrates and mid-turn-resumes
+ * while its background subagents stream tool calls into later relay batches, so a
+ * subagent's spawn and its children routinely land in different runs (a message
+ * splits them). Nesting per run would re-root those children as top-level calls;
+ * nesting globally keeps every subagent's calls under their spawn's node, which
+ * renders wherever the spawn's run sits. A child is therefore skipped at its own
+ * timeline position (it's already nested under its spawn) and only root calls
+ * anchor visible runs. Pure and unit-testable, mirroring parseSegments for the
+ * non-interactive log.
  */
 export function groupTimeline(items: TimelineItem[]): TimelineGroup[] {
-  const runs: (ToolItem[] | Extract<TimelineItem, { type: "message" }>)[] = [];
+  const toolItems = items.filter((it): it is ToolItem => it.type === "tool");
+  const { roots, rootItemIds } = buildToolForest(toolItems);
+  const rootNodeByItemId = new Map(roots.map((n) => [n.item.id, n]));
+
+  const groups: TimelineGroup[] = [];
+  let run: ToolNode[] = [];
+  const flushRun = () => {
+    if (run.length > 0) {
+      groups.push({ type: "tools", id: run[0]!.item.id, nodes: run });
+      run = [];
+    }
+  };
   for (const item of items) {
     // Subagent narration is rendered in the pinned card, not the main flow.
     if (item.type === "subagent-log") continue;
     if (item.type === "tool") {
-      const last = runs[runs.length - 1];
-      if (Array.isArray(last)) last.push(item);
-      else runs.push([item]);
+      // Only root calls anchor a run; a child is already nested under its spawn's
+      // node (which renders in that spawn's run), so it isn't placed again here.
+      if (!rootItemIds.has(item.id)) continue;
+      run.push(rootNodeByItemId.get(item.id)!);
     } else {
-      runs.push(item);
+      flushRun();
+      groups.push({ type: "message", id: item.id, item });
     }
   }
-  return runs.map((run) =>
-    Array.isArray(run)
-      ? { type: "tools", id: run[0]!.id, nodes: buildToolTree(run) }
-      : { type: "message", id: run.id, item: run },
-  );
+  flushRun();
+  return groups;
 }
 
 /** One subagent's narration, ready for the pinned card / popout modal. */
@@ -430,6 +473,80 @@ export function collectSubagentNarration(
     }
     n.entries.push({ variant: it.variant, text: it.text });
   }
+  return order.map((id) => byId.get(id)!);
+}
+
+/** One subagent spawn's identity and status, independent of any narration. */
+export interface SubagentStatus {
+  toolCallId: string;
+  label: string;
+  status: string;
+}
+
+/**
+ * Every subagent spawn in the timeline (a kind:"subagent" tool call), in
+ * first-seen order, with its current status. Unlike collectSubagentNarration this
+ * includes spawns that haven't narrated yet — so the card's running/done/failed
+ * counts and its mount/prune reflect every subagent, not just the talkative ones.
+ * Counting narration alone makes the tally jump and the card flicker (mount →
+ * unmount → mount) as each subagent's first words trickle in, which is exactly
+ * what a wide ultracode fan-out produces. The tool item already folds its
+ * spawn's tool_call_update into `status`, so the latest status is read directly.
+ */
+export function collectSubagentStatuses(
+  items: TimelineItem[],
+): SubagentStatus[] {
+  const order: string[] = [];
+  const byId = new Map<string, SubagentStatus>();
+  for (const it of items) {
+    if (it.type !== "tool" || it.kind !== "subagent" || !it.toolCallId)
+      continue;
+    const existing = byId.get(it.toolCallId);
+    if (existing) {
+      existing.label = it.title || existing.label;
+      existing.status = it.status;
+    } else {
+      byId.set(it.toolCallId, {
+        toolCallId: it.toolCallId,
+        label: it.title,
+        status: it.status,
+      });
+      order.push(it.toolCallId);
+    }
+  }
+  return order.map((id) => byId.get(id)!);
+}
+
+/**
+ * The subagent card's view model: every subagent — whether seen as a spawn tool
+ * call (collectSubagentStatuses) or via narration alone (an orphan whose spawn
+ * isn't in the fetched window) — merged by id in first-seen order, each carrying
+ * its status and any narration entries. Basing the card on this instead of
+ * narration alone is what keeps a silent-but-running subagent counted and stops
+ * the card flickering as narration arrives. Reuses SubagentNarration's shape so
+ * the card renders unchanged.
+ */
+export function collectSubagentCards(
+  items: TimelineItem[],
+): SubagentNarration[] {
+  const narration = collectSubagentNarration(items);
+  const narrById = new Map(narration.map((n) => [n.toolCallId, n]));
+  const order: string[] = [];
+  const byId = new Map<string, SubagentNarration>();
+  const add = (toolCallId: string, label: string, status: string) => {
+    if (byId.has(toolCallId)) return;
+    byId.set(toolCallId, {
+      toolCallId,
+      label,
+      status,
+      entries: narrById.get(toolCallId)?.entries ?? [],
+    });
+    order.push(toolCallId);
+  };
+  // Spawns first (authoritative label + status), then any narration-only orphans.
+  for (const s of collectSubagentStatuses(items))
+    add(s.toolCallId, s.label, s.status);
+  for (const n of narration) add(n.toolCallId, n.label, n.status);
   return order.map((id) => byId.get(id)!);
 }
 

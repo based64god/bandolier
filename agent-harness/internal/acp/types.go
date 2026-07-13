@@ -175,10 +175,17 @@ type ToolCall struct {
 }
 
 type ToolCallUpdate struct {
-	SessionUpdate string            `json:"sessionUpdate"` // UpdateToolCallUpdate
-	ToolCallID    string            `json:"toolCallId"`
-	Status        string            `json:"status,omitempty"`
-	Content       []ToolCallContent `json:"content,omitempty"`
+	SessionUpdate string `json:"sessionUpdate"` // UpdateToolCallUpdate
+	ToolCallID    string `json:"toolCallId"`
+	Status        string `json:"status,omitempty"`
+	// ParentToolCallID mirrors ToolCall's: set to the spawning Agent/Task call's
+	// id when this update belongs to a subagent's tool call, so a receiver that
+	// only sees updates (the interactive→transcript mirror) can attribute the
+	// output to the right subagent. Empty for main-agent calls; omitempty keeps
+	// their frames byte-identical. The live timeline client ignores it (it
+	// correlates updates to calls by toolCallId).
+	ParentToolCallID string            `json:"parentToolCallId,omitempty"`
+	Content          []ToolCallContent `json:"content,omitempty"`
 }
 
 // ToolCallContent wraps a content block produced by a tool.

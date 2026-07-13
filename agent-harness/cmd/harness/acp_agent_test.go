@@ -453,10 +453,12 @@ func TestACPAgentClaudeTurn(t *testing.T) {
 // mid-turn yield — the CLI auto-resumes the agent (no user message) when the task
 // finishes — not the end of the user's turn. The driver must hold the ACP turn
 // open on it, or the prompt ends early and a spurious "waiting for input"
-// notification fires while the agent is merely waiting on its subagent. The turn
-// completes only on the result that arrives once the background set drains.
+// notification fires while the agent is merely waiting on its subagent. Once
+// background tasks have run this turn, the completing result is debounced (no
+// result field marks it final — see below), so it lands after the quiet window
+// rather than synchronously.
 func TestClaudeDriverHoldsTurnForBackgroundTasks(t *testing.T) {
-	d := &claudeDriver{turnDone: make(chan acp.PromptResult, 1), agent: &acpAgent{}}
+	d := &claudeDriver{turnDone: make(chan acp.PromptResult, 1), agent: &acpAgent{}, quietWindow: 20 * time.Millisecond}
 
 	// A background subagent spawns: one task now in flight.
 	d.handle([]byte(`{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"t1"}]}`))
@@ -470,16 +472,68 @@ func TestClaudeDriverHoldsTurnForBackgroundTasks(t *testing.T) {
 
 	// The task finishes and the background set drains to empty.
 	d.handle([]byte(`{"type":"system","subtype":"background_tasks_changed","tasks":[]}`))
-	// The agent auto-resumes and truly finishes — now the turn completes.
+	// The agent auto-resumes and truly finishes. Because background tasks ran this
+	// turn, completion is debounced; with nothing following, the quiet window
+	// elapses and the turn completes.
 	d.handle([]byte(`{"type":"result","stop_reason":"end_turn","num_turns":1}`))
+	waitForResult(t, d, acp.StopEndTurn)
+}
+
+// The regression the debounce exists for: when several parallel subagents drain
+// together the CLI auto-resumes once per finished task, emitting one result per
+// completion. The first (bgActive already 0) is an acknowledgement, not the
+// user's answer, and a fresh system/init precedes the real follow-up. The driver
+// must NOT end the turn on that premature result — only on the true final one,
+// once the stream goes quiet — or a spurious "waiting for input" fires mid-answer.
+func TestClaudeDriverDebouncesPrematureResultAfterBackgroundDrain(t *testing.T) {
+	var buf bytes.Buffer
+	a := captureEmits(&buf)
+	d := &claudeDriver{turnDone: make(chan acp.PromptResult, 1), agent: a, quietWindow: 60 * time.Millisecond}
+
+	// Two parallel background subagents run, then drain together.
+	d.handle([]byte(`{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"t1"},{"task_id":"t2"}]}`))
+	d.handle([]byte(`{"type":"result","stop_reason":"end_turn"}`)) // mid-turn yield, held (bgActive>0)
+	d.handle([]byte(`{"type":"system","subtype":"background_tasks_changed","tasks":[]}`))
+
+	// Premature auto-resume result (acknowledging the first completion).
+	d.handle([]byte(`{"type":"result","stop_reason":"end_turn"}`))
 	select {
 	case r := <-d.turnDone:
-		if r.StopReason != acp.StopEndTurn {
-			t.Fatalf("final stopReason = %q, want %q", r.StopReason, acp.StopEndTurn)
-		}
+		t.Fatalf("completed on the premature post-drain result (stopReason=%q); want it debounced", r.StopReason)
 	default:
-		t.Fatal("turn did not complete after background tasks drained")
 	}
+
+	// The CLI auto-resumes again (fresh system/init) and streams the real answer;
+	// each intervening event supersedes the pending completion.
+	d.handle([]byte(`{"type":"system","subtype":"init","slash_commands":[]}`))
+	d.handle([]byte(`{"type":"assistant","message":{"content":[{"type":"text","text":"Both subagents completed."}]}}`))
+	d.handle([]byte(`{"type":"result","stop_reason":"end_turn"}`)) // the true final result
+
+	// The stream is now quiet: exactly one completion lands, for the final result.
+	waitForResult(t, d, acp.StopEndTurn)
+	select {
+	case r := <-d.turnDone:
+		t.Fatalf("a second (stale premature) completion landed (stopReason=%q); want exactly one", r.StopReason)
+	default:
+	}
+}
+
+// waitForResult blocks until the driver completes its turn, asserting the stop
+// reason. Used for the debounced completions, which land a quiet window after the
+// final result rather than synchronously.
+func waitForResult(t *testing.T, d *claudeDriver, want string) {
+	t.Helper()
+	waitFor(t, func() bool {
+		select {
+		case r := <-d.turnDone:
+			if r.StopReason != want {
+				t.Fatalf("stopReason = %q, want %q", r.StopReason, want)
+			}
+			return true
+		default:
+			return false
+		}
+	})
 }
 
 // discardWriteCloser is a stdin stand-in for a driver whose CLI is never actually

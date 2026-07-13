@@ -88,7 +88,7 @@ func runACPProxy(ctx context.Context, cfg config) error {
 		return err
 	}
 
-	p := &acpProxy{cfg: cfg, stdin: stdin, ended: make(chan struct{})}
+	p := &acpProxy{cfg: cfg, stdin: stdin, ended: make(chan struct{}), subagentLabels: map[string]string{}}
 	serveErr := p.serve(ctx, stdout)
 
 	// Closing stdin tells the agent (and its underlying CLI) to exit; then the
@@ -143,6 +143,13 @@ type acpProxy struct {
 	stdin     io.Writer
 	sessionID string
 
+	// subagentLabels maps a subagent spawn's tool-call id to its human label,
+	// recorded when the spawn frame passes through so the subagent's later frames
+	// (which carry that id as their parentToolCallId) can be attributed to it in
+	// the mirrored transcript — the interactive counterpart to the one-shot log
+	// sink's `labels`. Only the single a2cPump goroutine touches it, so no lock.
+	subagentLabels map[string]string
+
 	endOnce sync.Once
 	ended   chan struct{}
 }
@@ -179,7 +186,7 @@ func (p *acpProxy) handleAgentFrame(ctx context.Context, frame []byte) {
 		log.Printf("[harness] %s", awaitInputMarker)
 	}
 
-	renderFrameToTranscript(frame)
+	renderFrameToTranscript(frame, p.subagentLabels)
 	if err := p.acpPush(ctx, string(frame)); err != nil {
 		log.Printf("[harness] warn: acp push: %v", err)
 	}
@@ -383,8 +390,15 @@ func frameStopReason(raw []byte) string {
 
 // renderFrameToTranscript mirrors assistant text and tool activity from the
 // agent's session/update frames into the pod log / transcript, so issue-output
-// mode and PR-copy generation (which read the transcript) keep working.
-func renderFrameToTranscript(raw []byte) {
+// mode and PR-copy generation (which read the transcript) keep working. Subagent
+// frames (tagged with their spawn's parentToolCallId) are attributed to the
+// subagent — using the label recorded in `labels` when the spawn passed through —
+// so the mirrored transcript reads like the one-shot log sink: a subagent's
+// narration, thinking, tool calls, and output fold into that subagent's block,
+// and only the main agent's answer reaches stdoutTee. `labels` is read and
+// written here; pass a nil map for a stateless render (subagents fall back to a
+// generic label).
+func renderFrameToTranscript(raw []byte, labels map[string]string) {
 	var m struct {
 		Method string `json:"method"`
 		Params struct {
@@ -400,7 +414,8 @@ func renderFrameToTranscript(raw []byte) {
 	switch acp.UpdateKind(m.Params.Update) {
 	case acp.UpdateToolCallUpdate:
 		var tu struct {
-			Content []struct {
+			ParentToolCallID string `json:"parentToolCallId"`
+			Content          []struct {
 				Content struct {
 					Text string `json:"text"`
 				} `json:"content"`
@@ -413,11 +428,16 @@ func renderFrameToTranscript(raw []byte) {
 		for _, c := range tu.Content {
 			b.WriteString(c.Content.Text)
 		}
-		logToolResult("", b.String())
+		// A subagent's tool output folds into its subagent block; main-agent output
+		// stays unprefixed (the parentToolCallId ⇒ prefix mapping is shared with the
+		// one-shot path via subagentLinePrefix).
+		logToolResult(subagentPrefixFor(labels, tu.ParentToolCallID), b.String())
 	default:
 		var u struct {
 			SessionUpdate    string `json:"sessionUpdate"`
+			ToolCallID       string `json:"toolCallId"`
 			Title            string `json:"title"`
+			Kind             string `json:"kind"`
 			ParentToolCallID string `json:"parentToolCallId"`
 			Content          struct {
 				Text string `json:"text"`
@@ -433,24 +453,58 @@ func renderFrameToTranscript(raw []byte) {
 				break
 			}
 			// A subagent's narration isn't the run's answer — fold it into the
-			// [harness] transcript (attributed generically; the live card carries
-			// the precise label) so it doesn't pollute the output used for
-			// PR-copy / issue generation. Main-agent text surfaces as before.
+			// [harness] transcript, attributed to the subagent so distinct subagents
+			// stay separate and it doesn't pollute the output used for PR-copy /
+			// issue generation. Main-agent text surfaces as before.
 			if u.ParentToolCallID != "" {
+				prefix := subagentPrefixFor(labels, u.ParentToolCallID)
 				for _, l := range strings.Split(t, "\n") {
-					log.Printf("[harness] %s%s", subagentLinePrefix(""), l)
+					log.Printf("[harness] %s%s", prefix, l)
 				}
 				break
 			}
 			fmt.Fprintln(stdoutTee, t)
+		case acp.UpdateAgentThoughtChunk:
+			// Thinking is context, never the run's answer: always [harness]-tagged
+			// (never stdoutTee), attributed to the subagent when it came from one.
+			// Mirrors the one-shot onThinking format so both transcript paths match.
+			t := strings.TrimSpace(u.Content.Text)
+			if t == "" {
+				break
+			}
+			prefix := subagentPrefixFor(labels, u.ParentToolCallID)
+			lines := strings.Split(t, "\n")
+			log.Printf("[harness] %s(thinking) %s", prefix, lines[0])
+			for _, l := range lines[1:] {
+				log.Printf("[harness] %s    %s", prefix, l)
+			}
 		case acp.UpdateUserMessageChunk:
 			if t := strings.TrimSpace(u.Content.Text); t != "" {
 				logUserInput(t)
 			}
 		case acp.UpdateToolCall:
+			// Record a subagent spawn's label so the subagent's later frames (which
+			// carry this call's id as their parentToolCallId) can be attributed to
+			// it — the mirror's equivalent of the one-shot sink's s.labels.
+			if u.Kind == acp.ToolKindSubagent && u.ParentToolCallID == "" && u.ToolCallID != "" && labels != nil {
+				labels[u.ToolCallID] = u.Title
+			}
 			if u.Title != "" {
-				log.Printf("[harness] → %s", u.Title)
+				// A subagent's own tool call folds into its subagent block; the spawn
+				// itself and every other main-agent call stay unprefixed.
+				log.Printf("[harness] %s→ %s", subagentPrefixFor(labels, u.ParentToolCallID), u.Title)
 			}
 		}
 	}
+}
+
+// subagentPrefixFor resolves the ⇉ <label> ⟫ prefix for a frame tagged with a
+// subagent spawn's id, or "" for a main-agent frame (empty parentToolCallId). The
+// label comes from the remembered spawn; an unknown id falls back to the generic
+// label inside subagentLinePrefix.
+func subagentPrefixFor(labels map[string]string, parentToolCallID string) string {
+	if parentToolCallID == "" {
+		return ""
+	}
+	return subagentLinePrefix(labels[parentToolCallID])
 }

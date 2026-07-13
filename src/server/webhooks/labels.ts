@@ -1,11 +1,15 @@
 // Issue labels of the form `<prefix><value>` let the author configure that
 // issue's agent per issue:
 //   - `model:<query>`  — fuzzy-resolved against the available models.
+//   - `provider:<value>` — pins the model provider (anthropic|bedrock|openai|
+//                        gemini, or a gollm id like `groq`), scoping model
+//                        selection and routing credentials to it.
 //   - `effort:<level>` — reasoning effort (low|medium|high|xhigh|max); Claude
 //                        runs only, ignored otherwise.
 //   - `cpu:<qty>` / `memory:<qty>` — the agent pod's compute limits, as
 //                        Kubernetes quantities (e.g. cpu:4, memory:8Gi).
 export const MODEL_LABEL_PREFIX = "model:";
+export const PROVIDER_LABEL_PREFIX = "provider:";
 export const EFFORT_LABEL_PREFIX = "effort:";
 export const CPU_LABEL_PREFIX = "cpu:";
 export const MEMORY_LABEL_PREFIX = "memory:";

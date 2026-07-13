@@ -5,6 +5,8 @@
 /.pnp
 .pnp.js
 /.pnpm-store
+# this repo uses pnpm; a stray npm lockfile would drift from pnpm-lock.yaml
+package-lock.json
 
 # testing
 /coverage

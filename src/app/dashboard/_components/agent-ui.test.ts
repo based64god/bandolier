@@ -4,6 +4,7 @@ import {
   expiresAtLocal,
   explainFailure,
   isAgentDone,
+  isAgentOutputOpen,
   isAgentOutputResolved,
   isAgentResolved,
   SPINNER_STATUSES,
@@ -322,6 +323,93 @@ describe("isAgentResolved", () => {
         pullRequestState: "merged",
       }),
     ).toBe(true);
+  });
+
+  it("does not resolve an expired task whose pull request is still open", () => {
+    expect(
+      isAgentResolved({
+        ...base,
+        expired: true,
+        pullRequestUrl: "https://github.com/o/r/pull/1",
+        pullRequestState: "open",
+      }),
+    ).toBe(false);
+  });
+
+  it("does not resolve an expired task whose created issue is still open", () => {
+    expect(
+      isAgentResolved({
+        ...base,
+        expired: true,
+        createdIssueUrl: "https://github.com/o/r/issues/1",
+        createdIssueState: "open",
+      }),
+    ).toBe(false);
+  });
+
+  it("resolves an expired task whose pull request has closed", () => {
+    expect(
+      isAgentResolved({
+        ...base,
+        expired: true,
+        pullRequestUrl: "https://github.com/o/r/pull/1",
+        pullRequestState: "closed",
+      }),
+    ).toBe(true);
+  });
+});
+
+describe("isAgentOutputOpen", () => {
+  const base = {
+    pullRequestUrl: null,
+    pullRequestState: null,
+    createdIssueUrl: null,
+    createdIssueState: null,
+  };
+
+  it("is false when there is no GitHub output", () => {
+    expect(isAgentOutputOpen(base)).toBe(false);
+  });
+
+  it("is true for an open pull request", () => {
+    expect(
+      isAgentOutputOpen({
+        ...base,
+        pullRequestUrl: "https://github.com/o/r/pull/1",
+        pullRequestState: "open",
+      }),
+    ).toBe(true);
+  });
+
+  it("is true for an open created issue", () => {
+    expect(
+      isAgentOutputOpen({
+        ...base,
+        createdIssueUrl: "https://github.com/o/r/issues/1",
+        createdIssueState: "open",
+      }),
+    ).toBe(true);
+  });
+
+  it("prefers the created issue over the pull request", () => {
+    expect(
+      isAgentOutputOpen({
+        pullRequestUrl: "https://github.com/o/r/pull/1",
+        pullRequestState: "open",
+        createdIssueUrl: "https://github.com/o/r/issues/1",
+        createdIssueState: "closed",
+      }),
+    ).toBe(false);
+  });
+
+  it("is false for a merged pull request", () => {
+    expect(
+      isAgentOutputOpen({
+        ...base,
+        pullRequestUrl: "https://github.com/o/r/pull/1",
+        pullRequestState: "merged",
+      }),
+    ).toBe(false);
   });
 });
 

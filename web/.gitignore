@@ -1,0 +1,26 @@
+# Build artifacts and dependencies for the web app. Repo-wide ignores
+# (.env*, .vercel, editor/OS cruft, Go/terraform) live in the root .gitignore.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.js
+/.pnpm-store
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+next-env.d.ts
+
+# production
+/build
+
+# typescript
+*.tsbuildinfo
+
+# database
+db.sqlite
+db.sqlite-journal

@@ -234,7 +234,7 @@ The chart wires both the liveness and readiness probes here
 ## Configuration reference
 
 The chart's values map onto the app's environment (validated in
-[`src/env.js`](../src/env.js)); see the [main README's configuration
+[`web/src/env.js`](../web/src/env.js)); see the [main README's configuration
 reference](../README.md#configuration-reference) for what each variable does.
 
 | Value                                                                                         | Env var                                    | Notes                                                                     |

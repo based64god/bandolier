@@ -49,6 +49,10 @@ vi.mock("~/server/agents/resolve-credentials", () => ({
 const listModelsForUser = vi.fn<() => Promise<{ models: ModelOption[] }>>();
 const fuzzyPickModel =
   vi.fn<(query: string, models: ModelOption[]) => string | undefined>();
+const matchProviderQuery =
+  vi.fn<
+    (query: string, models: ModelOption[]) => ProviderName | undefined
+  >();
 const pickDefaultModel = vi.fn<(models: ModelOption[]) => string | undefined>();
 const pickPrWriterModel =
   vi.fn<
@@ -61,6 +65,8 @@ vi.mock("~/server/agents/models", () => ({
   listModelsForUser: () => listModelsForUser(),
   fuzzyPickModel: (query: string, models: ModelOption[]) =>
     fuzzyPickModel(query, models),
+  matchProviderQuery: (query: string, models: ModelOption[]) =>
+    matchProviderQuery(query, models),
   pickDefaultModel: (models: ModelOption[]) => pickDefaultModel(models),
   pickPrWriterModel: (
     models: ModelOption[],
@@ -149,6 +155,7 @@ beforeEach(() => {
     models: [model({ id: "claude-sonnet" }), model({ id: "claude-opus" })],
   });
   fuzzyPickModel.mockReturnValue(undefined);
+  matchProviderQuery.mockReturnValue(undefined);
   pickDefaultModel.mockReturnValue("claude-sonnet");
   pickPrWriterModel.mockReturnValue("claude-sonnet");
   resolveCompute.mockResolvedValue({ cpu: null, memory: null });
@@ -222,6 +229,77 @@ describe("resolveWebhookRun — model precedence", () => {
   it("returns null when no model can be chosen", async () => {
     pickDefaultModel.mockReturnValue(undefined);
     expect(await resolveWebhookRun(baseOpts({}))).toBeNull();
+  });
+});
+
+describe("resolveWebhookRun — provider override", () => {
+  it("pins the provider from a provider: label, scoping model selection and credentials", async () => {
+    listModelsForUser.mockResolvedValue({
+      models: [
+        model({ id: "claude-sonnet", provider: "anthropic" }),
+        model({ id: "claude-bedrock", provider: "bedrock" }),
+      ],
+    });
+    matchProviderQuery.mockReturnValue("bedrock");
+    pickDefaultModel.mockReturnValue("claude-bedrock");
+    selectRunCredentials.mockReturnValue({
+      ...NO_CREDENTIALS,
+      provider: "bedrock",
+      aws,
+    });
+    const run = await resolveWebhookRun(
+      baseOpts({ labels: [{ name: "provider:bedrock" }] }),
+    );
+    expect(run?.model).toBe("claude-bedrock");
+    // Model selection only ever saw the bedrock-scoped models.
+    expect(pickDefaultModel).toHaveBeenCalledWith([
+      expect.objectContaining({ id: "claude-bedrock", provider: "bedrock" }),
+    ]);
+    expect(selectRunCredentials).toHaveBeenCalledWith(expect.anything(), {
+      modelProvider: "bedrock",
+    });
+    expect(run?.specBase.awsCredentials).toEqual(aws);
+  });
+
+  it("overrides an out-of-scope repo default model with the pinned provider's default", async () => {
+    listModelsForUser.mockResolvedValue({
+      models: [
+        model({ id: "claude-sonnet", provider: "anthropic" }),
+        model({ id: "gpt-5", provider: "openai" }),
+      ],
+    });
+    matchProviderQuery.mockReturnValue("openai");
+    pickDefaultModel.mockReturnValue("gpt-5");
+    selectRunCredentials.mockReturnValue({
+      ...NO_CREDENTIALS,
+      provider: "openai",
+      openaiApiKey: "sk-openai",
+    });
+    const run = await resolveWebhookRun(
+      baseOpts({
+        labels: [{ name: "provider:openai" }],
+        defaultModel: "claude-sonnet",
+      }),
+    );
+    // The anthropic repo default is out of scope, so the openai default wins.
+    expect(run?.model).toBe("gpt-5");
+    expect(pickDefaultModel).toHaveBeenCalled();
+  });
+
+  it("ignores a provider: label that matches no available provider", async () => {
+    matchProviderQuery.mockReturnValue(undefined);
+    const run = await resolveWebhookRun(
+      baseOpts({ labels: [{ name: "provider:nope" }] }),
+    );
+    expect(run?.model).toBe("claude-sonnet");
+    // Falls through to the normal cross-provider selection.
+    expect(pickDefaultModel).toHaveBeenCalledWith([
+      expect.objectContaining({ id: "claude-sonnet" }),
+      expect.objectContaining({ id: "claude-opus" }),
+    ]);
+    expect(selectRunCredentials).toHaveBeenCalledWith(expect.anything(), {
+      modelProvider: "anthropic",
+    });
   });
 });
 

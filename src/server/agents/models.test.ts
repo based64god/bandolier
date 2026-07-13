@@ -5,6 +5,7 @@ import type { CustomProviderCredential } from "~/server/agents/custom-providers"
 import {
   fuzzyPickModel,
   listModelsForUser,
+  matchProviderQuery,
   pickCheapModel,
   pickDefaultModel,
   pickLatestGeminiFlash,
@@ -333,6 +334,43 @@ describe("fuzzyPickModel", () => {
   it("returns undefined for no match or an empty query", () => {
     expect(fuzzyPickModel("llama", models)).toBeUndefined();
     expect(fuzzyPickModel("   ", models)).toBeUndefined();
+  });
+});
+
+describe("matchProviderQuery", () => {
+  const gollm = (id: string, provider: string): ModelOption => ({
+    id,
+    label: id,
+    provider: provider as ModelOption["provider"],
+  });
+  const models = [
+    m("claude-opus-4-8"),
+    openai("gpt-5"),
+    gemini("gemini-2.5-pro"),
+    gollm("llama-3.3-70b", "gollm:groq"),
+  ];
+
+  it("matches a first-class provider tag exactly", () => {
+    expect(matchProviderQuery("anthropic", models)).toBe("anthropic");
+    expect(matchProviderQuery("gemini", models)).toBe("gemini");
+  });
+
+  it("matches a gollm provider by its full tag", () => {
+    expect(matchProviderQuery("gollm:groq", models)).toBe("gollm:groq");
+  });
+
+  it("matches a gollm provider by its catalog id without the prefix", () => {
+    expect(matchProviderQuery("groq", models)).toBe("gollm:groq");
+  });
+
+  it("is case-insensitive and trims the query", () => {
+    expect(matchProviderQuery("  Anthropic ", models)).toBe("anthropic");
+  });
+
+  it("returns undefined when no available provider matches", () => {
+    expect(matchProviderQuery("bedrock", models)).toBeUndefined();
+    expect(matchProviderQuery("openai", [m("claude-opus-4-8")])).toBeUndefined();
+    expect(matchProviderQuery("   ", models)).toBeUndefined();
   });
 });
 

@@ -246,6 +246,10 @@ Besides the dashboard, agents can be listed and launched over a small REST API u
 curl -H "Authorization: Bearer bnd_…" \
   https://<your-host>/api/v1/repos/<owner>/<repo>/tasks
 
+# List the models you can launch with (every provider you've configured)
+curl -H "Authorization: Bearer bnd_…" \
+  https://<your-host>/api/v1/repos/<owner>/<repo>/models
+
 # Launch a task
 curl -X POST -H "Authorization: Bearer bnd_…" -H "Content-Type: application/json" \
   -d '{"task":"Fix the flaky test in auth.spec.ts"}' \
@@ -267,11 +271,26 @@ curl -X DELETE -H "Authorization: Bearer bnd_…" \
 
 | Method   | Path                                      | Body                   | Purpose               |
 | -------- | ----------------------------------------- | ---------------------- | --------------------- |
+| `GET`    | `/api/v1/repos/{owner}/{repo}/models`     | —                      | List launchable models |
 | `GET`    | `/api/v1/repos/{owner}/{repo}/tasks`      | —                      | List tasks for a repo |
 | `POST`   | `/api/v1/repos/{owner}/{repo}/tasks`      | launch fields (below)  | Launch a task         |
 | `GET`    | `/api/v1/repos/{owner}/{repo}/tasks/{id}` | —                      | Read one task         |
 | `PATCH`  | `/api/v1/repos/{owner}/{repo}/tasks/{id}` | `{ "displayName": … }` | Rename a task         |
 | `DELETE` | `/api/v1/repos/{owner}/{repo}/tasks/{id}` | —                      | Terminate a task      |
+
+The models endpoint returns every model you can launch with, drawn from all the
+providers you've configured. Each entry carries the exact `model`,
+`modelProvider`, and `modelAuth` to pass back on launch — you copy those values
+from the response, you don't construct them:
+
+```jsonc
+{
+  "models": [
+    { "id": "claude-sonnet-4-5", "label": "Claude Sonnet 4.5", "provider": "anthropic", "auth": "api_key" },
+    { "id": "llama-3.3-70b-versatile", "label": "llama-3.3-70b-versatile", "provider": "gollm:groq" }
+  ]
+}
+```
 
 The launch endpoint accepts everything the dashboard's deploy dialog can set,
 except interactive sessions (the REST API only starts one-shot runs). The body
@@ -282,8 +301,8 @@ is JSON; every field except `task`/`prompt` is optional:
 | `task`          | string                                           | `""`                            | The operator task, or additional context when `issueNumber` is set.         |
 | `prompt`        | string                                           | —                               | Alias for `task` (used when `task` is omitted).                             |
 | `branch`        | string                                           | the repo's default branch       | Branch to check out.                                                        |
-| `model`         | string                                           | your provider's preferred model | A model id from one of your providers.                                      |
-| `modelProvider` | `anthropic` \| `bedrock` \| `openai` \| `gemini` | primary-provider precedence     | Pins which provider serves `model` when several are configured.             |
+| `model`         | string                                           | your provider's preferred model | A model id from one of your providers (see the models endpoint above).      |
+| `modelProvider` | string                                           | primary-provider precedence     | The model's `provider`, exactly as returned by the models endpoint. Pins which provider serves `model` when several are configured; pass the value back verbatim. |
 | `modelAuth`     | `api_key` \| `subscription`                      | api-key-beats-subscription      | Pins the credential kind for providers where both are configured.           |
 | `effort`        | `low` \| `medium` \| `high` \| `xhigh` \| `max`  | CLI default                     | Reasoning effort (Claude providers only; ignored otherwise).                |
 | `maxTurns`      | integer ≥ 1                                      | unlimited                       | Caps the number of agent turns.                                             |

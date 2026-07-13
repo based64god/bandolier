@@ -440,3 +440,25 @@ export function fuzzyPickModel(
     ),
   );
 }
+
+
+/**
+ * Resolves a free-text provider query (e.g. from a `provider:<value>` issue
+ * label) to one of the providers present in `models`. Matches the provider tag
+ * exactly (`bedrock`, `anthropic`, `gollm:groq`), or a gollm catalog id without
+ * the prefix (`groq` → `gollm:groq`), case-insensitively. Returns undefined when
+ * no available provider matches — the caller then falls back to the model's own
+ * provider.
+ */
+export function matchProviderQuery(
+  query: string,
+  models: ModelOption[],
+): ModelProvider | undefined {
+  const q = query.trim().toLowerCase();
+  if (!q) return undefined;
+  const providers = [...new Set(models.map((m) => m.provider))];
+  return (
+    providers.find((p) => p.toLowerCase() === q) ??
+    providers.find((p) => p.toLowerCase() === `gollm:${q}`)
+  );
+}

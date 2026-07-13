@@ -86,9 +86,20 @@ export const ACTION_ROW_MIN_H = "min-h-[1.875rem]";
  * also takes a share, so the least-dense column sits out until the viewport can
  * afford it. The final (label-less) column holds the "End session" control (on
  * running interactive rows) alongside the terminate control; on mobile the "End
- * session" button collapses to a compact icon (see InteractiveRow) so both
- * controls sit on one line, and the fixed `md:w-40` holds the widest pair (123px)
- * and the terminate glyph on one line without wrapping.
+ * session" button and the confirm/cancel pair all collapse to compact glyphs
+ * (see InteractiveRow) so both controls sit on one line, and the fixed `md:w-40`
+ * holds the widest full-label pair (123px) and the terminate glyph on one line
+ * without wrapping.
+ *
+ * On mobile this column is a fixed `w-24` rather than a wide percentage share.
+ * The share (`w-[30%]`) reserved confirm/cancel-sized room even when only the
+ * lone terminate glyph was showing, and every reserved pixel is stolen from the
+ * `w-auto` Task column — squeezing the name against the token readout. Since the
+ * widest mobile control set is just two compact glyphs (~88px: the End-session +
+ * terminate pair, and the confirm/cancel pair), `w-24` fits them exactly and
+ * hands the freed width to Task. It also means arming the confirm (glyph → pair)
+ * never needs more room than the terminate glyph already sat in, so the Task
+ * column doesn't shift when the confirmation opens.
  */
 export const TASK_TABLE_COLUMNS: {
   label: string;
@@ -102,7 +113,7 @@ export const TASK_TABLE_COLUMNS: {
   { label: "Created by", width: "w-36", optional: "lg" },
   { label: "Currently", width: "w-[13%]", optional: "xl" },
   { label: "Expires", width: "w-[9.5rem]", optional: "lg" },
-  { label: "", width: "w-[30%] md:w-40" },
+  { label: "", width: "w-24 md:w-40" },
 ];
 
 export function TaskRow({

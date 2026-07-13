@@ -75,7 +75,6 @@
             <li><a href="#github-app">GitHub App &amp; webhooks</a></li>
             <li><a href="#resuming">Resuming runs</a></li>
             <li><a href="#system-prompt">Repo system prompt</a></li>
-            <li><a href="#auto-merge">Auto-merge PRs</a></li>
             <li><a href="#maintainer-gate">Maintainer gate</a></li>
             <li><a href="#isolation">Agent isolation</a></li>
             <li><a href="#artifacts">Run artifacts</a></li>
@@ -452,32 +451,6 @@ curl -fsSL https://&lt;your-host&gt;/setup.sh | bash -s -- --scoped</code></pre>
             replacing it, so you don't need to repeat guidance in each task. Leave
             it blank for none.
           </p>
-        </section>
-
-        <section id="auto-merge">
-          <h2>Auto-merging Bandolier PRs</h2>
-          <p>
-            Auto-merge lives in the repo as a <strong>GitHub Action</strong>, not
-            in the app. <code>.github/workflows/auto-merge.yml</code> triggers when
-            the <code>CI</code> workflow finishes <strong>successfully</strong> on a
-            <code>bandolier/*</code> head branch, resolves the open PR for that
-            branch, and enables GitHub's native auto-merge
-            (<code>gh pr merge --auto --merge</code>). The PR then lands on its own
-            once every required check has passed and it's mergeable — no human
-            click.
-          </p>
-          <p>
-            Auto-merge still honors the branch's protection rules (required
-            reviews / status checks), so this only lands what the repo's own
-            gates already allow; a branch with no protection would merge right
-            away. It's scoped to <code>bandolier/*</code> branches, so agent PRs
-            auto-merge while human PRs still need a manual merge.
-          </p>
-          <div class="callout">
-            <strong>Change the policy in the workflow.</strong> Drop
-            <code>auto-merge.yml</code> (or narrow its <code>if:</code> condition)
-            to turn auto-merge off or scope it differently.
-          </div>
         </section>
 
         <section id="maintainer-gate">

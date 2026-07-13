@@ -86,11 +86,31 @@ export function isAgentOutputResolved(agent: {
 }
 
 /**
+ * Whether a task's output is still open on GitHub: an open created issue, or an
+ * open pull request when there's no created issue. Mirrors `isAgentOutputResolved`'s
+ * precedence (created issue stands in for the output when present, otherwise the
+ * pull request) so the two agree on which output a task is judged by.
+ */
+export function isAgentOutputOpen(agent: {
+  pullRequestUrl: string | null;
+  pullRequestState: GithubItemState | null;
+  createdIssueUrl: string | null;
+  createdIssueState: GithubItemState | null;
+}): boolean {
+  if (agent.createdIssueUrl) return agent.createdIssueState === "open";
+  if (agent.pullRequestUrl) return agent.pullRequestState === "open";
+  return false;
+}
+
+/**
  * Whether a task counts as "resolved" for the "Hide resolved" table filter.
  * That's either its output having reached a terminal state on GitHub (see
  * `isAgentOutputResolved`), or a task that succeeded and has since expired: its
  * pod is gone (Job TTL) and there's nothing left to act on, so it's just as done
  * as a merged PR even when it produced no GitHub output to resolve.
+ *
+ * A still-open issue or PR overrides both: an expired task whose output is still
+ * open has something left to act on, so it stays unresolved and isn't hidden.
  */
 export function isAgentResolved(agent: {
   status: string;
@@ -100,6 +120,7 @@ export function isAgentResolved(agent: {
   createdIssueUrl: string | null;
   createdIssueState: GithubItemState | null;
 }): boolean {
+  if (isAgentOutputOpen(agent)) return false;
   if (agent.status === "Succeeded" && agent.expired) return true;
   return isAgentOutputResolved(agent);
 }

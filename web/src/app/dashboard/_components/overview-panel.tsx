@@ -96,27 +96,29 @@ export function OverviewPanel({ notify }: { notify: boolean }) {
           <thead>
             <tr className="border-b border-white/10 bg-white/5 text-left text-xs font-medium tracking-wider text-white/50 uppercase">
               {[
-                // Wider on mobile (like Output below) so the "STATUS" header
-                // word fits its cell. Under table-fixed a too-narrow column
+                // Sized on mobile just wide enough for the "STATUS" header word
+                // to fit its cell (~17%): under table-fixed a too-narrow column
                 // can't shrink the unbreakable word, so it overflows to the
-                // right and the centered badges read as left-of-header; the
-                // extra width lets text-center actually center the label over
-                // the badges. From `md` up the column is fixed to its widest
+                // right and the centered badge reads as left-of-header. Trimmed
+                // to that floor (the mobile status pill is an icon, far narrower
+                // than the header) so the surplus goes to Repository rather than
+                // sitting idle. From `md` up the column is fixed to its widest
                 // pill ("Terminating" + padding) — the pill doesn't grow with
                 // the viewport, so a percentage share both starved it at 768px
                 // and wasted width at 1920px that belongs to Repository.
                 // Shares the same widths as the task table (agent-dashboard).
                 {
                   label: "Status",
-                  width: "w-[18%] md:w-[7.5rem]",
+                  width: "w-[17%] md:w-[7.5rem]",
                   center: true,
                 },
-                // Wider on mobile so the output pill (Issue/PR + state glyph)
-                // fits its cell; without the extra room the fixed layout
-                // starves this column and the badge spills into Repository.
-                // Fixed to the widest badge ("Issue ⏺") from `md` up, like
-                // Status. Shares the same widths as the task table.
-                { label: "Output", width: "w-[23%] md:w-[7rem]", center: true },
+                // Sized on mobile to the output pill (Issue/PR + state glyph):
+                // below that the fixed layout starves this column and the badge
+                // spills into Repository. Trimmed to that floor (~20%) so the
+                // surplus goes to Repository. Fixed to the widest badge
+                // ("Issue ⏺") from `md` up, like Status. Shares the same widths
+                // as the task table.
+                { label: "Output", width: "w-[20%] md:w-[7rem]", center: true },
                 { label: "Repository", width: "w-[auto]" },
                 // Dropped on narrow viewports where space is limited — the row
                 // stays readable with Status/Output/Repository alone. Fixed to

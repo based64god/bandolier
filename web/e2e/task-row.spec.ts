@@ -77,4 +77,32 @@ check(
 );
 await wide.close();
 
+// Regression: a resumed run shows an amber "↻ resumed" lineage chip in the Task
+// cell, beside the token readout. On a phone-width viewport the chip must not
+// shove the token count out of the cell — an over-wide Status/Output column used
+// to starve the Task column, pushing the readout past the cell's right edge
+// toward the action controls. The harness renders a dedicated resumed row that
+// also reports tokens (worst case: the widest 5-char count). 390px is the most
+// common phone width (iPhone 12–15).
+const phone = await browser.newPage({ viewport: { width: 390, height: 720 } });
+await phone.goto(`${BASE}/dev/task-row`);
+const resumedRow = phone
+  .locator("[data-testid='rows'] tr", { hasText: "resumed" })
+  .first();
+const taskCellBox = await resumedRow.locator("td").nth(2).boundingBox();
+const tokenBox = await resumedRow
+  .locator("span[aria-label*='tokens used']")
+  .boundingBox();
+if (!taskCellBox || !tokenBox)
+  throw new Error("resumed row cell/token has no box");
+// Distance the token's right edge runs past the Task cell's right edge; ≤0 means
+// the readout is fully contained.
+const tokenOverflow =
+  tokenBox.x + tokenBox.width - (taskCellBox.x + taskCellBox.width);
+check(
+  `resumed chip keeps the token inside the Task cell (overflow ${tokenOverflow.toFixed(0)}px)`,
+  tokenOverflow <= 2,
+);
+await phone.close();
+
 await finish(browser);

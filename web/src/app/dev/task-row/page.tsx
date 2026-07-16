@@ -44,6 +44,30 @@ export default function TaskRowHarness() {
     source: "manual",
   } as unknown as Task;
 
+  // Worst case for the narrow mobile Task column: a resumed run (the amber
+  // lineage chip) that is also reporting tokens. The chip and the token readout
+  // both sit in the Task cell beside the truncating name, so a too-narrow column
+  // shoves the token count off to the right, past the cell and toward the
+  // action control. The task-row spec asserts the token stays inside the cell on
+  // a phone-width viewport (see the mobile checks there). "88.8K" is the widest
+  // realistic count (5 chars); the badge is at its full "↻ resumed" width.
+  const resumedAgent = {
+    name: "task-resumed",
+    displayName: "a resumed follow-up task",
+    status: "Running",
+    ownedByViewer: true,
+    parentJobName: "task-parent-xyz",
+    parentDisplayName: "the parent run",
+    tokens: {
+      inputTokens: 88800,
+      outputTokens: 0,
+      cacheReadInputTokens: 0,
+      cacheCreationInputTokens: 0,
+    },
+    currently: "editing task-row.tsx",
+    source: "manual",
+  } as unknown as Task;
+
   // Worst-case column content, for measuring the layout: the widest realistic
   // "Created by" values (an Issue #NNNNN badge; a maximum-length 39-char GitHub
   // username), the widest "Expires" form (a not-today date with 2-digit day +
@@ -91,8 +115,8 @@ export default function TaskRowHarness() {
   // measured here (does a label wrap at `lg`?) without the real dashboard's
   // auth/data.
   const cols = [
-    { width: "w-[18%] md:w-[7.5rem]", label: "Status" },
-    { width: "w-[23%] md:w-[7rem]", label: "Output" },
+    { width: "w-[17%] md:w-[7.5rem]", label: "Status", center: true },
+    { width: "w-[20%] md:w-[7rem]", label: "Output", center: true },
     { width: "w-auto", label: "Task" },
     { width: "w-36 hidden lg:table-cell", label: "Created by" },
     { width: "w-[13%] hidden xl:table-cell", label: "Currently" },
@@ -101,7 +125,7 @@ export default function TaskRowHarness() {
   ];
 
   return (
-    <div className="min-h-screen bg-[#06140c] p-8 text-white">
+    <div className="min-h-screen bg-[#06140c] px-4 py-8 text-white sm:px-6">
       <h1 className="mb-4 text-lg">TaskRow harness</h1>
       <div className="overflow-hidden rounded-xl border border-white/10">
         <table className="w-full table-fixed text-sm">
@@ -111,7 +135,7 @@ export default function TaskRowHarness() {
                 <th
                   key={i}
                   data-testid={`header-${i}`}
-                  className={`px-3 py-2 align-middle md:px-4 md:py-3 ${c.width}`}
+                  className={`px-3 py-2 align-middle md:px-4 md:py-3 ${c.width} ${c.center ? "text-center" : ""}`}
                 >
                   {c.label}
                 </th>
@@ -121,6 +145,12 @@ export default function TaskRowHarness() {
           <tbody data-testid="rows" className="divide-y divide-white/5">
             <TaskRow
               agent={agent}
+              namespace="default"
+              onOpenLogs={(name) => setLastOpened(name)}
+            />
+            {/* Resumed + token worst case for the narrow mobile Task column. */}
+            <TaskRow
+              agent={resumedAgent}
               namespace="default"
               onOpenLogs={(name) => setLastOpened(name)}
             />

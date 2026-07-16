@@ -61,10 +61,18 @@ export const ACTION_ROW_MIN_H = "min-h-[1.875rem]";
  * 123px, + cell padding). A percentage share here grows with the viewport while
  * the content doesn't: it starved these columns at 1024px (the Expires time and
  * Status pill bled into their neighbours) and wasted ~100px per column at 1920px
- * that belongs to the Task column. Below `md` the percentage shares remain:
- * those are header-bound ("STATUS" must fit its cell at 360px), and the compact
- * layout has only four columns. Status/Output share the same widths as the
- * overview panel so the two tables line up.
+ * that belongs to the Task column. Below `md` the columns keep percentage
+ * shares (the compact layout has only four columns), but trimmed to their mobile
+ * content floors: the status pill collapses to a bare icon on mobile, so Status
+ * is bound only by its "STATUS" header (~54px, ~17% at 360px — any narrower and
+ * the unbreakable word overflows and the centered badge reads as left-of-header);
+ * Output is bound by its compact "Issue"/"PR" badge (~67px, ~20%). The surplus
+ * those trims free goes to the `w-auto` Task column, which on mobile must fit the
+ * resumed lineage chip and the token readout beside the (truncating) name — an
+ * over-wide Status/Output starved Task and shoved the token count off to the
+ * right, past the cell (see task-row.spec). To the same end the Task cell drops
+ * to `px-2` and a `gap-1` on mobile, keeping the readout inside the cell. Status/
+ * Output share the same widths as the overview panel so the two tables line up.
  *
  * The primary "Task" column is `w-auto` so it absorbs all the width the fixed
  * columns leave behind. A fixed share here would clamp the description to a
@@ -107,8 +115,8 @@ export const TASK_TABLE_COLUMNS: {
   center?: boolean;
   optional?: "lg" | "xl";
 }[] = [
-  { label: "Status", width: "w-[18%] md:w-[7.5rem]", center: true },
-  { label: "Output", width: "w-[23%] md:w-[7rem]", center: true },
+  { label: "Status", width: "w-[17%] md:w-[7.5rem]", center: true },
+  { label: "Output", width: "w-[20%] md:w-[7rem]", center: true },
   { label: "Task", width: "w-auto" },
   { label: "Created by", width: "w-36", optional: "lg" },
   { label: "Currently", width: "w-[13%]", optional: "xl" },
@@ -179,12 +187,12 @@ export function TaskRow({
         </div>
       </td>
 
-      <td className="px-3 py-2 align-middle md:px-4 md:py-3">
+      <td className="px-2 py-2 align-middle md:px-4 md:py-3">
         {/* Name clamps to one line so a long description can't grow the row
             taller than its neighbours; the full text is on hover. The lineage
             chip and token readout sit outside the truncating span (and won't
             shrink), so neither gets clipped away by a long name. */}
-        <div className="flex min-w-0 items-center gap-1.5">
+        <div className="flex min-w-0 items-center gap-1">
           <ResumedBadge
             parentJobName={agent.parentJobName}
             parentDisplayName={agent.parentDisplayName}

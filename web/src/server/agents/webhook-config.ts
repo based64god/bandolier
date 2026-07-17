@@ -37,6 +37,12 @@ export interface RepoWebhookConfig {
    */
   resumeOnCiFailure: boolean;
   /**
+   * Whether a pull request opened (or marked ready for review) in this repo
+   * gets an automatic Bandolier code review, posted in the bot voice. Off by
+   * default — opt-in, admin-only. A later push to the PR branch re-reviews.
+   */
+  reviewPullRequests: boolean;
+  /**
    * Whether the repo has a fully-configured artifact store (bucket + both
    * credential halves — see `repoArtifactStore`). Resuming a run requires it:
    * without a store no parent transcript was persisted, so a "resumed" run
@@ -160,6 +166,7 @@ export async function getRepoWebhookConfig(
     defaultWebhookEffort: row.defaultWebhookEffort ?? null,
     systemPrompt: row.systemPrompt ?? null,
     resumeOnCiFailure: row.resumeOnCiFailure,
+    reviewPullRequests: row.reviewPullRequests,
     hasArtifactStore: repoArtifactStore(row) !== null,
     networkPolicy: {
       allowPrivateEgress: row.allowPrivateEgress,

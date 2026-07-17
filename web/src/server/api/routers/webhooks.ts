@@ -224,6 +224,7 @@ export const webhooksRouter = createTRPCRouter({
           computeMemory: repoWebhookConfig.computeMemory,
           systemPrompt: repoWebhookConfig.systemPrompt,
           resumeOnCiFailure: repoWebhookConfig.resumeOnCiFailure,
+          reviewPullRequests: repoWebhookConfig.reviewPullRequests,
           allowPrivateEgress: repoWebhookConfig.allowPrivateEgress,
           allowAllPortsEgress: repoWebhookConfig.allowAllPortsEgress,
           networkPolicyYaml: repoWebhookConfig.networkPolicyYaml,
@@ -291,10 +292,13 @@ export const webhooksRouter = createTRPCRouter({
         // Whether a failing CI pipeline auto-resumes the run that produced the
         // PR (off unless a row turns it on).
         resumeOnCiFailure: row?.resumeOnCiFailure ?? false,
+        // Whether pull requests opened in the repo get an automatic bot-voice
+        // review (off unless a row turns it on).
+        reviewPullRequests: row?.reviewPullRequests ?? false,
         // Whether the repo has a usable artifact store. Resume features (by
-        // comment or by CI failure) require it — resumed runs are seeded with
-        // the parent's persisted transcript — so the UI gates their controls
-        // on this.
+        // comment, by CI failure, or a review's re-review on push) require it —
+        // resumed runs are seeded with the parent's persisted transcript — so
+        // the UI gates their controls on this.
         hasArtifactStore: row ? repoArtifactStore(row) !== null : false,
         // Network-policy egress toggles (both off unless a row turns them on).
         allowPrivateEgress,
@@ -509,6 +513,53 @@ export const webhooksRouter = createTRPCRouter({
       }
       await upsertRepoConfig(ctx.db, input.repoFullName, ctx.session.user.id, {
         resumeOnCiFailure: input.enabled,
+      });
+      return { success: true };
+    }),
+
+  // Toggle whether pull requests opened (or marked ready for review) in the repo
+  // get an automatic Bandolier code review, posted in the bandolier[bot] voice.
+  // Admin-only; off by default — opt-in, since a review spends the run owner's
+  // model credentials. Like auto-resume it requires the repo's artifact store:
+  // a push to the PR branch re-reviews by resuming the review run, which is
+  // seeded with the parent's persisted transcript. Partial upsert so it doesn't
+  // clobber other config.
+  setReviewPullRequests: protectedProcedure
+    .input(
+      z.object({
+        repoFullName: z.string().min(1),
+        enabled: z.boolean(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await requireRepoAdmin(ctx, input.repoFullName);
+      // Enabling requires the artifact store, so a later push can resume the
+      // review run (seeded with its persisted transcript) to re-review the
+      // changes. Disabling is always allowed, so removing the store later
+      // doesn't strand this toggle.
+      if (input.enabled) {
+        const [row] = await ctx.db
+          .select({
+            artifactsS3Bucket: repoWebhookConfig.artifactsS3Bucket,
+            artifactsS3Region: repoWebhookConfig.artifactsS3Region,
+            artifactsS3Endpoint: repoWebhookConfig.artifactsS3Endpoint,
+            artifactsAccessKeyId: repoWebhookConfig.artifactsAccessKeyId,
+            artifactsSecretAccessKey:
+              repoWebhookConfig.artifactsSecretAccessKey,
+          })
+          .from(repoWebhookConfig)
+          .where(eq(repoWebhookConfig.repoFullName, input.repoFullName))
+          .limit(1);
+        if (!row || repoArtifactStore(row) === null) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message:
+              "PR reviews need the repo's artifact store (S3 bucket + keys) — a push to the PR branch re-reviews by resuming the review run from its stored transcript. Configure artifact storage first.",
+          });
+        }
+      }
+      await upsertRepoConfig(ctx.db, input.repoFullName, ctx.session.user.id, {
+        reviewPullRequests: input.enabled,
       });
       return { success: true };
     }),

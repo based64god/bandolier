@@ -128,6 +128,7 @@ describe("getRepoWebhookConfig", () => {
         defaultWebhookEffort: "high",
         systemPrompt: "be terse",
         resumeOnCiFailure: true,
+        reviewPullRequests: true,
         allowPrivateEgress: true,
         allowAllPortsEgress: false,
         networkPolicyYaml: "kind: NetworkPolicy",
@@ -144,6 +145,7 @@ describe("getRepoWebhookConfig", () => {
       defaultWebhookEffort: "high",
       systemPrompt: "be terse",
       resumeOnCiFailure: true,
+      reviewPullRequests: true,
       hasArtifactStore: true,
       networkPolicy: {
         allowPrivateEgress: true,
@@ -163,6 +165,7 @@ describe("getRepoWebhookConfig", () => {
         defaultWebhookEffort: null,
         systemPrompt: null,
         resumeOnCiFailure: false,
+        reviewPullRequests: false,
         allowPrivateEgress: false,
         allowAllPortsEgress: false,
         networkPolicyYaml: null,
@@ -176,6 +179,7 @@ describe("getRepoWebhookConfig", () => {
       defaultWebhookEffort: null,
       systemPrompt: null,
       resumeOnCiFailure: false,
+      reviewPullRequests: false,
       hasArtifactStore: false,
       networkPolicy: {
         allowPrivateEgress: false,

@@ -78,7 +78,7 @@ function StateIndicator({
       fill="currentColor"
       role="img"
       aria-label={cfg.label}
-      className={`h-3 w-3 shrink-0 md:h-3.5 md:w-3.5 ${cfg.className}`}
+      className={`h-3.5 w-3.5 shrink-0 ${cfg.className}`}
     >
       <title>{cfg.label}</title>
       <path d={cfg.iconPath} />
@@ -90,12 +90,20 @@ const ISSUE_ICON =
   "M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0Zm0 4a1 1 0 0 1 1 1v3a1 1 0 0 1-2 0V5a1 1 0 0 1 1-1Zm0 7.5a1.1 1.1 0 1 1 0 2.2 1.1 1.1 0 0 1 0-2.2Z";
 const PR_ICON =
   "M5 3.25a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Zm0 2.122a2.25 2.25 0 1 0-1.5 0v5.256a2.251 2.251 0 1 0 1.5 0V5.372ZM5 12.75a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Zm6-2.626a2.251 2.251 0 1 0 1.5 0V6.75A3.75 3.75 0 0 0 8.75 3H7.81l.72-.72a.75.75 0 0 0-1.06-1.06L5.22 3.47a.75.75 0 0 0 0 1.06l2.25 2.25a.75.75 0 0 0 1.06-1.06l-.72-.72h.94A2.25 2.25 0 0 1 11 6.75v3.374Zm.75 3.314a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5Z";
+// Octicon "eye": a review's output is a posted review rather than a new PR, so
+// its collapsed mobile glyph is an eye to set it apart from the PR branch icon.
+const REVIEW_ICON =
+  "M8 2c1.981 0 3.671.992 4.933 2.078 1.27 1.091 2.187 2.345 2.637 3.023a1.62 1.62 0 0 1 0 1.798c-.45.678-1.367 1.932-2.637 3.023C11.67 13.008 9.981 14 8 14c-1.981 0-3.671-.992-4.933-2.078C1.797 10.83.88 9.576.43 8.898a1.62 1.62 0 0 1 0-1.798c.45-.677 1.367-1.931 2.637-3.022C4.33 2.992 6.019 2 8 2ZM1.679 7.932a.12.12 0 0 0 0 .136c.411.622 1.241 1.75 2.366 2.717C5.176 11.758 6.527 12.5 8 12.5c1.473 0 2.825-.742 3.955-1.715 1.124-.967 1.954-2.096 2.366-2.717a.12.12 0 0 0 0-.136c-.412-.621-1.242-1.75-2.366-2.717C10.824 4.242 9.473 3.5 8 3.5c-1.473 0-2.825.742-3.955 1.715-1.124.967-1.954 2.096-2.366 2.717ZM8 10a2 2 0 1 1-.001-3.999A2 2 0 0 1 8 10Z";
 
 /**
  * A PR/issue badge that links to GitHub and shows its open/closed/merged state.
- * `showIcon` adds the kind glyph (used in the roomier overview table); the
- * compact task rows omit it. The state indicator is a small inline glyph that
- * trails the label.
+ * The text label doesn't fit the narrow Output column on phone-width viewports
+ * (the longer "Review" pill overflowed it), so below `md` the badge collapses to
+ * its kind glyph — matching the Status column, which likewise drops its text for
+ * an icon on mobile. `showIcon` keeps the glyph visible at `md` and up too
+ * (alongside the label) for the roomier overview table; otherwise the glyph is
+ * the mobile-only stand-in for the label. The state indicator is a small inline
+ * glyph that trails the label at every width.
  */
 function LinkedBadge({
   href,
@@ -104,6 +112,7 @@ function LinkedBadge({
   iconPath,
   state,
   kind,
+  showIcon = false,
   onClick,
 }: {
   href: string;
@@ -112,6 +121,7 @@ function LinkedBadge({
   iconPath?: string;
   state: ItemState | null;
   kind?: "pull" | "issue";
+  showIcon?: boolean;
   onClick?: (e: React.MouseEvent) => void;
 }) {
   return (
@@ -120,19 +130,23 @@ function LinkedBadge({
       target="_blank"
       rel="noopener noreferrer"
       onClick={onClick}
-      className={`inline-flex items-center gap-1 rounded-md border px-1 py-1 text-[11px] whitespace-nowrap transition md:gap-1.5 md:px-2 md:text-xs ${className}`}
+      className={`inline-flex items-center gap-1.5 rounded-md border px-1.5 py-1 text-xs whitespace-nowrap transition md:px-2 ${className}`}
     >
       {iconPath && (
         <svg
           viewBox="0 0 16 16"
           fill="currentColor"
           aria-hidden="true"
-          className="h-3 w-3 shrink-0 md:h-3.5 md:w-3.5"
+          className={
+            showIcon ? "h-3.5 w-3.5 shrink-0" : "h-3.5 w-3.5 shrink-0 md:hidden"
+          }
         >
           <path d={iconPath} />
         </svg>
       )}
-      {label}
+      <span className={iconPath && !showIcon ? "hidden md:inline" : ""}>
+        {label}
+      </span>
       {state && <StateIndicator state={state} kind={kind} />}
     </a>
   );
@@ -163,7 +177,8 @@ export function OutputBadge({
       <LinkedBadge
         href={createdIssueUrl}
         label="Issue"
-        iconPath={showIcon ? ISSUE_ICON : undefined}
+        iconPath={ISSUE_ICON}
+        showIcon={showIcon}
         state={createdIssueState}
         className="border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20"
       />
@@ -174,7 +189,8 @@ export function OutputBadge({
       <LinkedBadge
         href={pullRequestUrl}
         label={prLabel}
-        iconPath={showIcon ? PR_ICON : undefined}
+        iconPath={prLabel === "Review" ? REVIEW_ICON : PR_ICON}
+        showIcon={showIcon}
         state={pullRequestState}
         kind="pull"
         className="border-purple-500/30 bg-purple-500/10 text-purple-300 hover:bg-purple-500/20"

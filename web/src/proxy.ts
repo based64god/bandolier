@@ -18,6 +18,7 @@ export const EXEMPT_EXACT: ReadonlySet<string> = new Set([
   // no session/password to present). Every route under src/app/api that calls
   // verifyIngestToken must be represented here; proxy.test.ts asserts this.
   "/api/agent-runs",
+  "/api/agent-runs/review",
   "/api/agent-input",
   "/api/acp",
   // The version endpoint (just a build id; clients poll it to detect deploys).

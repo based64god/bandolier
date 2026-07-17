@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 
 import { createAgentJob } from "~/server/agents/create-job";
 import { getRegistryPullSecret } from "~/server/agents/github-app";
@@ -57,6 +57,13 @@ export interface CommentResume {
    * comments; folded into the resume user message when present.
    */
   reviewComment?: ReviewCommentLocation;
+  /**
+   * The id of the review a PR review comment belongs to. When it matches a
+   * review Bandolier itself posted, the comment is that review's own output
+   * (not a human reply), so it must not resume anything. Absent for vanilla
+   * comments.
+   */
+  reviewId?: number | null;
 }
 
 /**
@@ -84,6 +91,31 @@ export async function resumeFromComment(
   // "picked up / resuming" acknowledgements, which would otherwise loop.
   if (user.type === "Bot" || user.login.endsWith("[bot]")) {
     return;
+  }
+
+  // A review Bandolier itself posted must not resume anything on its own inline
+  // comments. Bot-voice reviews are caught by the filter above, but a
+  // dashboard review is posted in the user's voice — so its comments look
+  // human. Skip when the comment belongs to a review we recorded posting
+  // (task_run.posted_review_id).
+  if (input.reviewId != null) {
+    const [posted] = await db
+      .select({ jobName: taskRun.jobName })
+      .from(taskRun)
+      .where(
+        and(
+          eq(taskRun.repoFullName, repository.full_name),
+          eq(taskRun.postedReviewId, String(input.reviewId)),
+        ),
+      )
+      .limit(1);
+    if (posted) {
+      console.log(
+        "[bandolier:webhook] comment skipped — it's a Bandolier review's own comment",
+        { ...logCtx, review: input.reviewId, run: posted.jobName },
+      );
+      return;
+    }
   }
 
   const commentBody = input.body ?? "";
@@ -114,7 +146,10 @@ export async function resumeFromComment(
 
   // The parent is the most recent run for the commented item: matched by PR
   // URL for pull requests, by repo + issue number for issues. No parent run
-  // means there is nothing to resume.
+  // means there is nothing to resume. Review runs are excluded (reviewed_pr_url
+  // is null on coding runs): a comment on a PR — including a reply to one of the
+  // bot's review comments — resumes the run that *opened* the PR, not the review
+  // of it; a push to the branch re-reviews (see handlePullRequestSynchronize).
   const [parent] = await db
     .select({
       jobName: taskRun.jobName,
@@ -127,10 +162,12 @@ export async function resumeFromComment(
         ? and(
             eq(taskRun.repoFullName, repository.full_name),
             eq(taskRun.pullRequestUrl, input.pullRequestUrl!),
+            isNull(taskRun.reviewedPrUrl),
           )
         : and(
             eq(taskRun.repoFullName, repository.full_name),
             eq(taskRun.issueNumber, String(input.number)),
+            isNull(taskRun.reviewedPrUrl),
           ),
     )
     .orderBy(desc(taskRun.createdAt))

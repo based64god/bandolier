@@ -32,11 +32,12 @@ import (
 // from the config and the environment up front, rather than mutating cfg in
 // place across a switch.
 type runMode struct {
-	prBranch    string
-	prTitle     string
-	prBody      string
-	issueOutput bool
-	parentIssue *githubIssue // the originating issue, when triggered by one
+	prBranch     string
+	prTitle      string
+	prBody       string
+	issueOutput  bool
+	reviewOutput bool         // analyse a PR read-only and submit a review
+	parentIssue  *githubIssue // the originating issue, when triggered by one
 }
 
 // orSignal maps a driver/step error to the run's result: a nil error when the
@@ -204,7 +205,7 @@ func setupGit(ctx context.Context, cfg config, name, email string) error {
 // where they need to be built (issue context, working-agreement framing) but no
 // longer threads that state through an in-place mutation of a shared switch.
 func resolveMode(ctx context.Context, cfg *config) (runMode, error) {
-	mode := runMode{issueOutput: cfg.issueOutput()}
+	mode := runMode{issueOutput: cfg.issueOutput(), reviewOutput: cfg.reviewOutput()}
 
 	switch {
 	case cfg.issueNumber != "":
@@ -246,7 +247,16 @@ func resolveMode(ctx context.Context, cfg *config) (runMode, error) {
 	case cfg.repoURL != "":
 		// ── Repo mode (dashboard deploy against a repository) ────────────────────
 		log.Printf("[harness] repo mode (output=%s)", cfg.outputType)
-		if mode.issueOutput {
+		if mode.reviewOutput {
+			// Review an existing PR read-only: check out its head so the working
+			// tree holds the change, and frame the review objective. No branch,
+			// no commits, no PR. The server leaves the system prompt unset (like
+			// issue output); build it here unless one was supplied.
+			checkoutPR(ctx, *cfg)
+			if strings.TrimSpace(cfg.systemPrompt) == "" {
+				cfg.systemPrompt = buildReviewOutputSystemPrompt(cfg.reviewPRNumber, cfg.reviewFile)
+			}
+		} else if mode.issueOutput {
 			// Analysis-only; the harness opens an issue from the findings. The
 			// interactive path is framed in runAgent.
 			if !cfg.interactive {
@@ -364,6 +374,13 @@ func finish(ctx context.Context, cfg config, mode runMode, name, email string) e
 	// ── Post-run: open an issue from the findings (issue-output mode) ───────────
 	if mode.issueOutput {
 		if err := orSignal(ctx, openIssue(ctx, cfg, transcript.String(), mode.parentIssue), "open issue"); err != nil {
+			return err
+		}
+	}
+
+	// ── Post-run: submit the PR review (review-output mode) ─────────────────────
+	if mode.reviewOutput {
+		if err := orSignal(ctx, submitReview(ctx, cfg, transcript.String()), "submit review"); err != nil {
 			return err
 		}
 	}

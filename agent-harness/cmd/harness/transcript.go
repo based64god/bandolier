@@ -47,7 +47,7 @@ var (
 // custom agent image was built from harness source older than what the server
 // now expects of it. Pinned in wire-contract.json (repo root) and asserted
 // against it by wire_contract_test.go; bump only together with that file.
-const harnessContractVersion = 1
+const harnessContractVersion = 2
 
 // outputPRURL / outputIssueURL hold the run's structured output (the pull
 // request or issue the harness produced). They're reported to Bandolier via the

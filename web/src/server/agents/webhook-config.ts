@@ -21,6 +21,12 @@ export interface RepoWebhookConfig {
   /** Default model id for webhook-triggered agents; null means provider default. */
   defaultWebhookModel: string | null;
   /**
+   * Model id for PR-review runs specifically; null falls back to
+   * `defaultWebhookModel`, then the provider default. Lets a repo review with a
+   * different model than it writes code with.
+   */
+  reviewModel: string | null;
+  /**
    * Default reasoning-effort level for webhook-triggered Claude agents
    * (low|medium|high|xhigh|max); null means the CLI default. Ignored for
    * non-Claude providers. An issue's `effort:<level>` label overrides it.
@@ -36,6 +42,12 @@ export interface RepoWebhookConfig {
    * produced its branch (the webhook's `workflow_run` handler). Off by default.
    */
   resumeOnCiFailure: boolean;
+  /**
+   * Whether a pull request opened (or marked ready for review) in this repo
+   * gets an automatic Bandolier code review, posted in the bot voice. Off by
+   * default — opt-in, admin-only. A later push to the PR branch re-reviews.
+   */
+  reviewPullRequests: boolean;
   /**
    * Whether the repo has a fully-configured artifact store (bucket + both
    * credential halves — see `repoArtifactStore`). Resuming a run requires it:
@@ -157,9 +169,11 @@ export async function getRepoWebhookConfig(
     triggerOnAllEvents: row.triggerOnAllEvents,
     agentImage: row.agentImage ?? null,
     defaultWebhookModel: row.defaultWebhookModel ?? null,
+    reviewModel: row.reviewModel ?? null,
     defaultWebhookEffort: row.defaultWebhookEffort ?? null,
     systemPrompt: row.systemPrompt ?? null,
     resumeOnCiFailure: row.resumeOnCiFailure,
+    reviewPullRequests: row.reviewPullRequests,
     hasArtifactStore: repoArtifactStore(row) !== null,
     networkPolicy: {
       allowPrivateEgress: row.allowPrivateEgress,

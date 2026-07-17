@@ -10,6 +10,7 @@ export type WebhookRunConfig = Pick<
   | "triggerOnAllEvents"
   | "agentImage"
   | "defaultWebhookModel"
+  | "reviewModel"
   | "defaultWebhookEffort"
   | "systemPrompt"
   | "networkPolicy"
@@ -78,6 +79,10 @@ export interface PullRequestReviewCommentPayload {
     id: number;
     body: string | null;
     user: { id: number; login: string; type?: string };
+    // The review this comment belongs to. When it names a review Bandolier
+    // posted (task_run.posted_review_id), the comment is the review's own — not
+    // a human reply — so it must not resume anything.
+    pull_request_review_id: number | null;
     path: string;
     // The line the comment targets in the file's new (`RIGHT`) or old (`LEFT`)
     // side. Null when the comment is on an outdated diff GitHub can't remap.
@@ -95,6 +100,30 @@ export interface PullRequestReviewCommentPayload {
     labels: { name: string }[];
   };
   repository: GitHubRepository;
+  sender: { id: number; login: string };
+}
+
+// `pull_request` event: a PR was opened, marked ready for review, or had new
+// commits pushed to its branch (synchronize), among other actions. Drives
+// automatic PR reviews: `opened`/`ready_for_review` start a review, and
+// `synchronize` re-reviews by resuming the PR's review run. Only the fields the
+// review handlers read are modelled.
+export interface PullRequestPayload {
+  action: string;
+  number: number;
+  pull_request: {
+    number: number;
+    title: string;
+    body: string | null;
+    html_url: string;
+    labels: { name: string }[];
+    // A draft PR isn't ready for review; a later `ready_for_review` clears this.
+    draft?: boolean;
+    user: { id: number; login: string; type?: string };
+  };
+  repository: GitHubRepository;
+  // Who triggered the event: the opener for `opened`, the pusher for
+  // `synchronize`. The run is owned by (and spends the credentials of) this user.
   sender: { id: number; login: string };
 }
 

@@ -183,6 +183,7 @@ export function TaskRow({
             createdIssueState={agent.createdIssueState}
             pullRequestUrl={agent.pullRequestUrl}
             pullRequestState={agent.pullRequestState}
+            prLabel={agent.outputType === "review" ? "Review" : "PR"}
           />
         </div>
       </td>

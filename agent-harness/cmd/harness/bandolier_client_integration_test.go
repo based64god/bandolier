@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -183,8 +184,9 @@ func TestBandolierCallbackConformance(t *testing.T) {
 
 		req := f.lastRequest(t, http.MethodPost, "/ingest")
 		assertAuthHeaders(t, req)
-		if got := req.headers.Get("X-Bandolier-Harness-Contract"); got != "1" {
-			t.Errorf("X-Bandolier-Harness-Contract = %q, want %q", got, "1")
+		want := fmt.Sprintf("%d", harnessContractVersion)
+		if got := req.headers.Get("X-Bandolier-Harness-Contract"); got != want {
+			t.Errorf("X-Bandolier-Harness-Contract = %q, want %q", got, want)
 		}
 		if got := req.headers.Get("X-Bandolier-Status"); got != "Succeeded" {
 			t.Errorf("X-Bandolier-Status = %q, want Succeeded", got)

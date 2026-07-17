@@ -8,7 +8,11 @@ import { z } from "zod";
 import { env } from "~/env";
 import { getArtifact, resolveArtifactStore } from "~/server/agents/artifacts";
 import { validateAwsCredentials } from "~/server/agents/aws";
-import { postIssueCommentWithFallback } from "~/server/agents/github-issues";
+import {
+  getIssue,
+  postIssueCommentWithFallback,
+} from "~/server/agents/github-issues";
+import { buildReviewUserMessage } from "~/lib/review-prompt";
 import {
   assertOwnsInteractiveJob,
   assertRepoAccess,
@@ -718,15 +722,21 @@ export const agentsRouter = createTRPCRouter({
           // Run as a long-lived interactive session that waits for user input
           // between turns instead of a one-shot task.
           interactive: z.boolean().optional(),
-          // What the run produces: a pull request (default) or a GitHub issue.
-          // "issue" runs the agent read-only and opens one issue from its
-          // findings (a sub-task of the selected issue, when one is picked).
-          outputType: z.enum(["pr", "issue"]).optional(),
+          // What the run produces: a pull request (default), a GitHub issue, or
+          // a PR review. "issue" runs the agent read-only and opens one issue
+          // from its findings; "review" reviews reviewPrNumber read-only and the
+          // review is posted in the deploying user's voice.
+          outputType: z.enum(["pr", "issue", "review"]).optional(),
+          // The pull request a "review" run reviews. Required for review output.
+          reviewPrNumber: z.number().int().positive().optional(),
         })
         .refine(
-          (v) => v.task.trim().length > 0 || v.issueNumber !== undefined,
+          (v) =>
+            v.task.trim().length > 0 ||
+            v.issueNumber !== undefined ||
+            (v.outputType === "review" && v.reviewPrNumber !== undefined),
           {
-            message: "Provide a task or select an issue.",
+            message: "Provide a task, select an issue, or pick a PR to review.",
             path: ["task"],
           },
         ),
@@ -741,6 +751,15 @@ export const agentsRouter = createTRPCRouter({
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: "A repository is required to create an issue.",
+        });
+      }
+
+      // Review output reviews a specific PR in a repository, read-only.
+      const reviewOutput = input.outputType === "review";
+      if (reviewOutput && (!input.repoFullName || !input.reviewPrNumber)) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "A repository and a pull request number are required to review.",
         });
       }
 
@@ -870,15 +889,58 @@ export const agentsRouter = createTRPCRouter({
             issueOutput,
           );
 
+        // A dashboard review targets a specific PR, read-only, and is posted in
+        // the deploying user's voice (reviewAsUser). Build its context from the
+        // PR — the harness re-fetches the diff, so a lookup failure just falls
+        // back to a numbered display name rather than blocking the deploy.
+        let reviewCtx:
+          | {
+              task: string;
+              displayName: string;
+              reviewPrNumber: string;
+              reviewedPrUrl: string;
+            }
+          | undefined;
+        if (reviewOutput) {
+          let pr = null;
+          try {
+            pr = githubToken
+              ? await getIssue(
+                  githubToken,
+                  input.repoFullName!,
+                  input.reviewPrNumber!,
+                )
+              : null;
+          } catch (err) {
+            console.warn("[bandolier:deploy] review PR lookup failed", {
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+          const title = pr?.title ?? `#${input.reviewPrNumber}`;
+          reviewCtx = {
+            task: buildReviewUserMessage({
+              number: input.reviewPrNumber!,
+              title,
+              body: pr?.body ?? "",
+            }),
+            displayName: `Review #${input.reviewPrNumber}: ${title}`,
+            reviewPrNumber: String(input.reviewPrNumber),
+            reviewedPrUrl:
+              pr?.url ??
+              `https://github.com/${input.repoFullName}/pull/${input.reviewPrNumber}`,
+          };
+        }
+
         // PR-producing runs (repo or issue mode) get their PR title/description
         // written out-of-band of the (possibly larger) task model by a cheap
         // same-provider writer (the latest Sonnet / GPT mini / Flash), picked
         // only from the models the run's resolved credentials serve — a
         // subscription run must never be handed a dated API-key model id it
         // can't invoke. Best-effort: a lookup failure falls back to the
-        // harness's commit-based title and must not block the deploy.
+        // harness's commit-based title and must not block the deploy. A review
+        // produces no PR, so it's skipped.
         let prWriterModel: string | undefined;
-        if (provider && (repoUrl ?? issue ?? issueOutput)) {
+        if (provider && !reviewOutput && (repoUrl ?? issue ?? issueOutput)) {
           try {
             const { models } = await listModelsForUser(
               ctx.db,
@@ -905,10 +967,11 @@ export const agentsRouter = createTRPCRouter({
 
         const jobName = await createAgentJob({
           namespace: input.namespace,
-          task,
-          systemPrompt,
-          agentBranch,
-          displayName,
+          task: reviewCtx ? reviewCtx.task : task,
+          // A review is read-only: the harness frames it and cuts no branch.
+          systemPrompt: reviewCtx ? undefined : systemPrompt,
+          agentBranch: reviewCtx ? undefined : agentBranch,
+          displayName: reviewCtx ? reviewCtx.displayName : displayName,
           repoUrl,
           repoFullName: input.repoFullName,
           branch: input.branch,
@@ -922,8 +985,13 @@ export const agentsRouter = createTRPCRouter({
           maxTurns: input.maxTurns,
           compute,
           prWriterModel,
-          interactive: input.interactive,
+          // A review is always one-shot, never an interactive session.
+          interactive: reviewOutput ? undefined : input.interactive,
           outputType: input.outputType,
+          // Review fields (dashboard reviews are posted in the user's voice).
+          reviewPrNumber: reviewCtx?.reviewPrNumber,
+          reviewedPrUrl: reviewCtx?.reviewedPrUrl,
+          reviewAsUser: reviewOutput ? true : undefined,
           issueNumber: issue ? String(issue.number) : undefined,
           issueUrl: issue?.url,
           userId,

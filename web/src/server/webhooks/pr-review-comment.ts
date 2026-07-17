@@ -27,6 +27,7 @@ export async function handlePrReviewComment(
       repository,
       user: comment.user,
       body: comment.body ?? "",
+      reviewId: comment.pull_request_review_id,
       reviewComment: {
         path: comment.path,
         line: comment.line,

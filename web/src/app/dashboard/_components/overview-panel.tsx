@@ -183,6 +183,7 @@ export function OverviewPanel({ notify }: { notify: boolean }) {
                       createdIssueState={agent.createdIssueState}
                       pullRequestUrl={agent.pullRequestUrl}
                       pullRequestState={agent.pullRequestState}
+                      prLabel={agent.outputType === "review" ? "Review" : "PR"}
                     />
                   </td>
 

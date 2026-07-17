@@ -14,9 +14,14 @@ import {
 } from "~/server/webhooks/issue-opened";
 import { handlePrReviewComment } from "~/server/webhooks/pr-review-comment";
 import {
+  handlePullRequestOpened,
+  handlePullRequestSynchronize,
+} from "~/server/webhooks/pull-request";
+import {
   type InstallationPayload,
   type IssueCommentPayload,
   type IssuePayload,
+  type PullRequestPayload,
   type PullRequestReviewCommentPayload,
   type WorkflowRunPayload,
 } from "~/server/webhooks/types";
@@ -139,6 +144,22 @@ export async function POST(req: NextRequest) {
           ? await getRepoWebhookConfig(db, repoFullName)
           : null;
         await handlePrReviewComment(p, config);
+      }
+    } else if (event === "pull_request") {
+      // A pull request opened / marked ready for review gets an automatic
+      // bot-voice review; a push to its branch (synchronize) re-reviews it. Both
+      // are gated on the repo's opt-in, so the config read and handler work only
+      // happen for repos that turned reviews on.
+      const p = payload as PullRequestPayload;
+      const config = repoFullName
+        ? await getRepoWebhookConfig(db, repoFullName)
+        : null;
+      if (config?.reviewPullRequests) {
+        if (p.action === "opened" || p.action === "ready_for_review") {
+          await handlePullRequestOpened(p, config);
+        } else if (p.action === "synchronize") {
+          await handlePullRequestSynchronize(p, config);
+        }
       }
     } else if (
       event === "workflow_run" &&

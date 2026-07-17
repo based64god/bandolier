@@ -39,6 +39,40 @@ export async function listOpenIssues(
     }));
 }
 
+
+/** A pull request, as surfaced by the deploy modal's PR-review picker. */
+export interface GithubPull {
+  number: number;
+  title: string;
+  url: string;
+}
+
+interface RawOpenPull {
+  number: number;
+  title: string;
+  html_url: string;
+}
+
+/** Lists open pull requests for a repo, for the deploy modal's review picker. */
+export async function listOpenPulls(
+  token: string,
+  repoFullName: string,
+): Promise<GithubPull[]> {
+  const url = new URL(`https://api.github.com/repos/${repoFullName}/pulls`);
+  url.searchParams.set("state", "open");
+  url.searchParams.set("per_page", "100");
+  url.searchParams.set("sort", "updated");
+  url.searchParams.set("direction", "desc");
+
+  const res = await ghFetch(url, token);
+  const raw = (await res.json()) as RawOpenPull[];
+  return raw.map((p) => ({
+    number: p.number,
+    title: p.title,
+    url: p.html_url,
+  }));
+}
+
 /**
  * Whether a GitHub PR or issue is open, closed, or (PRs only) merged.
  * "completed" is a closed issue that was resolved as done (e.g. closed by a

@@ -78,7 +78,7 @@ function StateIndicator({
       fill="currentColor"
       role="img"
       aria-label={cfg.label}
-      className={`h-3.5 w-3.5 shrink-0 ${cfg.className}`}
+      className={`h-3 w-3 shrink-0 md:h-3.5 md:w-3.5 ${cfg.className}`}
     >
       <title>{cfg.label}</title>
       <path d={cfg.iconPath} />
@@ -120,14 +120,14 @@ function LinkedBadge({
       target="_blank"
       rel="noopener noreferrer"
       onClick={onClick}
-      className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs whitespace-nowrap transition ${className}`}
+      className={`inline-flex items-center gap-1 rounded-md border px-1 py-1 text-[11px] whitespace-nowrap transition md:gap-1.5 md:px-2 md:text-xs ${className}`}
     >
       {iconPath && (
         <svg
           viewBox="0 0 16 16"
           fill="currentColor"
           aria-hidden="true"
-          className="h-3.5 w-3.5 shrink-0"
+          className="h-3 w-3 shrink-0 md:h-3.5 md:w-3.5"
         >
           <path d={iconPath} />
         </svg>

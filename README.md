@@ -195,7 +195,7 @@ Encrypt TLS — and installs the chart, in one `tofu apply`.
 
 To have agents launch automatically when issues are opened, install the Bandolier GitHub App:
 
-1. Create a GitHub App (Settings → Developer settings → GitHub Apps). Give it a webhook URL of `https://<your-host>/api/webhooks/github`, a webhook secret, and these repository permissions: **Issues** (read & write), **Pull requests** (read & write), **Contents** (read), **Actions** (read), and **Metadata** (read). Subscribe to the **Issues**, **Issue comment**, **Pull request review comment**, and **Workflow run** events. Issue comment powers resuming a run by commenting on its issue or PR, and drives the maintainer-approval flow for runs on shared repo credentials (see [Repository credentials and the maintainer gate](#repository-credentials-and-the-maintainer-gate)); Pull request review comment extends both of those to a PR's inline review comments (left on a specific line of the diff); Workflow run (with the Actions read permission) powers auto-resuming a run when a CI pipeline fails on the pull request it produced, for repos that opt into it in the repo config. Generate a private key. (Pulling private custom harness images from GHCR uses the triggering user's OAuth `read:packages` scope, not an App permission — see [The agent harness image](#the-agent-harness-image).)
+1. Create a GitHub App (Settings → Developer settings → GitHub Apps). Give it a webhook URL of `https://<your-host>/api/webhooks/github`, a webhook secret, and these repository permissions: **Issues** (read & write), **Pull requests** (read & write), **Contents** (read), **Actions** (read), and **Metadata** (read). Subscribe to the **Issues**, **Issue comment**, **Pull request**, **Pull request review comment**, and **Workflow run** events. Issue comment powers resuming a run by commenting on its issue or PR, and drives the maintainer-approval flow for runs on shared repo credentials (see [Repository credentials and the maintainer gate](#repository-credentials-and-the-maintainer-gate)); Pull request review comment extends both of those to a PR's inline review comments (left on a specific line of the diff); Pull request powers automatic PR reviews for repos that opt into them (a review when a PR opens, and a re-review when its branch is updated — see [Automatic PR reviews](#automatic-pr-reviews-optional)); Workflow run (with the Actions read permission) powers auto-resuming a run when a CI pipeline fails on the pull request it produced, for repos that opt into it in the repo config. Generate a private key. (Pulling private custom harness images from GHCR uses the triggering user's OAuth `read:packages` scope, not an App permission — see [The agent harness image](#the-agent-harness-image).)
 2. Set `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY` (PEM, `\n`-escaped), and `GITHUB_WEBHOOK_SECRET` (the App's webhook secret) in the app's environment. Optionally set `NEXT_PUBLIC_GITHUB_APP_SLUG` so the repo-config UI links to the App's install page.
 3. Install the App on the repos you want Bandolier to act on. The App delivers events automatically — there's no per-repo webhook to add.
 
@@ -212,6 +212,19 @@ Commenting on an issue or pull request that a run already worked on **resumes** 
 This works for both a pull request's vanilla conversation comments and its inline **review comments** (left on a specific line of the diff). A review-comment resume additionally hands the agent the file, line range, and diff hunk the comment is anchored to, so it knows exactly which code the reviewer is pointing at.
 
 Comments from bots are ignored (including Bando's own acknowledgements), a comment only ever resumes — one with no prior run does nothing — and the repo's trigger phrase, when configured, applies to comments too.
+
+---
+
+## Automatic PR reviews (optional)
+
+A repo admin can opt a repository into **automatic pull-request reviews** (in the repo-config UI, off by default like every repo setting). When on, opening a pull request — or marking a draft ready for review — spawns a read-only agent that analyses the PR and posts a code review: an overall summary plus inline comments anchored to the diff. Unlike the coding agent, a review never touches a branch, commits, or opens anything; it only reviews.
+
+**Attribution is always the `bandolier[bot]` voice, never a user.** The agent produces the review content read-only in its pod, but the review itself is posted server-side with the GitHub App installation token — the same bot identity as Bando's acknowledgement comments — so it is never attributed to the triggering user's credentials. (The run is owned by, and spends the model credentials of, the PR's author, like an issue-triggered run; if they aren't a Bandolier user with credentials, the PR is simply not reviewed.)
+
+Reviews are **resumable in two complementary ways**:
+
+- **Pushing new commits to the PR's branch** (a `pull_request` synchronize) re-reviews it: the review run resumes from its persisted transcript and reviews the update, focusing on whether earlier feedback was addressed and on newly introduced changes. This needs the repo's [artifact storage](#run-artifacts-optional) (the transcript to resume from) and a prior review to continue.
+- **Replying to one of the review's comments** resumes the **run that opened the pull request** (the coding task), not the review — so the agent that wrote the code addresses the feedback and pushes a fix, which in turn triggers a fresh re-review. The repo's trigger phrase applies to these replies as it does to any comment resume.
 
 ---
 

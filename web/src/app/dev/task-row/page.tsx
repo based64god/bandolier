@@ -108,6 +108,22 @@ export default function TaskRowHarness() {
       createdIssueState: "completed",
       expiresAt: wideExpiry,
     },
+    {
+      name: "task-review",
+      displayName: "Review #67890: Add a feature",
+      status: "Succeeded",
+      ownedByViewer: true,
+      tokens: null,
+      currently: "reviewing the pull request diff",
+      source: "manual",
+      outputType: "review",
+      // A review run's output is the posted review; its URL lands in
+      // pullRequestUrl and the badge reads "Review".
+      pullRequestUrl:
+        "https://github.com/acme/widgets/pull/67890#pullrequestreview-1",
+      pullRequestState: "open",
+      expiresAt: wideExpiry,
+    },
   ] as unknown as Task[];
 
   // Columns copied from the real task table's <thead> (agent-dashboard): the

@@ -419,8 +419,22 @@ export function DeployModal({
                   }
                   placeholder="Select a pull request to review"
                   loading={pullsLoading}
-                  searchPlaceholder="Search pull requests…"
+                  searchPlaceholder="Search or type a PR number…"
                   emptyText="No open pull requests in this repository."
+                  createOption={(q) =>
+                    /^\d+$/.test(q.trim())
+                      ? {
+                          value: q.trim(),
+                          searchText: q.trim(),
+                          label: (
+                            <span className="min-w-0 flex-1 truncate">
+                              Review PR{" "}
+                              <span className="text-white/40">#{q.trim()}</span>
+                            </span>
+                          ),
+                        }
+                      : null
+                  }
                 />
               </div>
             )}

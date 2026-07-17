@@ -37,6 +37,7 @@ function payload(
     start_line?: number | null;
     diff_hunk?: string | null;
     user?: { id: number; login: string; type?: string };
+    pull_request_review_id?: number | null;
   } = {},
 ): PullRequestReviewCommentPayload {
   return {
@@ -45,6 +46,7 @@ function payload(
       id: 5,
       body: "body" in overrides ? overrides.body! : "please tweak this line",
       user: overrides.user ?? { id: 42, login: "octocat", type: "User" },
+      pull_request_review_id: overrides.pull_request_review_id ?? 900,
       path: "src/auth.ts",
       line: overrides.line ?? 42,
       start_line: overrides.start_line ?? null,
@@ -87,6 +89,9 @@ describe("handlePrReviewComment", () => {
     expect(input.repository).toBe(REPO);
     expect(input.user).toEqual({ id: 42, login: "octocat", type: "User" });
     expect(input.body).toBe("please tweak this line");
+    // The review id is forwarded so a Bandolier review's own comments can be
+    // recognized and skipped downstream.
+    expect(input.reviewId).toBe(900);
     // Config is forwarded untouched.
     expect(resumeFromComment.mock.calls[0]![1]).toBe(CONFIG);
   });

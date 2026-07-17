@@ -79,6 +79,10 @@ export interface PullRequestReviewCommentPayload {
     id: number;
     body: string | null;
     user: { id: number; login: string; type?: string };
+    // The review this comment belongs to. When it names a review Bandolier
+    // posted (task_run.posted_review_id), the comment is the review's own — not
+    // a human reply — so it must not resume anything.
+    pull_request_review_id: number | null;
     path: string;
     // The line the comment targets in the file's new (`RIGHT`) or old (`LEFT`)
     // side. Null when the comment is on an outdated diff GitHub can't remap.

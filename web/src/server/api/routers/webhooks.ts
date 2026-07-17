@@ -219,6 +219,7 @@ export const webhooksRouter = createTRPCRouter({
           triggerOnAllEvents: repoWebhookConfig.triggerOnAllEvents,
           agentImage: repoWebhookConfig.agentImage,
           defaultWebhookModel: repoWebhookConfig.defaultWebhookModel,
+          reviewModel: repoWebhookConfig.reviewModel,
           defaultWebhookEffort: repoWebhookConfig.defaultWebhookEffort,
           computeCpu: repoWebhookConfig.computeCpu,
           computeMemory: repoWebhookConfig.computeMemory,
@@ -283,6 +284,9 @@ export const webhooksRouter = createTRPCRouter({
             agentImageReportedContract < HARNESS_CONTRACT_VERSION,
         },
         defaultWebhookModel: row?.defaultWebhookModel ?? null,
+        // The PR-review-specific model ("" = none; falls back to the webhook
+        // model, then the provider default).
+        reviewModel: row?.reviewModel ?? null,
         defaultWebhookEffort: row?.defaultWebhookEffort ?? null,
         // Default agent compute for the repo ("" = none; fall through to the
         // user default, then the built-in limit).
@@ -429,6 +433,27 @@ export const webhooksRouter = createTRPCRouter({
       const value = input.model.trim() ? input.model.trim() : null;
       await upsertRepoConfig(ctx.db, input.repoFullName, ctx.session.user.id, {
         defaultWebhookModel: value,
+      });
+      return { success: true };
+    }),
+
+  // Set (or clear, with an empty string) the model used for PR-review runs,
+  // separate from the webhook model that serves issues. Blank clears it (reviews
+  // fall back to the webhook model, then the provider default). Partial upsert;
+  // not validated against the live model list here — selection re-checks
+  // availability at trigger time.
+  setReviewModel: protectedProcedure
+    .input(
+      z.object({
+        repoFullName: z.string().min(1),
+        model: z.string(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await requireRepoAdmin(ctx, input.repoFullName);
+      const value = input.model.trim() ? input.model.trim() : null;
+      await upsertRepoConfig(ctx.db, input.repoFullName, ctx.session.user.id, {
+        reviewModel: value,
       });
       return { success: true };
     }),

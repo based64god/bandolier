@@ -118,7 +118,8 @@ async function launchReview(opts: {
     sender,
     repoFullName: repository.full_name,
     labels: pr.labels,
-    defaultModel: config?.defaultWebhookModel ?? null,
+    // Prefer the repo's review-specific model; fall back to the webhook model.
+    defaultModel: config?.reviewModel ?? config?.defaultWebhookModel ?? null,
     defaultEffort: config?.defaultWebhookEffort ?? null,
     logCtx,
   });

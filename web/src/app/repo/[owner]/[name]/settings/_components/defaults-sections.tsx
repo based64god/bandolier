@@ -84,6 +84,67 @@ export function RepoDefaultModelSection({
   );
 }
 
+// Model used for PR-review runs on this repo, separate from the webhook model
+// that serves issues. Leaving it unset falls back to the webhook model, then the
+// provider default. Only meaningful when the repo has reviews enabled.
+export function RepoReviewModelSection({
+  repoFullName,
+}: {
+  repoFullName: string;
+}) {
+  const utils = api.useUtils();
+  const { data: config } = api.webhooks.getConfig.useQuery({ repoFullName });
+  const { data: modelData, isLoading: modelsLoading } =
+    api.models.list.useQuery({ repoFullName });
+  const models = modelData?.models ?? [];
+  const [result, setResult] = useState<string | null>(null);
+
+  const setReview = api.webhooks.setReviewModel.useMutation({
+    onSuccess: () => {
+      void utils.webhooks.getConfig.invalidate({ repoFullName });
+      setResult("Saved ✓");
+    },
+  });
+
+  return (
+    <div className="space-y-2">
+      <h3 className="text-sm font-semibold text-purple-300">Reviewer model</h3>
+      <p className="text-xs text-white/40">
+        The model used for PR reviews on this repo, separate from the webhook
+        model above. Leave unset to fall back to the webhook model (then the
+        provider default) — set it to review with a different model than the repo
+        writes code with.
+      </p>
+      <SearchableSelect
+        options={models
+          .filter((m, i, all) => all.findIndex((x) => x.id === m.id) === i)
+          .map((m) => ({
+            value: m.id,
+            searchText:
+              `${m.label} ${m.id} ${m.provider} ${m.auth ?? ""}`.toLowerCase(),
+            label: (
+              <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
+                <span className="truncate text-white">{m.label}</span>
+                <ProviderTag provider={m.provider} auth={m.auth} />
+              </span>
+            ),
+          }))}
+        value={config?.reviewModel ?? null}
+        onChange={(v) => {
+          setResult(null);
+          setReview.mutate({ repoFullName, model: v ?? "" });
+        }}
+        placeholder="Same as webhook model"
+        clearLabel="No override (use the webhook model)"
+        loading={modelsLoading}
+        searchPlaceholder="Search models…"
+        emptyText="No models available — configure credentials below."
+      />
+      <CredentialFeedback saveError={setReview.error?.message} result={result} />
+    </div>
+  );
+}
+
 // Default reasoning effort for webhook-triggered Claude agents on this repo.
 // Claude-only (Anthropic / Bedrock): hidden when the repo's configured provider
 // can't use it. An issue `effort:<level>` label overrides it per issue.

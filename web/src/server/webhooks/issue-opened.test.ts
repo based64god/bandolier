@@ -90,6 +90,7 @@ function config(
     triggerOnAllEvents,
     agentImage: null,
     defaultWebhookModel: null,
+    reviewModel: null,
     defaultWebhookEffort: null,
     systemPrompt: null,
     networkPolicy: {

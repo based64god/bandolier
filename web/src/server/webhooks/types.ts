@@ -10,6 +10,7 @@ export type WebhookRunConfig = Pick<
   | "triggerOnAllEvents"
   | "agentImage"
   | "defaultWebhookModel"
+  | "reviewModel"
   | "defaultWebhookEffort"
   | "systemPrompt"
   | "networkPolicy"

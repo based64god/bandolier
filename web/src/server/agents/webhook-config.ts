@@ -21,6 +21,12 @@ export interface RepoWebhookConfig {
   /** Default model id for webhook-triggered agents; null means provider default. */
   defaultWebhookModel: string | null;
   /**
+   * Model id for PR-review runs specifically; null falls back to
+   * `defaultWebhookModel`, then the provider default. Lets a repo review with a
+   * different model than it writes code with.
+   */
+  reviewModel: string | null;
+  /**
    * Default reasoning-effort level for webhook-triggered Claude agents
    * (low|medium|high|xhigh|max); null means the CLI default. Ignored for
    * non-Claude providers. An issue's `effort:<level>` label overrides it.
@@ -163,6 +169,7 @@ export async function getRepoWebhookConfig(
     triggerOnAllEvents: row.triggerOnAllEvents,
     agentImage: row.agentImage ?? null,
     defaultWebhookModel: row.defaultWebhookModel ?? null,
+    reviewModel: row.reviewModel ?? null,
     defaultWebhookEffort: row.defaultWebhookEffort ?? null,
     systemPrompt: row.systemPrompt ?? null,
     resumeOnCiFailure: row.resumeOnCiFailure,

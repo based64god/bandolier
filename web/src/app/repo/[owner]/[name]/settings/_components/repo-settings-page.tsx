@@ -11,6 +11,7 @@ import {
   RepoDefaultComputeSection,
   RepoDefaultEffortSection,
   RepoDefaultModelSection,
+  RepoReviewModelSection,
 } from "./defaults-sections";
 import { GithubAppSection, RepoBehaviorSection } from "./general-sections";
 import { RepoNetworkPolicySection } from "./network-policy-section";
@@ -115,7 +116,10 @@ export function RepoSettingsPage({ repoFullName }: { repoFullName: string }) {
                   <RepoResumeSection repoFullName={repoFullName} />
                 </SettingsCard>
                 <SettingsCard id="review">
-                  <RepoReviewSection repoFullName={repoFullName} />
+                  <div className="space-y-5">
+                    <RepoReviewSection repoFullName={repoFullName} />
+                    <RepoReviewModelSection repoFullName={repoFullName} />
+                  </div>
                 </SettingsCard>
               </>
             )}

@@ -13,9 +13,11 @@ import type {
 // review spec, and the re-review resume gates) are driven by return values and
 // observed at the mocked createAgentJob.
 
-const resolveWebhookRun = vi.fn<() => Promise<ResolvedWebhookRun | null>>();
+const resolveWebhookRun =
+  vi.fn<(opts: { defaultModel: string | null }) => Promise<ResolvedWebhookRun | null>>();
 vi.mock("~/server/webhooks/resolve-run", () => ({
-  resolveWebhookRun: () => resolveWebhookRun(),
+  resolveWebhookRun: (opts: { defaultModel: string | null }) =>
+    resolveWebhookRun(opts),
 }));
 
 const createAgentJob = vi.fn<(spec: JobSpec) => Promise<string>>();
@@ -83,6 +85,7 @@ function config(overrides: Partial<WebhookRunConfig> = {}): WebhookRunConfig {
     triggerOnAllEvents: false,
     agentImage: null,
     defaultWebhookModel: null,
+    reviewModel: null,
     defaultWebhookEffort: null,
     systemPrompt: null,
     networkPolicy: {
@@ -131,6 +134,26 @@ describe("handlePullRequestOpened", () => {
     expect(spec.parentJobName).toBeUndefined();
     // The PR context is the task.
     expect(spec.task).toContain("Pull request #7");
+  });
+
+  it("prefers the repo's reviewModel over the webhook model", async () => {
+    await handlePullRequestOpened(
+      payload(),
+      config({ reviewModel: "claude-opus-4-8", defaultWebhookModel: "sonnet" }),
+    );
+    expect(resolveWebhookRun).toHaveBeenCalledWith(
+      expect.objectContaining({ defaultModel: "claude-opus-4-8" }),
+    );
+  });
+
+  it("falls back to the webhook model when no reviewModel is set", async () => {
+    await handlePullRequestOpened(
+      payload(),
+      config({ reviewModel: null, defaultWebhookModel: "sonnet" }),
+    );
+    expect(resolveWebhookRun).toHaveBeenCalledWith(
+      expect.objectContaining({ defaultModel: "sonnet" }),
+    );
   });
 
   it("skips a draft PR (waits for ready_for_review)", async () => {

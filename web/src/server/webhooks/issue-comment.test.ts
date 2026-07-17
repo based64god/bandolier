@@ -116,6 +116,7 @@ const CONFIG: WebhookRunConfig = {
   triggerOnAllEvents: true,
   agentImage: null,
   defaultWebhookModel: null,
+  reviewModel: null,
   defaultWebhookEffort: null,
   systemPrompt: null,
   networkPolicy: {

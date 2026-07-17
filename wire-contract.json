@@ -8,5 +8,5 @@
   "_highestEffortComment": "The top of the effortLevels ladder — the level that selects the highest reasoning effort and, on Claude runs, turns on ultracode. Declared explicitly (rather than left as an implicit array position) so the ultracode gate (Go config.highestEffort) and the picker/UI (TS HIGHEST_EFFORT) bind to one value; both test suites assert it equals the last effortLevels entry.",
   "highestEffort": "max",
   "_harnessContractVersionComment": "Bump by one whenever the server↔harness expectations change in a way that makes an older harness image misbehave (a new env var the harness must honor, a changed callback shape, …). The harness reports its version on the ingest callback; the server compares the last-reported version against this value to warn repo admins running a stale custom agent image.",
-  "harnessContractVersion": 1
+  "harnessContractVersion": 2
 }

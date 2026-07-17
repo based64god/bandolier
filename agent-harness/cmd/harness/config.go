@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -69,7 +70,16 @@ type config struct {
 	interactive      bool   // long-lived session driven by user input between turns
 	inputURL         string // Bandolier endpoint the interactive loop polls for input
 	acpURL           string // Bandolier ACP relay endpoint the proxy pulls/pushes frames on
-	outputType       string // "pr" (default) or "issue": what the run produces when done
+	outputType       string // "pr" (default), "issue", or "review": what the run produces
+	// Review mode (outputType "review"): reviewPRNumber is the pull request the
+	// run reviews (REVIEW_PR_NUMBER); reviewURL is the Bandolier endpoint the
+	// harness POSTs the structured review to (BANDOLIER_REVIEW_URL), which the
+	// server posts to the PR in the bot voice; reviewFile is the workspace path
+	// the agent writes its review JSON to, read back by the harness. All empty
+	// for non-review runs.
+	reviewPRNumber string
+	reviewURL      string
+	reviewFile     string
 	// resumeBranch is the existing remote branch this run resumes work on
 	// (RESUME_BRANCH): the server clones it directly (BRANCH is set to the same
 	// value), no fresh branch is cut, new work is measured against its remote tip
@@ -109,6 +119,12 @@ func (c config) diffBase() string {
 // pull request: the agent analyses the task/repo (no branch, no commits) and the
 // harness opens an issue written from the transcript by the writer model.
 func (c config) issueOutput() bool { return c.outputType == "issue" }
+
+// reviewOutput reports whether the run should produce a pull-request review: the
+// agent analyses an existing PR read-only (no branch, no commits) and writes a
+// structured review the harness submits to Bandolier, which posts it to the PR
+// in the bot voice.
+func (c config) reviewOutput() bool { return c.outputType == "review" }
 
 // claudeProvider reports whether the run drives the `claude` CLI (Anthropic API
 // or AWS Bedrock), as opposed to Codex (OpenAI) or Antigravity (Gemini). Serena
@@ -215,10 +231,18 @@ func loadConfig() (config, error) {
 	}
 
 	// Default to opening a pull request; "issue" makes the run produce a GitHub
-	// issue (sub-task) instead.
+	// issue (sub-task) instead, and "review" a pull-request review.
 	outputType := os.Getenv("OUTPUT_TYPE")
 	if outputType == "" {
 		outputType = "pr"
+	}
+
+	// Review mode reads the PR to review and the submit endpoint from the env;
+	// the review file is a fixed workspace-external path the agent is told to
+	// write to (kept out of the repo so it's never mistaken for a change).
+	reviewFile := ""
+	if outputType == "review" {
+		reviewFile = filepath.Join(os.TempDir(), "bandolier-review.json")
 	}
 
 	return config{
@@ -244,6 +268,9 @@ func loadConfig() (config, error) {
 		inputURL:         os.Getenv("BANDOLIER_INPUT_URL"),
 		acpURL:           os.Getenv("BANDOLIER_ACP_URL"),
 		outputType:       outputType,
+		reviewPRNumber:   strings.TrimSpace(os.Getenv("REVIEW_PR_NUMBER")),
+		reviewURL:        os.Getenv("BANDOLIER_REVIEW_URL"),
+		reviewFile:       reviewFile,
 		resumeBranch:     strings.TrimSpace(os.Getenv("RESUME_BRANCH")),
 		contextURL:       os.Getenv("BANDOLIER_CONTEXT_URL"),
 	}, nil

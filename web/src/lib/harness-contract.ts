@@ -10,7 +10,7 @@
 // This crosses the process boundary (the Go harness reports it, the server
 // compares against it), so its value is pinned in wire-contract.json and
 // asserted by both test suites — see src/lib/wire-contract.test.ts.
-export const HARNESS_CONTRACT_VERSION = 1;
+export const HARNESS_CONTRACT_VERSION = 2;
 
 /**
  * The version persisted for a run whose ingest callback carried no

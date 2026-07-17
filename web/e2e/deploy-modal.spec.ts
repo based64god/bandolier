@@ -4,7 +4,7 @@
 // intercepted here so submit can complete offline.
 //
 // Covers: model resolution, required-field validation, the issue-selection
-// path, and the repo-credentials provider source.
+// path, the PR-review dropdown path, and the repo-credentials provider source.
 //
 // Run against a dev server serving the harness route:
 //   pnpm next dev --port 3137 &
@@ -143,6 +143,30 @@ await dialog.waitFor({ state: "hidden", timeout: 8000 });
 check(
   "deploy payload carries the selected issue number",
   captured.payload?.["0"]?.json?.issueNumber === 235,
+);
+
+// ── PR-review dropdown path ──────────────────────────────────────────────────
+await openScenario("repo");
+await dialog.getByRole("button", { name: "PR review" }).click();
+const prTrigger = page
+  .getByRole("dialog")
+  .getByText("Select a pull request to review")
+  .locator("xpath=ancestor::button[1]");
+await prTrigger.click();
+const prSearch = page.getByPlaceholder("Search pull requests…");
+await prSearch.waitFor({ state: "visible", timeout: 5000 });
+await prSearch.fill("popover");
+await page.getByText("Fix status badge popover flicker").click();
+check(
+  "selecting a PR satisfies validation without a typed task",
+  await deployBtn().isEnabled(),
+);
+await deployBtn().click();
+await dialog.waitFor({ state: "hidden", timeout: 8000 });
+check(
+  "deploy payload carries the selected PR number and review output",
+  captured.payload?.["0"]?.json?.reviewPrNumber === 131 &&
+    captured.payload?.["0"]?.json?.outputType === "review",
 );
 
 // ── Repo-credentials provider source ─────────────────────────────────────────

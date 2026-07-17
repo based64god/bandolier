@@ -126,3 +126,43 @@ describe("agents.deploy error propagation", () => {
     expect((err as TRPCError).message).toContain("maintainer access or higher");
   });
 });
+
+describe("agents.deploy review validation", () => {
+  it("rejects a review with a PR number but no repository", async () => {
+    const err = await caller()
+      .deploy({
+        namespace: "ns",
+        task: "",
+        model: "claude-opus-4-8",
+        outputType: "review",
+        reviewPrNumber: 5,
+      })
+      .then(
+        () => {
+          throw new Error("expected deploy to reject");
+        },
+        (e: unknown) => e,
+      );
+    expect((err as TRPCError).code).toBe("BAD_REQUEST");
+    expect((err as TRPCError).message).toContain("pull request number");
+  });
+
+  it("rejects a review with neither a PR number nor a task (input refine)", async () => {
+    const err = await caller()
+      .deploy({
+        namespace: "ns",
+        task: "",
+        model: "claude-opus-4-8",
+        repoFullName: "owner/repo",
+        outputType: "review",
+      })
+      .then(
+        () => {
+          throw new Error("expected deploy to reject");
+        },
+        (e: unknown) => e,
+      );
+    // Zod refine rejects before the handler runs.
+    expect((err as TRPCError).code).toBe("BAD_REQUEST");
+  });
+});

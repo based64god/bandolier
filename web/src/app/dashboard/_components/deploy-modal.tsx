@@ -39,8 +39,11 @@ interface DeployForm {
   // Interactive agents stay alive and wait for the user's input between turns.
   interactive: boolean;
   // "pr" opens a pull request; "issue" opens a GitHub issue (sub-task) from the
-  // agent's findings. Issue output needs a repository to open the issue in.
-  outputType: "pr" | "issue";
+  // agent's findings; "review" reviews a pull request (reviewPrNumber). Issue
+  // and review output need a repository.
+  outputType: "pr" | "issue" | "review";
+  // The pull request number a "review" run reviews. Empty unless output=review.
+  reviewPrNumber: string;
 }
 
 type DeployFormAction = {
@@ -135,6 +138,7 @@ export function DeployModal({
     issueNumber: "",
     interactive: false,
     outputType: "pr",
+    reviewPrNumber: "",
   });
   const {
     task,
@@ -148,8 +152,12 @@ export function DeployModal({
     issueNumber,
     interactive,
     outputType,
+    reviewPrNumber,
   } = form;
   const issueOutput = outputType === "issue";
+  const reviewOutput = outputType === "review";
+  // A review is deployable once a PR number is entered — it needs no task.
+  const reviewValid = reviewOutput && reviewPrNumber.trim() !== "";
 
   const { data: providerInfo } = api.agents.providerInfo.useQuery({
     repoFullName,
@@ -246,8 +254,12 @@ export function DeployModal({
       cpu: cpu.trim() || undefined,
       memory: memory.trim() || undefined,
       issueNumber: hasIssue ? parseInt(issueNumber, 10) : undefined,
-      interactive: interactive || undefined,
-      outputType: issueOutput ? "issue" : undefined,
+      // A review is always one-shot.
+      interactive: reviewOutput ? undefined : interactive || undefined,
+      outputType: reviewOutput ? "review" : issueOutput ? "issue" : undefined,
+      reviewPrNumber: reviewValid
+        ? parseInt(reviewPrNumber, 10)
+        : undefined,
     });
   }
 
@@ -280,8 +292,8 @@ export function DeployModal({
           </div>
         )}
 
-        {/* GitHub issue (optional) */}
-        {repoFullName && (
+        {/* GitHub issue (optional) — not shown for a PR review */}
+        {repoFullName && !reviewOutput && (
           <div className="space-y-1">
             <div className="relative flex items-center gap-1.5">
               <label className="block text-xs font-medium text-white/60">
@@ -357,6 +369,7 @@ export function DeployModal({
                 [
                   { value: "pr", label: "Pull request" },
                   { value: "issue", label: "GitHub issue" },
+                  { value: "review", label: "PR review" },
                 ] as const
               ).map((opt) => (
                 <button
@@ -378,38 +391,56 @@ export function DeployModal({
             <p className="text-xs text-white/40">
               {issueOutput
                 ? "Explores read-only and opens an issue — no code changes."
-                : "Implements the task and opens a pull request."}
+                : reviewOutput
+                  ? "Reviews a pull request read-only. The review is posted as you."
+                  : "Implements the task and opens a pull request."}
             </p>
+            {reviewOutput && (
+              <input
+                type="number"
+                min={1}
+                value={reviewPrNumber}
+                onChange={(e) =>
+                  setField({ field: "reviewPrNumber", value: e.target.value })
+                }
+                placeholder="Pull request number (e.g. 42)"
+                className="mt-1 w-full rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-white placeholder:text-white/30 focus:border-purple-500/50 focus:outline-none"
+              />
+            )}
           </div>
         )}
 
-        {/* Task */}
-        <div className="space-y-1">
-          <label className="block text-xs font-medium text-white/60">
-            {hasIssue ? (
-              <>
-                Additional context{" "}
-                <span className="font-normal text-white/30">(optional)</span>
-              </>
-            ) : (
-              <>
-                Task <span className="text-red-400">*</span>
-              </>
-            )}
-          </label>
-          <textarea
-            required={!hasIssue}
-            rows={3}
-            value={task}
-            onChange={(e) => setField({ field: "task", value: e.target.value })}
-            placeholder={
-              hasIssue
-                ? "Extra guidance for the agent (optional)…"
-                : "Describe what you want Claude to do…"
-            }
-            className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-white placeholder-white/30 focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/30 focus:outline-none"
-          />
-        </div>
+        {/* Task — a review's input is the PR, so no task is needed for it */}
+        {!reviewOutput && (
+          <div className="space-y-1">
+            <label className="block text-xs font-medium text-white/60">
+              {hasIssue ? (
+                <>
+                  Additional context{" "}
+                  <span className="font-normal text-white/30">(optional)</span>
+                </>
+              ) : (
+                <>
+                  Task <span className="text-red-400">*</span>
+                </>
+              )}
+            </label>
+            <textarea
+              required={!hasIssue}
+              rows={3}
+              value={task}
+              onChange={(e) =>
+                setField({ field: "task", value: e.target.value })
+              }
+              placeholder={
+                hasIssue
+                  ? "Extra guidance for the agent (optional)…"
+                  : "Describe what you want Claude to do…"
+              }
+              className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-white placeholder-white/30 focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/30 focus:outline-none"
+            />
+          </div>
+        )}
 
         {/* Model */}
         <div className="space-y-1">
@@ -618,7 +649,11 @@ export function DeployModal({
           <button
             type="submit"
             disabled={
-              deploy.isPending || !effectiveModel || (!hasIssue && !task.trim())
+              deploy.isPending ||
+              !effectiveModel ||
+              (reviewOutput
+                ? !reviewValid
+                : !hasIssue && !task.trim())
             }
             className="rounded-lg bg-purple-600 px-4 py-1.5 text-sm font-medium text-black hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-50"
           >

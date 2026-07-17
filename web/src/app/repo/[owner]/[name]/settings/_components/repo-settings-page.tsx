@@ -14,7 +14,7 @@ import {
 } from "./defaults-sections";
 import { GithubAppSection, RepoBehaviorSection } from "./general-sections";
 import { RepoNetworkPolicySection } from "./network-policy-section";
-import { RepoResumeSection } from "./toggles";
+import { RepoResumeSection, RepoReviewSection } from "./toggles";
 
 const NAV: SettingsNavGroup[] = [
   {
@@ -113,6 +113,9 @@ export function RepoSettingsPage({ repoFullName }: { repoFullName: string }) {
                 </SettingsCard>
                 <SettingsCard id="resume">
                   <RepoResumeSection repoFullName={repoFullName} />
+                </SettingsCard>
+                <SettingsCard id="review">
+                  <RepoReviewSection repoFullName={repoFullName} />
                 </SettingsCard>
               </>
             )}

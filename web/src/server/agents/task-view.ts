@@ -230,7 +230,11 @@ export async function expiredRunToTask(
     createdIssueUrl: run.createdIssueUrl,
     createdIssueState,
     issueState,
-    outputType: run.createdIssueUrl ? ("issue" as const) : ("pr" as const),
+    outputType: run.reviewedPrUrl
+      ? ("review" as const)
+      : run.createdIssueUrl
+        ? ("issue" as const)
+        : ("pr" as const),
     interactive: false,
     awaitingInput: false,
     tokens: rowTokens(run),
@@ -337,7 +341,9 @@ export async function podToTask(
     outputType:
       pod.metadata?.annotations?.["bandolier.io/output-type"] === "issue"
         ? ("issue" as const)
-        : ("pr" as const),
+        : pod.metadata?.annotations?.["bandolier.io/output-type"] === "review"
+          ? ("review" as const)
+          : ("pr" as const),
     interactive,
     awaitingInput: interactive && awaitingInput,
     tokens,

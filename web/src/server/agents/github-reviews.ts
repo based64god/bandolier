@@ -42,11 +42,17 @@ function toApiComment(c: ReviewComment): Record<string, unknown> {
   };
 }
 
+/** A posted review: its GitHub numeric id and the html_url to link to it. */
+export interface PostedReview {
+  id: string;
+  url: string;
+}
+
 /**
  * Submits a pull-request review via the GitHub reviews API and returns the
- * created review's html_url. The caller passes the GitHub App installation
- * (bot) token, so the review is always attributed to bandolier[bot] and never
- * to a user.
+ * created review's id and html_url. The caller passes the token that decides
+ * attribution: the GitHub App installation token (bandolier[bot], for webhook
+ * reviews) or the acting user's token (for dashboard reviews).
  *
  * Inline comments must anchor to lines in the PR's diff; if any don't, GitHub
  * rejects the whole review (422). Rather than lose the review, this retries with
@@ -58,9 +64,9 @@ export async function submitPullRequestReview(
   repoFullName: string,
   prNumber: number,
   review: PullRequestReviewInput,
-): Promise<string> {
+): Promise<PostedReview> {
   const url = `https://api.github.com/repos/${repoFullName}/pulls/${prNumber}/reviews`;
-  const post = async (withComments: boolean): Promise<string> => {
+  const post = async (withComments: boolean): Promise<PostedReview> => {
     const res = await ghFetch(url, token, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -72,7 +78,8 @@ export async function submitPullRequestReview(
           : {}),
       }),
     });
-    return ((await res.json()) as { html_url: string }).html_url;
+    const data = (await res.json()) as { id: number; html_url: string };
+    return { id: String(data.id), url: data.html_url };
   };
 
   if (review.comments.length === 0) return post(false);

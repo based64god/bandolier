@@ -872,6 +872,7 @@ describe("createAgentJob", () => {
         repoFullName: null,
         issueNumber: null,
         reviewedPrUrl: null,
+        reviewAsUser: null,
         parentJobName: null,
         ciResumeSha: null,
         agentImage: DEFAULT_HARNESS_IMAGE,

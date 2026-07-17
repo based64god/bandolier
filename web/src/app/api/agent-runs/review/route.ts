@@ -4,6 +4,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { env } from "~/env";
 import { verifyIngestToken } from "~/lib/ingest";
 import { getRepoBotToken } from "~/server/agents/github-app";
+import { getUserGithubToken } from "~/server/agents/github-token";
 import {
   type ReviewComment,
   type ReviewEvent,
@@ -101,11 +102,13 @@ export async function POST(req: NextRequest) {
   }
 
   // The run row scopes the review to its PR (reviewed_pr_url), so a job can only
-  // ever post to the PR it was created to review.
+  // ever post to the PR it was created to review. reviewAsUser decides the voice.
   const [run] = await db
     .select({
       repoFullName: taskRun.repoFullName,
       reviewedPrUrl: taskRun.reviewedPrUrl,
+      reviewAsUser: taskRun.reviewAsUser,
+      spawnedBy: taskRun.spawnedBy,
     })
     .from(taskRun)
     .where(eq(taskRun.jobName, jobName))
@@ -115,43 +118,67 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Not a review run" }, { status: 404 });
   }
 
-  // Bot voice only: the review is posted with the GitHub App installation token,
-  // never a user credential. No App installation ⇒ no bot identity to review as,
-  // so the review is skipped rather than posted under another credential.
-  const botToken = await getRepoBotToken(db, run.repoFullName, Date.now());
-  if (!botToken) {
-    console.warn("[bandolier:review] no bot token — cannot post review", {
+  // Pick the token that decides attribution. A dashboard review (reviewAsUser)
+  // is posted in the run owner's voice with their GitHub token; a webhook review
+  // is posted in the bandolier[bot] voice with the App installation token —
+  // never a user credential. Either way, no usable token ⇒ skip rather than post
+  // under some other identity.
+  let token: string | null;
+  let voice: "user" | "bot";
+  if (run.reviewAsUser) {
+    token = run.spawnedBy
+      ? await getUserGithubToken(db, run.spawnedBy)
+      : null;
+    voice = "user";
+  } else {
+    token = await getRepoBotToken(db, run.repoFullName, Date.now());
+    voice = "bot";
+  }
+  if (!token) {
+    console.warn("[bandolier:review] no token to post review", {
       job: jobName,
       repo: run.repoFullName,
       pr: prNumber,
+      voice,
     });
     return NextResponse.json(
-      { error: "No bot identity for this repo" },
+      {
+        error:
+          voice === "user"
+            ? "No GitHub token for the review's owner"
+            : "No bot identity for this repo",
+      },
       { status: 503 },
     );
   }
 
   try {
-    const reviewUrl = await submitPullRequestReview(
-      botToken,
+    const posted = await submitPullRequestReview(
+      token,
       run.repoFullName,
       prNumber,
       { event, body: body || "Reviewed by Bandolier.", comments },
     );
-    // Record the review as the run's output so the dashboard can surface it,
-    // surviving pod-log loss like the PR/issue URLs the ingest callback stores.
+    // Record the review as the run's output (surviving pod-log loss like the
+    // PR/issue URLs) and its GitHub id, so the webhook layer can skip resuming
+    // on the inline comments this review generated.
     await db
       .update(taskRun)
-      .set({ pullRequestUrl: reviewUrl, updatedAt: new Date() })
+      .set({
+        pullRequestUrl: posted.url,
+        postedReviewId: posted.id,
+        updatedAt: new Date(),
+      })
       .where(eq(taskRun.jobName, jobName));
     console.log("[bandolier:review] review posted", {
       job: jobName,
       repo: run.repoFullName,
       pr: prNumber,
       event,
+      voice,
       comments: comments.length,
     });
-    return NextResponse.json({ url: reviewUrl });
+    return NextResponse.json({ url: posted.url });
   } catch (err) {
     console.error("[bandolier:review] failed to post review", {
       job: jobName,

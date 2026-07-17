@@ -14,6 +14,11 @@ vi.mock("~/server/agents/github-app", () => ({
   getRepoBotToken: () => getRepoBotToken(),
 }));
 
+const getUserGithubToken = vi.fn<() => Promise<string | null>>();
+vi.mock("~/server/agents/github-token", () => ({
+  getUserGithubToken: () => getUserGithubToken(),
+}));
+
 const submitPullRequestReview =
   vi.fn<
     (
@@ -21,7 +26,7 @@ const submitPullRequestReview =
       repo: string,
       pr: number,
       review: unknown,
-    ) => Promise<string>
+    ) => Promise<{ id: string; url: string }>
   >();
 vi.mock("~/server/agents/github-reviews", () => ({
   submitPullRequestReview: (
@@ -80,11 +85,11 @@ beforeEach(() => {
   selectRows.length = 0;
   updateSets.length = 0;
   getRepoBotToken.mockReset().mockResolvedValue("bot-token");
-  submitPullRequestReview
-    .mockReset()
-    .mockResolvedValue(
-      "https://github.com/o/r/pull/7#pullrequestreview-1",
-    );
+  getUserGithubToken.mockReset().mockResolvedValue("user-token");
+  submitPullRequestReview.mockReset().mockResolvedValue({
+    id: "999",
+    url: "https://github.com/o/r/pull/7#pullrequestreview-1",
+  });
   vi.spyOn(console, "log").mockImplementation(() => undefined);
   vi.spyOn(console, "warn").mockImplementation(() => undefined);
   vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -99,9 +104,14 @@ describe("POST /api/agent-runs/review", () => {
     expect(submitPullRequestReview).not.toHaveBeenCalled();
   });
 
-  it("posts the review with the bot token and records the review URL", async () => {
+  it("posts a webhook review with the bot token and records URL + review id", async () => {
     selectRows.push([
-      { repoFullName: "o/r", reviewedPrUrl: "https://github.com/o/r/pull/7" },
+      {
+        repoFullName: "o/r",
+        reviewedPrUrl: "https://github.com/o/r/pull/7",
+        reviewAsUser: false,
+        spawnedBy: "u1",
+      },
     ]);
 
     const res = await POST(post(authHeaders("job-1"), REVIEW) as never);
@@ -117,10 +127,50 @@ describe("POST /api/agent-runs/review", () => {
       7,
       expect.objectContaining({ event: "COMMENT", body: "Looks mostly good." }),
     );
-    // The review URL is recorded as the run's output.
+    expect(getUserGithubToken).not.toHaveBeenCalled();
+    // The review URL and its id are recorded on the run.
     expect(updateSets[0]).toMatchObject({
       pullRequestUrl: "https://github.com/o/r/pull/7#pullrequestreview-1",
+      postedReviewId: "999",
     });
+  });
+
+  it("posts a dashboard review in the owner's voice (their GitHub token)", async () => {
+    selectRows.push([
+      {
+        repoFullName: "o/r",
+        reviewedPrUrl: "https://github.com/o/r/pull/7",
+        reviewAsUser: true,
+        spawnedBy: "u1",
+      },
+    ]);
+
+    const res = await POST(post(authHeaders("job-1"), REVIEW) as never);
+
+    expect(res.status).toBe(200);
+    // User voice: posted with the owner's token, never the bot token.
+    expect(submitPullRequestReview).toHaveBeenCalledWith(
+      "user-token",
+      "o/r",
+      7,
+      expect.anything(),
+    );
+    expect(getRepoBotToken).not.toHaveBeenCalled();
+  });
+
+  it("503s a dashboard review whose owner has no GitHub token", async () => {
+    selectRows.push([
+      {
+        repoFullName: "o/r",
+        reviewedPrUrl: "https://github.com/o/r/pull/7",
+        reviewAsUser: true,
+        spawnedBy: "u1",
+      },
+    ]);
+    getUserGithubToken.mockResolvedValue(null);
+    const res = await POST(post(authHeaders("job-1"), REVIEW) as never);
+    expect(res.status).toBe(503);
+    expect(submitPullRequestReview).not.toHaveBeenCalled();
   });
 
   it("404s when the run isn't a review run", async () => {

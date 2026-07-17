@@ -16,21 +16,21 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
-function okJson(url: string): Response {
-  return new Response(JSON.stringify({ html_url: url }), { status: 200 });
+function okJson(url: string, id = 55): Response {
+  return new Response(JSON.stringify({ id, html_url: url }), { status: 200 });
 }
 
 describe("submitPullRequestReview", () => {
   it("posts inline comments and returns the review URL", async () => {
-    fetchMock.mockResolvedValueOnce(okJson("https://gh/pull/7#review-1"));
+    fetchMock.mockResolvedValueOnce(okJson("https://gh/pull/7#review-1", 55));
 
-    const url = await submitPullRequestReview("tok", "o/r", 7, {
+    const posted = await submitPullRequestReview("tok", "o/r", 7, {
       event: "COMMENT",
       body: "ok",
       comments: [{ path: "a.ts", line: 3, body: "nit" }],
     });
 
-    expect(url).toBe("https://gh/pull/7#review-1");
+    expect(posted).toEqual({ id: "55", url: "https://gh/pull/7#review-1" });
     const sent = JSON.parse(
       (fetchMock.mock.calls[0]![1] as { body: string }).body,
     ) as { comments: { path: string; line: number; side: string }[] };
@@ -44,13 +44,13 @@ describe("submitPullRequestReview", () => {
       .mockResolvedValueOnce(new Response("bad", { status: 422 }))
       .mockResolvedValueOnce(okJson("https://gh/pull/7#review-2"));
 
-    const url = await submitPullRequestReview("tok", "o/r", 7, {
+    const posted = await submitPullRequestReview("tok", "o/r", 7, {
       event: "COMMENT",
       body: "summary",
       comments: [{ path: "a.ts", line: 999, body: "off-diff" }],
     });
 
-    expect(url).toBe("https://gh/pull/7#review-2");
+    expect(posted.url).toBe("https://gh/pull/7#review-2");
     expect(fetchMock).toHaveBeenCalledTimes(2);
     // The retry drops the inline comments.
     const retry = JSON.parse(

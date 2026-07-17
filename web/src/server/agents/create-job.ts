@@ -216,6 +216,13 @@ export interface JobSpec {
    * find the review run to re-review, and so a comment-resume can skip it.
    */
   reviewedPrUrl?: string;
+  /**
+   * For a review run, whether its review is posted in the acting user's voice
+   * (their GitHub token) instead of the bandolier[bot] voice. True for
+   * dashboard-created reviews; unset/false for webhook-triggered ones. Recorded
+   * on the run row; the review-submit endpoint reads it to pick the token.
+   */
+  reviewAsUser?: boolean;
   gitName?: string;
   gitEmail?: string;
   /** Set for issue tasks (dashboard or webhook). */
@@ -890,6 +897,9 @@ export async function recordRun(spec: JobSpec, jobName: string, ns: string) {
     // find this run to re-review and a comment-resume can skip it. Null for
     // every non-review run.
     reviewedPrUrl: spec.reviewedPrUrl ?? null,
+    // Whether a review run posts in the user's voice (dashboard) vs the bot's
+    // (webhook). Null for non-review runs; the review endpoint reads it.
+    reviewAsUser: spec.reviewAsUser ?? null,
     parentJobName: spec.parentJobName ?? null,
     ciResumeSha: spec.ciResumeSha ?? null,
     // The resolved image (same fallback as the pod spec), so the harness

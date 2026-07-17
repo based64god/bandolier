@@ -253,6 +253,13 @@
       "when": 1783887291527,
       "tag": "0035_daffy_gertrude_yorkes",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1784280674850,
+      "tag": "0036_high_wolverine",
+      "breakpoints": true
     }
   ]
 }

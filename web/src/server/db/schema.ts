@@ -139,6 +139,16 @@ export const taskRun = pgTable("task_run", {
   pullRequestUrl: text("pull_request_url"),
   createdIssueUrl: text("created_issue_url"),
   /**
+   * For a review run (outputType "review"), the html_url of the pull request it
+   * reviews — its *input*, recorded at creation time (unlike pullRequestUrl /
+   * createdIssueUrl, which the harness reports as a run's produced output). A
+   * non-null value is what marks a run as a review: it lets a comment-resume
+   * skip review runs when picking the coding task to resume, and lets a push to
+   * the PR branch (`pull_request` synchronize) find the review run to re-review.
+   * Null for every non-review run.
+   */
+  reviewedPrUrl: text("reviewed_pr_url"),
+  /**
    * The run's cumulative token usage, reported by the harness ingest callback
    * (parsed from the agent CLI's result event). Like the output URLs, pod logs
    * are the live source while the pod exists, but persisting it here keeps a
@@ -266,6 +276,13 @@ export const repoWebhookConfig = pgTable("repo_webhook_config", {
   // handler bounds itself (one resume per failing commit, capped per PR) to
   // avoid an endless resume→push→fail loop.
   resumeOnCiFailure: boolean("resume_on_ci_failure").notNull().default(false),
+  // When true, a pull request opened (or marked ready for review) in this repo
+  // gets an automatic Bandolier code review: a read-only agent analyses the PR
+  // and the review is posted in the bandolier[bot] voice (never the triggering
+  // user's credentials). Off by default — opt-in, like every other repo setting,
+  // and only a repo admin can turn it on. A subsequent push to the PR's branch
+  // (`pull_request` synchronize) resumes that review to re-review the changes.
+  reviewPullRequests: boolean("review_pull_requests").notNull().default(false),
   // ── Repo-scoped credentials (admin-only) ──────────────────────────────────
   // Shared infrastructure for everyone working on this repo: a kubeconfig the
   // repo's agents run on and model credentials they authenticate with. Only a

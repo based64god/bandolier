@@ -72,6 +72,19 @@ const ISSUES: RouterOutputs["repos"]["issues"] = [
   },
 ];
 
+const PULLS: RouterOutputs["repos"]["pulls"] = [
+  {
+    number: 128,
+    title: "Add retry to the deploy poller",
+    url: "https://github.com/acme/widgets/pull/128",
+  },
+  {
+    number: 131,
+    title: "Fix status badge popover flicker",
+    url: "https://github.com/acme/widgets/pull/131",
+  },
+];
+
 const DEFAULTS: RouterOutputs["agents"]["deployDefaults"] = {
   maxTurns: 40,
   compute: { cpu: "2", memory: "4Gi" },
@@ -93,6 +106,7 @@ export default function DeployModalHarness() {
     );
     utils.agents.deployDefaults.setData({ repoFullName: REPO }, DEFAULTS);
     utils.repos.issues.setData({ repoFullName: REPO }, ISSUES);
+    utils.repos.pulls.setData({ repoFullName: REPO }, PULLS);
     utils.models.list.setData({ repoFullName: REPO }, { models: MODELS[id] });
     setDeployed("");
     setScenario(id);

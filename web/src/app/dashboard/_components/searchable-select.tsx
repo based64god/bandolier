@@ -56,6 +56,7 @@ export function SearchableSelect({
   emptyText = "No options.",
   clearLabel,
   recentValues,
+  createOption,
   className = "",
 }: {
   options: SelectOption[];
@@ -75,6 +76,13 @@ export function SearchableSelect({
    * are ignored.
    */
   recentValues?: string[];
+  /**
+   * When the search yields no match, turn the raw query into a selectable
+   * option (return null to reject it). Lets a picker accept a value that isn't
+   * in `options` — e.g. a PR number outside the fetched open-PR list. The same
+   * builder resolves the trigger label for a selected off-list value.
+   */
+  createOption?: (query: string) => SelectOption | null;
   /** Extra classes for the root (e.g. a fixed width); defaults to full width. */
   className?: string;
 }) {
@@ -161,7 +169,18 @@ export function SearchableSelect({
     ? options.filter((o) => o.searchText.includes(query))
     : options;
 
-  const selected = options.find((o) => o.value === value) ?? null;
+  // A caller-built option offered when the search matches nothing, so a value
+  // outside `options` (e.g. an off-list PR number) can still be picked.
+  const customOption =
+    createOption && query && filtered.length === 0
+      ? createOption(search.trim())
+      : null;
+
+  // Resolve the trigger's label: a known option, else the caller's rendering of
+  // an off-list selected value (so a typed-in value shows, not the placeholder).
+  const selected =
+    options.find((o) => o.value === value) ??
+    (value !== null && createOption ? createOption(value) : null);
 
   // Recent picks, resolved against the option list (stale values drop out).
   // They render as a headed group above the full list, but only while the
@@ -184,6 +203,7 @@ export function SearchableSelect({
   const navValues: (string | null)[] = [
     ...(showClear ? [null] : []),
     ...sections.flatMap((s) => s.options.map((o) => o.value)),
+    ...(customOption ? [customOption.value] : []),
   ];
 
   // The nav index of the currently-selected value within the list as it will
@@ -321,7 +341,7 @@ export function SearchableSelect({
               />
             </div>
 
-            {options.length === 0 ? (
+            {options.length === 0 && !customOption ? (
               <p className="px-4 py-3 text-xs text-white/30">{emptyText}</p>
             ) : (
               <ul ref={listRef} className="flex-1 overflow-y-auto py-1">
@@ -345,9 +365,29 @@ export function SearchableSelect({
                   </li>
                 )}
                 {filtered.length === 0 ? (
-                  <li className="px-4 py-3 text-xs text-white/30">
-                    No matches for &ldquo;{search}&rdquo;.
-                  </li>
+                  customOption ? (
+                    // Query non-empty means no clear row and no section rows, so
+                    // this custom row is always nav index 0.
+                    <li>
+                      <button
+                        type="button"
+                        data-nav={0}
+                        onClick={() => choose(customOption.value)}
+                        onMouseEnter={() => setHighlight(0)}
+                        className={`flex w-full items-center gap-1.5 px-4 py-2 text-left text-sm transition ${
+                          highlight === 0 ? "bg-white/10" : ""
+                        }`}
+                      >
+                        <span className="flex min-w-0 flex-1 items-center">
+                          {customOption.label}
+                        </span>
+                      </button>
+                    </li>
+                  ) : (
+                    <li className="px-4 py-3 text-xs text-white/30">
+                      No matches for &ldquo;{search}&rdquo;.
+                    </li>
+                  )
                 ) : (
                   sections.map((section, si) => {
                     // Nav indices run continuously across sections (after the

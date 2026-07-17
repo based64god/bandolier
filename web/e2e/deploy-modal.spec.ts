@@ -4,7 +4,8 @@
 // intercepted here so submit can complete offline.
 //
 // Covers: model resolution, required-field validation, the issue-selection
-// path, and the repo-credentials provider source.
+// path, the PR-review dropdown path (including the typed off-list PR-number
+// fallback), and the repo-credentials provider source.
 //
 // Run against a dev server serving the harness route:
 //   pnpm next dev --port 3137 &
@@ -143,6 +144,60 @@ await dialog.waitFor({ state: "hidden", timeout: 8000 });
 check(
   "deploy payload carries the selected issue number",
   captured.payload?.["0"]?.json?.issueNumber === 235,
+);
+
+// ── PR-review dropdown path ──────────────────────────────────────────────────
+await openScenario("repo");
+await dialog.getByRole("button", { name: "PR review" }).click();
+const prTrigger = page
+  .getByRole("dialog")
+  .getByText("Select a pull request to review")
+  .locator("xpath=ancestor::button[1]");
+await prTrigger.click();
+const prSearch = page.getByPlaceholder("Search or type a PR number…");
+await prSearch.waitFor({ state: "visible", timeout: 5000 });
+await prSearch.fill("popover");
+await page.getByText("Fix status badge popover flicker").click();
+check(
+  "selecting a PR satisfies validation without a typed task",
+  await deployBtn().isEnabled(),
+);
+await deployBtn().click();
+await dialog.waitFor({ state: "hidden", timeout: 8000 });
+check(
+  "deploy payload carries the selected PR number and review output",
+  captured.payload?.["0"]?.json?.reviewPrNumber === 131 &&
+    captured.payload?.["0"]?.json?.outputType === "review",
+);
+
+// ── Typed-number fallback for an off-list PR ──────────────────────────────────
+// A PR that isn't in the fetched open-PR list (closed/merged, or beyond the
+// 100-open cap) is still reviewable by typing its number.
+await openScenario("repo");
+await dialog.getByRole("button", { name: "PR review" }).click();
+await page
+  .getByRole("dialog")
+  .getByText("Select a pull request to review")
+  .locator("xpath=ancestor::button[1]")
+  .click();
+const prSearch2 = page.getByPlaceholder("Search or type a PR number…");
+await prSearch2.waitFor({ state: "visible", timeout: 5000 });
+await prSearch2.fill("902");
+await page.getByText("Review PR #902").click();
+check(
+  "a typed off-list PR number satisfies validation",
+  await deployBtn().isEnabled(),
+);
+check(
+  "the typed PR number shows in the trigger",
+  (await dialog.innerText()).includes("Review PR #902"),
+);
+await deployBtn().click();
+await dialog.waitFor({ state: "hidden", timeout: 8000 });
+check(
+  "deploy payload carries the typed off-list PR number",
+  captured.payload?.["0"]?.json?.reviewPrNumber === 902 &&
+    captured.payload?.["0"]?.json?.outputType === "review",
 );
 
 // ── Repo-credentials provider source ─────────────────────────────────────────

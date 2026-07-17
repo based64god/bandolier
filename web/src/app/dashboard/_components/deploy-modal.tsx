@@ -172,6 +172,11 @@ export function DeployModal({
       { repoFullName: repoFullName! },
       { enabled: !!repoFullName },
     );
+  const { data: pulls = [], isLoading: pullsLoading } =
+    api.repos.pulls.useQuery(
+      { repoFullName: repoFullName! },
+      { enabled: !!repoFullName && reviewOutput },
+    );
   const {
     data: modelData,
     isLoading: modelsLoading,
@@ -396,16 +401,28 @@ export function DeployModal({
                   : "Implements the task and opens a pull request."}
             </p>
             {reviewOutput && (
-              <input
-                type="number"
-                min={1}
-                value={reviewPrNumber}
-                onChange={(e) =>
-                  setField({ field: "reviewPrNumber", value: e.target.value })
-                }
-                placeholder="Pull request number (e.g. 42)"
-                className="mt-1 w-full rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-white placeholder:text-white/30 focus:border-purple-500/50 focus:outline-none"
-              />
+              <div className="mt-1">
+                <SearchableSelect
+                  options={pulls.map((p) => ({
+                    value: String(p.number),
+                    searchText: `#${p.number} ${p.title}`.toLowerCase(),
+                    label: (
+                      <span className="min-w-0 flex-1 truncate">
+                        <span className="text-white/40">#{p.number}</span>{" "}
+                        <span className="text-white">{p.title}</span>
+                      </span>
+                    ),
+                  }))}
+                  value={reviewPrNumber || null}
+                  onChange={(v) =>
+                    setField({ field: "reviewPrNumber", value: v ?? "" })
+                  }
+                  placeholder="Select a pull request to review"
+                  loading={pullsLoading}
+                  searchPlaceholder="Search pull requests…"
+                  emptyText="No open pull requests in this repository."
+                />
+              </div>
             )}
           </div>
         )}

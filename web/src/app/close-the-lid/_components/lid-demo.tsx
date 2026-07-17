@@ -30,7 +30,7 @@ export function LidDemo() {
           aria-hidden="true"
         >
           <div
-            className="mx-auto h-24 w-40 origin-bottom rounded-t-lg border border-white/20 bg-gradient-to-b from-white/10 to-white/5 transition-transform duration-700 ease-in-out"
+            className="mx-auto h-24 w-40 origin-bottom rounded-t-lg border border-white/20 bg-gradient-to-b from-white/10 to-white/5 transition-transform duration-700 ease-in-out motion-reduce:transition-none"
             style={{
               transform: closed ? "rotateX(-88deg)" : "rotateX(0deg)",
               transformStyle: "preserve-3d",
@@ -63,7 +63,7 @@ export function LidDemo() {
             className="flex items-center gap-3 rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-left"
           >
             <span className="relative flex h-2.5 w-2.5 shrink-0">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-purple-400 opacity-75" />
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-purple-400 opacity-75 motion-reduce:hidden" />
               <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-purple-500" />
             </span>
             <div className="min-w-0 flex-1">
@@ -71,8 +71,8 @@ export function LidDemo() {
               <p className="truncate text-xs text-white/40">{agent.repo}</p>
             </div>
             <span
-              className="shrink-0 text-xs font-medium text-purple-300"
-              style={{ animation: `pulse 1.4s ${i * 0.3}s infinite` }}
+              className="shrink-0 animate-pulse text-xs font-medium text-purple-300 motion-reduce:animate-none"
+              style={{ animationDelay: `${i * 0.3}s` }}
             >
               running
             </span>

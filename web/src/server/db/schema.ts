@@ -149,6 +149,22 @@ export const taskRun = pgTable("task_run", {
    */
   reviewedPrUrl: text("reviewed_pr_url"),
   /**
+   * For a review run, whether its review is posted in the acting user's voice
+   * (their GitHub token) rather than the bandolier[bot] voice. Dashboard-created
+   * reviews are user-attributed (true); webhook-triggered reviews are bot-voice
+   * (false). Read by the review-submit endpoint to pick which token posts. Null
+   * for non-review runs.
+   */
+  reviewAsUser: boolean("review_as_user"),
+  /**
+   * For a review run, the numeric GitHub id of the review it posted, recorded
+   * when the review-submit endpoint posts it. Lets the webhook layer skip
+   * resuming on the inline comments that review generated (a user-attributed
+   * review's comments are authored by a real user, so the bot-login filter
+   * wouldn't catch them). Null until a review is posted (or for non-review runs).
+   */
+  postedReviewId: text("posted_review_id"),
+  /**
    * The run's cumulative token usage, reported by the harness ingest callback
    * (parsed from the agent CLI's result event). Like the output URLs, pod logs
    * are the live source while the pod exists, but persisting it here keeps a
@@ -283,6 +299,11 @@ export const repoWebhookConfig = pgTable("repo_webhook_config", {
   // and only a repo admin can turn it on. A subsequent push to the PR's branch
   // (`pull_request` synchronize) resumes that review to re-review the changes.
   reviewPullRequests: boolean("review_pull_requests").notNull().default(false),
+  // Optional model id used specifically for PR-review runs, separate from
+  // defaultWebhookModel (which serves issue/comment runs). Null = fall back to
+  // defaultWebhookModel, then the provider default. Lets a repo review with a
+  // cheaper/stronger model than it uses to write code.
+  reviewModel: text("review_model"),
   // ── Repo-scoped credentials (admin-only) ──────────────────────────────────
   // Shared infrastructure for everyone working on this repo: a kubeconfig the
   // repo's agents run on and model credentials they authenticate with. Only a

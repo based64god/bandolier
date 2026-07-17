@@ -588,6 +588,24 @@ describe("createAgentJob", () => {
       expect(envVar("REPO_SYSTEM_PROMPT")?.value).toBe("repo prompt");
       expect(envVar("OUTPUT_TYPE")?.value).toBe("issue");
     });
+
+    it("wires review mode: OUTPUT_TYPE, PR number, and the bot-voice submit URL", async () => {
+      await createAgentJob(
+        baseSpec({
+          repoFullName: "owner/repo",
+          outputType: "review",
+          reviewPrNumber: "7",
+          reviewedPrUrl: "https://github.com/owner/repo/pull/7",
+        }),
+      );
+      expect(envVar("OUTPUT_TYPE")?.value).toBe("review");
+      expect(envVar("REVIEW_PR_NUMBER")?.value).toBe("7");
+      expect(envVar("BANDOLIER_REVIEW_URL")?.value).toBe(
+        "http://test.local/api/agent-runs/review",
+      );
+      // A review is read-only — no working branch is cut for it.
+      expect(envNames()).not.toContain("AGENT_BRANCH");
+    });
   });
 
   describe("annotations and labels", () => {
@@ -853,6 +871,7 @@ describe("createAgentJob", () => {
         spawnedBy: "u1",
         repoFullName: null,
         issueNumber: null,
+        reviewedPrUrl: null,
         parentJobName: null,
         ciResumeSha: null,
         agentImage: DEFAULT_HARNESS_IMAGE,

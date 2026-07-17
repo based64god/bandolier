@@ -196,12 +196,26 @@ export interface JobSpec {
    */
   interactive?: boolean;
   /**
-   * What the run produces when it finishes: a pull request (default) or a GitHub
-   * issue. In issue mode the harness runs the agent read-only and opens one issue
-   * written from the transcript — for a webhook/issue-triggered run, a sub-task of
-   * the originating issue. Issue mode requires `repoFullName` (where to open it).
+   * What the run produces when it finishes: a pull request (default), a GitHub
+   * issue, or a PR review. In issue mode the harness runs the agent read-only
+   * and opens one issue written from the transcript. In review mode it analyses
+   * an existing pull request read-only and the review is submitted server-side
+   * in the bot voice (never the acting user's credentials) — see reviewPrNumber.
+   * Both non-PR modes require `repoFullName`.
    */
-  outputType?: "pr" | "issue";
+  outputType?: "pr" | "issue" | "review";
+  /**
+   * The number of the pull request a review run reviews (review mode only). The
+   * harness fetches its diff read-only; the server posts the resulting review to
+   * this PR in the bot voice. Passed to the harness as REVIEW_PR_NUMBER.
+   */
+  reviewPrNumber?: string;
+  /**
+   * The html_url of the pull request a review run reviews. Recorded on the run
+   * row (task_run.reviewed_pr_url) at creation so a push to that PR's branch can
+   * find the review run to re-review, and so a comment-resume can skip it.
+   */
+  reviewedPrUrl?: string;
   gitName?: string;
   gitEmail?: string;
   /** Set for issue tasks (dashboard or webhook). */
@@ -615,6 +629,19 @@ export function buildEnvVars(
   if (spec.outputType === "issue") {
     envVars.push({ name: "OUTPUT_TYPE", value: "issue" });
   }
+  if (spec.outputType === "review") {
+    envVars.push({ name: "OUTPUT_TYPE", value: "review" });
+    if (spec.reviewPrNumber) {
+      envVars.push({ name: "REVIEW_PR_NUMBER", value: spec.reviewPrNumber });
+    }
+    // The harness POSTs the structured review here; the server posts it to the
+    // PR in the bot voice (never the acting user's credentials). Same per-job
+    // HMAC as the ingest callback authenticates it.
+    envVars.push({
+      name: "BANDOLIER_REVIEW_URL",
+      value: `${env.BETTER_AUTH_URL}/api/agent-runs/review`,
+    });
+  }
 
   // The ingest callback, the artifact upload, and the interactive input poll are
   // all authenticated by the same per-job HMAC token; inject it (and the job
@@ -695,8 +722,8 @@ export function buildJobManifest(
     ...(spec.repoFullName && { "bandolier.io/repo": spec.repoFullName }),
     ...(spec.issueNumber && { "bandolier.io/github-issue": spec.issueNumber }),
     ...(spec.issueUrl && { "bandolier.io/issue-url": spec.issueUrl }),
-    ...(spec.outputType === "issue" && {
-      "bandolier.io/output-type": "issue",
+    ...((spec.outputType === "issue" || spec.outputType === "review") && {
+      "bandolier.io/output-type": spec.outputType,
     }),
     ...(spec.createdBy && { "bandolier.io/created-by": spec.createdBy }),
     // Lineage of a resumed run, read by the dashboard to show what it continues.
@@ -859,6 +886,10 @@ export async function recordRun(spec: JobSpec, jobName: string, ns: string) {
     spawnedBy: spec.userId,
     repoFullName: spec.repoFullName ?? null,
     issueNumber: spec.issueNumber ?? null,
+    // The PR a review run reviews (its input), so a push to that PR's branch can
+    // find this run to re-review and a comment-resume can skip it. Null for
+    // every non-review run.
+    reviewedPrUrl: spec.reviewedPrUrl ?? null,
     parentJobName: spec.parentJobName ?? null,
     ciResumeSha: spec.ciResumeSha ?? null,
     // The resolved image (same fallback as the pod spec), so the harness

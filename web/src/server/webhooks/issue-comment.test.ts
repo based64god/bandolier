@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { JobSpec } from "~/server/agents/create-job";
@@ -291,6 +291,7 @@ describe("parent matching", () => {
       and(
         eq(taskRun.repoFullName, "acme/widgets"),
         eq(taskRun.issueNumber, "7"),
+        isNull(taskRun.reviewedPrUrl),
       ),
     );
     expect(orderBy).toHaveBeenCalledWith(desc(taskRun.createdAt));
@@ -311,6 +312,7 @@ describe("parent matching", () => {
       and(
         eq(taskRun.repoFullName, "acme/widgets"),
         eq(taskRun.pullRequestUrl, prUrl),
+        isNull(taskRun.reviewedPrUrl),
       ),
     );
   });

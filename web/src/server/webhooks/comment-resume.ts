@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 
 import { createAgentJob } from "~/server/agents/create-job";
 import { getRegistryPullSecret } from "~/server/agents/github-app";
@@ -114,7 +114,10 @@ export async function resumeFromComment(
 
   // The parent is the most recent run for the commented item: matched by PR
   // URL for pull requests, by repo + issue number for issues. No parent run
-  // means there is nothing to resume.
+  // means there is nothing to resume. Review runs are excluded (reviewed_pr_url
+  // is null on coding runs): a comment on a PR — including a reply to one of the
+  // bot's review comments — resumes the run that *opened* the PR, not the review
+  // of it; a push to the branch re-reviews (see handlePullRequestSynchronize).
   const [parent] = await db
     .select({
       jobName: taskRun.jobName,
@@ -127,10 +130,12 @@ export async function resumeFromComment(
         ? and(
             eq(taskRun.repoFullName, repository.full_name),
             eq(taskRun.pullRequestUrl, input.pullRequestUrl!),
+            isNull(taskRun.reviewedPrUrl),
           )
         : and(
             eq(taskRun.repoFullName, repository.full_name),
             eq(taskRun.issueNumber, String(input.number)),
+            isNull(taskRun.reviewedPrUrl),
           ),
     )
     .orderBy(desc(taskRun.createdAt))

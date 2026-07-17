@@ -98,6 +98,30 @@ export interface PullRequestReviewCommentPayload {
   sender: { id: number; login: string };
 }
 
+// `pull_request` event: a PR was opened, marked ready for review, or had new
+// commits pushed to its branch (synchronize), among other actions. Drives
+// automatic PR reviews: `opened`/`ready_for_review` start a review, and
+// `synchronize` re-reviews by resuming the PR's review run. Only the fields the
+// review handlers read are modelled.
+export interface PullRequestPayload {
+  action: string;
+  number: number;
+  pull_request: {
+    number: number;
+    title: string;
+    body: string | null;
+    html_url: string;
+    labels: { name: string }[];
+    // A draft PR isn't ready for review; a later `ready_for_review` clears this.
+    draft?: boolean;
+    user: { id: number; login: string; type?: string };
+  };
+  repository: GitHubRepository;
+  // Who triggered the event: the opener for `opened`, the pusher for
+  // `synchronize`. The run is owned by (and spends the credentials of) this user.
+  sender: { id: number; login: string };
+}
+
 // Payloads for the GitHub App's lifecycle events, which maintain the
 // repo → installation mapping the bot-token broker reads.
 export interface InstallationRef {

@@ -63,14 +63,24 @@ export async function recordCredentialUsage(
 ): Promise<void> {
   const now = new Date();
   const isSubscription = authKind === "subscription";
-  const windowFloor = new Date(now.getTime() - SUBSCRIPTION_WINDOW_MS);
+  // Compare and assign the window timestamps as ISO strings cast to `timestamp`,
+  // matching how Drizzle serializes the Date-valued columns in the insert below.
+  // A raw Date embedded in a `sql` template is handed to the driver unmapped,
+  // which postgres-js rejects ("Received an instance of Date"), so every
+  // subscription upsert would throw — silently, since the caller treats usage
+  // telemetry as best-effort. The cast keeps the window update off the
+  // Date-binding path while storing the exact same UTC wall-clock.
+  const nowIso = now.toISOString();
+  const windowFloorIso = new Date(
+    now.getTime() - SUBSCRIPTION_WINDOW_MS,
+  ).toISOString();
   // Reset the window in the same statement the count increments in, so
   // concurrent deploys can't race a read-then-write: the started-at and count
   // both branch on whether the stored window has elapsed.
-  const windowExpired = sql`${credentialUsage.windowStartedAt} < ${windowFloor}`;
+  const windowExpired = sql`${credentialUsage.windowStartedAt} < ${windowFloorIso}::timestamp`;
   const windowUpdate = isSubscription
     ? {
-        windowStartedAt: sql`CASE WHEN ${windowExpired} THEN ${now} ELSE ${credentialUsage.windowStartedAt} END`,
+        windowStartedAt: sql`CASE WHEN ${windowExpired} THEN ${nowIso}::timestamp ELSE ${credentialUsage.windowStartedAt} END`,
         windowRuns: sql`CASE WHEN ${windowExpired} THEN 1 ELSE ${credentialUsage.windowRuns} + 1 END`,
       }
     : {};

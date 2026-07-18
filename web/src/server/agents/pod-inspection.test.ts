@@ -54,6 +54,7 @@ describe("inspectPod log derivations", () => {
     expect(readNamespacedPodLog).toHaveBeenCalledWith({
       name: "pod-urls",
       namespace: "ns-urls",
+      container: "harness",
       tailLines: 200,
     });
   });

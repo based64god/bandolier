@@ -1,4 +1,5 @@
 import { parseTokenUsageFromLogs, type TokenUsage } from "~/lib/tokens";
+import { AGENT_CONTAINER_NAME } from "~/server/agents/labels";
 import { getCoreV1Api } from "~/server/k8s/client";
 
 const PR_MARKER = /PR_URL=(https:\/\/\S+)/;
@@ -53,6 +54,10 @@ async function readPodInspection(
   const logs = await getCoreV1Api(kubeconfig).readNamespacedPodLog({
     name: podName,
     namespace,
+    // Name the harness container explicitly so an injected sidecar (which makes
+    // the pod multi-container) can't turn this read into an ambiguous-container
+    // error — mirroring getLogs. See AGENT_CONTAINER_NAME.
+    container: AGENT_CONTAINER_NAME,
     tailLines: 200,
   });
 

@@ -162,7 +162,7 @@ export function startFakeK8s(): Promise<FakeK8s> {
           labels: tmpl.labels ?? {},
           annotations: tmpl.annotations ?? {},
         },
-        spec: { containers: [{ name: "agent", image: "bandolier/agent" }] },
+        spec: { containers: [{ name: "harness", image: "bandolier/agent" }] },
         status: {
           phase: "Running",
           startTime: new Date().toISOString(),

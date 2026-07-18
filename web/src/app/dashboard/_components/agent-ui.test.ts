@@ -307,8 +307,14 @@ describe("isAgentResolved", () => {
     expect(isAgentResolved({ ...base, expired: false })).toBe(false);
   });
 
-  it("does not resolve a non-succeeded task just because it expired", () => {
+  it("resolves a failed task that has expired, even without GitHub output", () => {
     expect(isAgentResolved({ ...base, status: "Failed", expired: true })).toBe(
+      true,
+    );
+  });
+
+  it("does not resolve a non-terminal task just because it expired", () => {
+    expect(isAgentResolved({ ...base, status: "Running", expired: true })).toBe(
       false,
     );
   });

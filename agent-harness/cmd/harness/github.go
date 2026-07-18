@@ -81,6 +81,21 @@ Do not ask for clarification. Implement the best solution you can.`,
 		branchName)
 }
 
+// buildRebaseTask frames the rebase-recovery pass: the sole instruction handed
+// to a restarted agent after the branch's push was rejected as a
+// non-fast-forward. It tells the agent to fetch the advanced remote branch and
+// rebase this run's commits onto it, resolving any conflicts, and leaves the
+// pushing and PR-opening to the harness so the retried push fast-forwards.
+func buildRebaseTask(branchName string) string {
+	return fmt.Sprintf(`Pushing branch %q was rejected as a non-fast-forward: the remote branch has advanced with commits your local branch does not have. Reconcile the two histories so the branch can be pushed.
+
+1. Fetch the latest remote branch: git fetch origin %s
+2. Rebase this branch's commits onto the updated remote tip: git rebase origin/%s
+3. If the rebase stops on a conflict, resolve each conflicted file so both sides' intent is preserved, git add the resolved files, then git rebase --continue. Repeat until the rebase completes.
+
+Do NOT force-push, run git reset --hard, drop commits, or open a pull request — the harness pushes the branch and opens the PR once you finish. Leave the working tree clean with the rebase completed. Do not ask for clarification.`, branchName, branchName, branchName)
+}
+
 // buildIssueOutputSystemPrompt frames an issue-output run: the agent analyses
 // the task/repo and the harness opens a single GitHub issue from its findings —
 // no code changes, no branch, no PR. When the run was triggered by a parent
@@ -275,8 +290,8 @@ func openPR(ctx context.Context, cfg config, branchName, title, body string) err
 	}
 
 	log.Printf("[harness] pushing branch %s", branchName)
-	if err := runCmd(ctx, cfg.workDir, os.Environ(), "git", "push", "-u", "origin", branchName); err != nil {
-		return fmt.Errorf("git push: %w", err)
+	if err := pushWithRebaseRecovery(ctx, cfg, branchName); err != nil {
+		return err
 	}
 
 	log.Printf("[harness] creating pull request: %s", title)
@@ -289,11 +304,7 @@ func openPR(ctx context.Context, cfg config, branchName, title, body string) err
 		"--base", cfg.baseBranch,
 		"--head", branchName,
 	)
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
-		if line != "" {
-			log.Printf("[harness] %s", line)
-		}
-	}
+	logHarnessLines(out)
 	res := classifyPRCreate(out, err)
 	if res.err != nil {
 		return res.err
@@ -311,6 +322,76 @@ func openPR(ctx context.Context, cfg config, branchName, title, body string) err
 		log.Printf("[harness] pull request created (no URL parsed)")
 	}
 	return nil
+}
+
+// logHarnessLines re-emits a subprocess's captured output line by line under the
+// [harness] tag, so it renders as dimmed harness context in the dashboard rather
+// than being mistaken for Claude's output. Blank lines are dropped.
+func logHarnessLines(out string) {
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if line != "" {
+			log.Printf("[harness] %s", line)
+		}
+	}
+}
+
+// gitPush pushes branchName to origin, capturing stdout+stderr together so the
+// caller can classify the outcome — git prints the "[rejected] … non-fast-forward"
+// notice to stderr.
+func gitPush(ctx context.Context, cfg config, branchName string) (string, error) {
+	return captureCombined(ctx, cfg.workDir, "git", "push", "-u", "origin", branchName)
+}
+
+// pushRejectedRe matches a git push refused as a non-fast-forward — the remote
+// branch carries commits the local branch doesn't, so the push only succeeds
+// after those commits are pulled in (a rebase). Auth, branch-protection, and
+// network failures don't match, so they aren't retried with a pointless rebase
+// pass.
+var pushRejectedRe = regexp.MustCompile(`(?i)\[rejected\]|non-fast-forward|fetch first|tip of your current branch is behind`)
+
+// pushWithRebaseRecovery pushes the branch and, when the push is rejected as a
+// non-fast-forward, restarts Claude for a focused pass that rebases this run's
+// commits onto the updated remote tip (resolving any conflicts) before retrying
+// the push once. It recovers the end-of-run race where the remote branch
+// advanced after the clone — a concurrent push, or a resume whose parent pushed
+// further — instead of failing the run with the work stranded on the pod. A push
+// that fails for any other reason is returned as-is, since a rebase can't fix it.
+func pushWithRebaseRecovery(ctx context.Context, cfg config, branchName string) error {
+	out, err := gitPush(ctx, cfg, branchName)
+	logHarnessLines(out)
+	if err == nil {
+		return nil
+	}
+	if !pushRejectedRe.MatchString(out) {
+		return fmt.Errorf("git push: %w", err)
+	}
+
+	log.Printf("[harness] push of %s rejected as non-fast-forward — restarting Claude to rebase onto the updated remote", branchName)
+	if rerr := rebaseWithClaude(ctx, cfg, branchName); rerr != nil {
+		return fmt.Errorf("git push rejected and rebase recovery failed: %w", rerr)
+	}
+
+	out, err = gitPush(ctx, cfg, branchName)
+	logHarnessLines(out)
+	if err != nil {
+		return fmt.Errorf("git push after rebase: %w", err)
+	}
+	return nil
+}
+
+// rebaseWithClaude restarts the agent for a single, tightly-scoped pass: fetch
+// the advanced remote branch and rebase this run's commits onto it, resolving
+// any conflicts, so the retried push fast-forwards. The mechanical recovery
+// needs neither the run's repo-wide framing nor ultracode's multi-agent fan-out,
+// so they're stripped (effort cleared, which also drops ultracode) to keep the
+// pass on the one task.
+func rebaseWithClaude(ctx context.Context, cfg config, branchName string) error {
+	rebaseCfg := cfg
+	rebaseCfg.systemPrompt = ""
+	rebaseCfg.repoSystemPrompt = ""
+	rebaseCfg.effort = ""
+	rebaseCfg.task = buildRebaseTask(branchName)
+	return runClaude(ctx, rebaseCfg)
 }
 
 // prCreateResult is the decision classifyPRCreate derives from a `gh pr create`
@@ -368,11 +449,7 @@ func openIssue(ctx context.Context, cfg config, transcript string, parent *githu
 		"--title", title,
 		"--body", body,
 	)
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
-		if line != "" {
-			log.Printf("[harness] %s", line)
-		}
-	}
+	logHarnessLines(out)
 	if err != nil {
 		return fmt.Errorf("gh issue create: %w", err)
 	}

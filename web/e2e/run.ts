@@ -32,6 +32,7 @@ const ROUTES = [
   "/dev/composer",
   "/dev/conversation",
   "/dev/credential-ui",
+  "/dev/credential-usage",
   "/dev/deploy-modal",
   "/dev/effort-picker",
   "/dev/interactive-scroll",

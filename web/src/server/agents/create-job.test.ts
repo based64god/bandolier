@@ -891,13 +891,36 @@ describe("createAgentJob", () => {
 
     it("records the run's provider usage for the recently-used footer", async () => {
       await createAgentJob(baseSpec());
+      // An API key is metered, so the usage is tagged api_key.
       expect(usageValues).toHaveBeenCalledWith(
-        expect.objectContaining({ userId: "u1", provider: "anthropic" }),
+        expect.objectContaining({
+          userId: "u1",
+          provider: "anthropic",
+          authKind: "api_key",
+        }),
       );
       expect(usageOnConflict).toHaveBeenCalledTimes(1);
     });
 
-    it("records a gollm-proxied provider's usage as gollm:<id>", async () => {
+    it("tags a subscription OAuth run's usage as a subscription", async () => {
+      await createAgentJob(
+        baseSpec({ anthropicApiKey: undefined, anthropicOauthToken: "oat-1" }),
+      );
+      expect(usageValues).toHaveBeenCalledWith(
+        expect.objectContaining({ provider: "anthropic", authKind: "subscription" }),
+      );
+    });
+
+    it("tags a ChatGPT-subscription run's usage as a subscription", async () => {
+      await createAgentJob(
+        baseSpec({ anthropicApiKey: undefined, codexAuthJson: '{"tokens":{}}' }),
+      );
+      expect(usageValues).toHaveBeenCalledWith(
+        expect.objectContaining({ provider: "openai", authKind: "subscription" }),
+      );
+    });
+
+    it("records a gollm-proxied provider's usage as a metered gollm:<id>", async () => {
       await createAgentJob(
         baseSpec({
           anthropicApiKey: undefined,
@@ -908,7 +931,10 @@ describe("createAgentJob", () => {
         }),
       );
       expect(usageValues).toHaveBeenCalledWith(
-        expect.objectContaining({ provider: "gollm:openrouter" }),
+        expect.objectContaining({
+          provider: "gollm:openrouter",
+          authKind: "api_key",
+        }),
       );
     });
 

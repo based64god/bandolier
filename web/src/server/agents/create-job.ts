@@ -26,7 +26,10 @@ import {
   NETWORK_POLICY_NAME,
   type NetworkPolicyOptions,
 } from "~/server/agents/network-policy";
-import { providerForCredentials } from "~/server/agents/resolve-credentials";
+import {
+  providerForCredentials,
+  type AuthKind,
+} from "~/server/agents/resolve-credentials";
 import { db } from "~/server/db";
 import { taskRun } from "~/server/db/schema";
 import {
@@ -543,6 +546,23 @@ export function resolveProvider(spec: JobSpec): ProviderDescriptor {
 }
 
 /**
+ * Which credential kind the resolved run routed through, for usage telemetry.
+ * Only Anthropic and OpenAI offer a subscription login, and only when no API
+ * key outranks it (the key wins in resolveProvider); every other provider —
+ * Bedrock, Gemini, and the gollm-proxied ones — is metered.
+ */
+function resolveAuthKind(
+  type: ProviderDescriptor["type"],
+  spec: JobSpec,
+): AuthKind {
+  if (type === "anthropic" && !spec.anthropicApiKey && spec.anthropicOauthToken)
+    return "subscription";
+  if (type === "openai" && !spec.openaiApiKey && spec.codexAuthJson)
+    return "subscription";
+  return "api_key";
+}
+
+/**
  * Builds a descriptor for a proxied provider: BANDOLIER_LLM_PROVIDER names the
  * gollm backend the harness routes to, and every credential env var becomes a
  * per-job secret ref. Shared by the OpenAI/Gemini paths and the generic
@@ -1003,7 +1023,12 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
       provider.type === "custom" && spec.customProvider
         ? gollmProviderName(spec.customProvider.provider)
         : provider.type;
-    await recordCredentialUsage(db, spec.userId, usedProvider);
+    await recordCredentialUsage(
+      db,
+      spec.userId,
+      usedProvider,
+      resolveAuthKind(provider.type, spec),
+    );
   } catch (error) {
     console.warn("[bandolier:deploy] failed to record credential usage", {
       job: jobName,

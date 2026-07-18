@@ -73,7 +73,17 @@ interface ParsedUpdate {
   // tool_call_update. Narrowed per-case via chunkText / toolOutputText.
   content?: { text?: string } | ToolContentBlock[];
   availableCommands?: AvailableCommand[];
+  // The live set of background subagent task ids, carried by a
+  // _bandolier/background_tasks update (a Bandolier ACP extension).
+  taskIds?: string[];
 }
+
+/**
+ * The sessionUpdate discriminator for the harness's background-tasks extension
+ * frame. Kept as a named const (rather than an inline string) so the switch case
+ * and any test reference one value. Mirrors the Go acp.UpdateBackgroundTasks.
+ */
+export const BACKGROUND_TASKS_UPDATE = "_bandolier/background_tasks";
 
 /** Text of a message chunk's content, ignoring the tool_call_update array form. */
 function chunkText(content: ParsedUpdate["content"]): string {
@@ -140,7 +150,9 @@ interface ParsedFrame {
  * JSON-RPC id is in `sentPromptIds` are skipped: this client instance already
  * rendered them optimistically when it sent them. An
  * available_commands_update surfaces the session's slash commands (for the
- * input's typeahead) rather than a timeline item. Other frames (responses,
+ * input's typeahead) rather than a timeline item, and a _bandolier/background_tasks
+ * update surfaces the live set of background subagent tasks as `backgroundTasks`
+ * (for a live indicator), also not a timeline item. Other frames (responses,
  * cancels, control frames) are ignored for rendering — only their sessionId is
  * harvested.
  */
@@ -153,10 +165,17 @@ export function applyFrames(
   sessionId?: string;
   /** Present only when an available_commands_update was seen in this batch. */
   commands?: AvailableCommand[];
+  /**
+   * The live background-task set, present only when a background-tasks frame was
+   * seen in this batch. An empty array means every background task has drained;
+   * `undefined` means no frame arrived, so the caller keeps its previous value.
+   */
+  backgroundTasks?: string[];
 } {
   const items = [...prev];
   let sessionId: string | undefined;
   let commands: AvailableCommand[] | undefined;
+  let backgroundTasks: string[] | undefined;
 
   for (const f of frames) {
     let msg: ParsedFrame;
@@ -265,10 +284,19 @@ export function applyFrames(
         commands = (u.availableCommands ?? []).filter((c) => c?.name);
         break;
       }
+      case BACKGROUND_TASKS_UPDATE: {
+        // The live set of background subagent tasks in flight (a Bandolier ACP
+        // extension). Authoritative — the latest frame replaces the set — and not a
+        // timeline item: it drives a live indicator, while each task's actual work
+        // still streams into the tool tree under its spawn. An empty set (a drain)
+        // clears the indicator.
+        backgroundTasks = u.taskIds ?? [];
+        break;
+      }
     }
   }
 
-  return { items, sessionId, commands };
+  return { items, sessionId, commands, backgroundTasks };
 }
 
 /**
@@ -548,6 +576,45 @@ export function collectSubagentCards(
     add(s.toolCallId, s.label, s.status);
   for (const n of narration) add(n.toolCallId, n.label, n.status);
   return order.map((id) => byId.get(id)!);
+}
+
+/** One background subagent task: its id and, when correlatable, the label of the
+ * subagent spawn that started it. */
+export interface BackgroundTask {
+  id: string;
+  /**
+   * The spawning subagent call's label, when a kind:"subagent" tool call in the
+   * fetched window shares this task's id; undefined otherwise (background task ids
+   * and tool-call ids don't always coincide, and a task's spawn may be outside the
+   * window). The panel shows the label when present and a generic name otherwise.
+   */
+  label?: string;
+}
+
+/**
+ * The background-task set as view models: each live task id paired with the label
+ * of the subagent spawn it corresponds to, when that spawn is present in the
+ * timeline under the same id. Deduplicates ids while preserving first-seen order.
+ * Pure, so the panel can render straight from the hook's `backgroundTasks` state.
+ */
+export function collectBackgroundTasks(
+  taskIds: readonly string[],
+  items: TimelineItem[],
+): BackgroundTask[] {
+  const labels = new Map<string, string>();
+  for (const it of items) {
+    if (it.type === "tool" && it.kind === "subagent" && it.toolCallId) {
+      labels.set(it.toolCallId, it.title);
+    }
+  }
+  const seen = new Set<string>();
+  const out: BackgroundTask[] = [];
+  for (const id of taskIds) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push({ id, label: labels.get(id) });
+  }
+  return out;
 }
 
 /** Builds a session/prompt JSON-RPC frame for the frontend client to enqueue. */

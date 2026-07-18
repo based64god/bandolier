@@ -14,7 +14,11 @@ import type {
 // observed at the mocked createAgentJob.
 
 const resolveWebhookRun =
-  vi.fn<(opts: { defaultModel: string | null }) => Promise<ResolvedWebhookRun | null>>();
+  vi.fn<
+    (opts: {
+      defaultModel: string | null;
+    }) => Promise<ResolvedWebhookRun | null>
+  >();
 vi.mock("~/server/webhooks/resolve-run", () => ({
   resolveWebhookRun: (opts: { defaultModel: string | null }) =>
     resolveWebhookRun(opts),
@@ -26,9 +30,24 @@ vi.mock("~/server/agents/create-job", () => ({
 }));
 
 const getRegistryPullSecret = vi.fn(() => undefined);
+const getRepoBotToken = vi.fn<() => Promise<string | null>>();
 vi.mock("~/server/agents/github-app", () => ({
   getRegistryPullSecret: () => getRegistryPullSecret(),
+  getRepoBotToken: () => getRepoBotToken(),
 }));
+
+// The base-only-update check compares the PR's diff at the before/after heads
+// via the compare API; each ghFetch resolves the next queued compare response.
+const ghFetch = vi.fn<() => Promise<{ json: () => Promise<unknown> }>>();
+vi.mock("~/server/agents/github-api", () => ({
+  ghFetch: () => ghFetch(),
+}));
+
+function compareResponse(
+  files: { filename: string; status: string; patch?: string }[],
+) {
+  return { json: () => Promise.resolve({ files }) };
+}
 
 // The parent-review lookup is a single drizzle select chain; this stub resolves
 // the configured rows so the synchronize handler can be driven by them.
@@ -40,9 +59,8 @@ const dbFrom = vi.fn(() => ({ where: dbWhere }));
 const dbSelect = vi.fn(() => ({ from: dbFrom }));
 vi.mock("~/server/db", () => ({ db: { select: () => dbSelect() } }));
 
-const { handlePullRequestOpened, handlePullRequestSynchronize } = await import(
-  "~/server/webhooks/pull-request"
-);
+const { handlePullRequestOpened, handlePullRequestSynchronize } =
+  await import("~/server/webhooks/pull-request");
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -59,6 +77,8 @@ function payload(
     title?: string;
     body?: string | null;
     draft?: boolean;
+    before?: string;
+    after?: string;
   } = {},
 ): PullRequestPayload {
   const number = overrides.number ?? 7;
@@ -73,8 +93,11 @@ function payload(
       labels: [],
       draft: overrides.draft,
       user: { id: 42, login: "octo" },
+      base: { ref: "main" },
     },
     repository: REPO,
+    before: overrides.before,
+    after: overrides.after,
     sender: { id: 42, login: "octo" },
   };
 }
@@ -98,7 +121,9 @@ function config(overrides: Partial<WebhookRunConfig> = {}): WebhookRunConfig {
   };
 }
 
-function resolvedRun(accessToken: string | null = "gh-tok"): ResolvedWebhookRun {
+function resolvedRun(
+  accessToken: string | null = "gh-tok",
+): ResolvedWebhookRun {
   return {
     linked: { userId: "u1", accessToken },
     model: "claude-sonnet-4-5",
@@ -116,6 +141,7 @@ beforeEach(() => {
   parentRows = [];
   resolveWebhookRun.mockResolvedValue(resolvedRun());
   createAgentJob.mockResolvedValue("bandolier-agent-1");
+  getRepoBotToken.mockResolvedValue("bot-tok");
 });
 
 describe("handlePullRequestOpened", () => {
@@ -170,7 +196,9 @@ describe("handlePullRequestOpened", () => {
 
 describe("handlePullRequestSynchronize", () => {
   it("resumes the PR's most recent review run for a re-review", async () => {
-    parentRows = [{ jobName: "review-1", displayName: "Review #7: Add a feature" }];
+    parentRows = [
+      { jobName: "review-1", displayName: "Review #7: Add a feature" },
+    ];
 
     await handlePullRequestSynchronize(
       payload({ action: "synchronize" }),
@@ -204,5 +232,68 @@ describe("handlePullRequestSynchronize", () => {
     expect(createAgentJob).not.toHaveBeenCalled();
     // Gated before the parent lookup even runs.
     expect(dbSelect).not.toHaveBeenCalled();
+  });
+
+  it("skips a base-only update (rebase/merge leaves the PR diff unchanged)", async () => {
+    parentRows = [{ jobName: "review-1", displayName: "Review #7" }];
+    // Same contribution signature at both heads ⇒ no new work.
+    const files = [
+      { filename: "a.ts", status: "modified", patch: "@@ -1 +1 @@\n-a\n+b" },
+    ];
+    ghFetch
+      .mockResolvedValueOnce(compareResponse(files))
+      .mockResolvedValueOnce(compareResponse(files));
+
+    await handlePullRequestSynchronize(
+      payload({ action: "synchronize", before: "sha-old", after: "sha-new" }),
+      config(),
+    );
+
+    expect(ghFetch).toHaveBeenCalledTimes(2);
+    expect(createAgentJob).not.toHaveBeenCalled();
+  });
+
+  it("re-reviews when the head diff changed (new commits added)", async () => {
+    parentRows = [{ jobName: "review-1", displayName: "Review #7" }];
+    ghFetch
+      .mockResolvedValueOnce(
+        compareResponse([
+          {
+            filename: "a.ts",
+            status: "modified",
+            patch: "@@ -1 +1 @@\n-a\n+b",
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(
+        compareResponse([
+          {
+            filename: "a.ts",
+            status: "modified",
+            patch: "@@ -1 +2 @@\n-a\n+b\n+c",
+          },
+        ]),
+      );
+
+    await handlePullRequestSynchronize(
+      payload({ action: "synchronize", before: "sha-old", after: "sha-new" }),
+      config(),
+    );
+
+    expect(createAgentJob).toHaveBeenCalledTimes(1);
+    expect(createAgentJob.mock.calls[0]![0].parentJobName).toBe("review-1");
+  });
+
+  it("fails open (re-reviews) when the compare can't be read", async () => {
+    parentRows = [{ jobName: "review-1", displayName: "Review #7" }];
+    getRepoBotToken.mockResolvedValue(null);
+
+    await handlePullRequestSynchronize(
+      payload({ action: "synchronize", before: "sha-old", after: "sha-new" }),
+      config(),
+    );
+
+    expect(ghFetch).not.toHaveBeenCalled();
+    expect(createAgentJob).toHaveBeenCalledTimes(1);
   });
 });

@@ -63,6 +63,7 @@ export function useAcpSession({
   const [items, setItems] = useState<TimelineItem[]>([]);
   const [sessionId, setSessionId] = useState<string | undefined>(undefined);
   const [commands, setCommands] = useState<AvailableCommand[]>([]);
+  const [backgroundTasks, setBackgroundTasks] = useState<string[]>([]);
 
   const itemsRef = useRef<TimelineItem[]>([]);
   const cursorRef = useRef(0);
@@ -120,11 +121,15 @@ export function useAcpSession({
           items: next,
           sessionId: sid,
           commands: cmds,
+          backgroundTasks: bg,
         } = applyFrames(itemsRef.current, res.frames, sentPromptIdsRef.current);
         itemsRef.current = next;
         setItems(next);
         if (sid) setSessionId(sid);
         if (cmds) setCommands(cmds);
+        // A batch without a background-tasks frame leaves `bg` undefined; keep the
+        // previous set then. An empty array is a real drain, so set it.
+        if (bg !== undefined) setBackgroundTasks(bg);
       } catch {
         // transient; retry on the next tick
       }
@@ -180,6 +185,11 @@ export function useAcpSession({
     items,
     /** Slash commands the agent advertised, or [] until one is seen. */
     commands,
+    /**
+     * The live set of background subagent task ids, or [] when none are in
+     * flight. Drives the pinned background-tasks indicator.
+     */
+    backgroundTasks,
     /** True once the session id is known and a prompt can be sent. */
     ready: !!sessionId,
     sendPrompt,

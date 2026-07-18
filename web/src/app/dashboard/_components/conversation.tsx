@@ -163,6 +163,9 @@ const TOOL_KIND_GLYPH: Record<string, string> = {
   // A spawned subagent (Claude's Agent/Task tool): a fan-out mark, since its own
   // tool calls nest beneath it.
   subagent: "⇉",
+  // A Workflow (Claude's multi-agent orchestration): a wider fan-out than a lone
+  // subagent, since it drives many agents across phases, each nesting beneath it.
+  workflow: "⇶",
   other: "▢",
 };
 

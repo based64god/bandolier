@@ -7,6 +7,7 @@ import type { RouterOutputs } from "~/trpc/react";
 import { expiresAtLocal, taskNameLabel, taskNameTooltip } from "./agent-ui";
 import { Conversation, SessionHeader } from "./conversation";
 import { SubagentPanel } from "./subagent-panel";
+import { BackgroundTasksPanel } from "./background-tasks-panel";
 import { SessionErrorBoundary } from "./session-error-boundary";
 import { OutputBadge, SourceBadge } from "./output-badge";
 import { SessionComposer } from "./session-composer";
@@ -583,6 +584,12 @@ export function InteractiveRow({
               >
                 <div className="shrink-0">
                   <SubagentPanel items={session.items} />
+                </div>
+                <div className="shrink-0">
+                  <BackgroundTasksPanel
+                    taskIds={session.backgroundTasks}
+                    items={session.items}
+                  />
                 </div>
                 <Conversation
                   items={session.items}

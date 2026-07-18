@@ -17,9 +17,11 @@ import {
   testCustomProviderCredential,
   validateCustomProviderInput,
 } from "~/server/agents/custom-providers";
+import { getRecentCredentialUsage } from "~/server/agents/credential-usage";
 import {
   GOLLM_PROVIDERS,
   gollmProviderInfo,
+  parseGollmProvider,
   providerFields,
   providerPriority,
 } from "~/server/agents/gollm-catalog";
@@ -510,6 +512,26 @@ export const accountRouter = createTRPCRouter({
       }
       return testCustomProviderCredential(cred);
     }),
+
+  // The providers the user has run an agent on recently (last 7 days),
+  // most-recent first — the source for the dashboard footer's usage indicators.
+  // Covers every gollm-supported provider: the four first-class ones plus any
+  // gollm-proxied "gollm:<id>", labelled from the catalog.
+  recentCredentialUsage: protectedProcedure.query(async ({ ctx }) => {
+    const rows = await getRecentCredentialUsage(ctx.db, ctx.session.user.id);
+    return rows.map((row) => {
+      const gollmId = parseGollmProvider(row.provider);
+      return {
+        provider: row.provider,
+        // First-class providers carry their own label in the client badge;
+        // gollm-proxied ones need the catalog label passed through.
+        label: gollmId
+          ? (gollmProviderInfo(gollmId)?.label ?? gollmId)
+          : row.provider,
+        lastUsedAt: row.lastUsedAt,
+      };
+    });
+  }),
 
   // ── Kubeconfig ────────────────────────────────────────────────────────────
 

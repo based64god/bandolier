@@ -288,4 +288,61 @@ describe("agents.retrigger", () => {
       .catch(() => undefined);
     expect(parseComputeInput).toHaveBeenCalledWith("4", "8Gi");
   });
+
+  it("pins the re-run to the provider the original run resolved to", async () => {
+    // Only an Anthropic key is configured, but the original ran on Gemini
+    // (recorded as an annotation). Threading that provider back into deploy
+    // routes credential selection to Gemini — which has none — so deploy fails
+    // with the no-credentials error, proving the provider (not the current
+    // primary) drove the re-run.
+    resolveModelCredentials.mockResolvedValue(creds());
+    listNamespacedJob.mockResolvedValue({
+      items: [
+        fakeJob(
+          { CLAUDE_MODEL: "gemini-2.5-pro", CLAUDE_TASK: "do it" },
+          { "bandolier.io/model-provider": "gemini" },
+        ),
+      ],
+    });
+    const err = await caller()
+      .retrigger({ namespace: "ns", jobName: "bandolier-agent-1" })
+      .then(
+        () => {
+          throw new Error("expected retrigger to reject");
+        },
+        (e: unknown) => e,
+      );
+    expect((err as TRPCError).code).toBe("BAD_REQUEST");
+    expect((err as TRPCError).message).toContain("No model credentials");
+  });
+
+  it("pins the re-run to the auth kind the original run resolved to", async () => {
+    // Only an Anthropic API key is configured, but the original ran on the
+    // subscription kind. Threading that auth kind back excludes the API key and
+    // finds no subscription token, so deploy fails with the no-credentials
+    // error — proving the auth kind (not the api-key-beats-subscription
+    // precedence) drove the re-run.
+    resolveModelCredentials.mockResolvedValue(creds());
+    listNamespacedJob.mockResolvedValue({
+      items: [
+        fakeJob(
+          { CLAUDE_MODEL: "claude-opus-4-8", CLAUDE_TASK: "do it" },
+          {
+            "bandolier.io/model-provider": "anthropic",
+            "bandolier.io/model-auth": "subscription",
+          },
+        ),
+      ],
+    });
+    const err = await caller()
+      .retrigger({ namespace: "ns", jobName: "bandolier-agent-1" })
+      .then(
+        () => {
+          throw new Error("expected retrigger to reject");
+        },
+        (e: unknown) => e,
+      );
+    expect((err as TRPCError).code).toBe("BAD_REQUEST");
+    expect((err as TRPCError).message).toContain("No model credentials");
+  });
 });

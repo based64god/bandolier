@@ -35,6 +35,7 @@ import {
 import { EFFORT_LEVELS, providerSupportsEffort } from "~/lib/effort";
 import { gollmProviderEnv } from "~/server/agents/gollm-catalog";
 import { createAgentJob, DEFAULT_MAX_TURNS } from "~/server/agents/create-job";
+import { AGENT_CONTAINER_NAME } from "~/server/agents/labels";
 import { getRepoBotToken } from "~/server/agents/github-app";
 import { getUserGithubToken } from "~/server/agents/github-token";
 import {
@@ -416,11 +417,12 @@ export const agentsRouter = createTRPCRouter({
         userId,
         input.repoFullName,
       );
+      // Only read logs for a pod the caller may view: their own, or — for a
+      // query bound to the repo's own namespace — any collaborator's task in
+      // that repo. A pod outside that set simply won't appear here, so we never
+      // read across tenants.
+      let mayView = false;
       try {
-        // Only read logs for a pod the caller may view: their own, or — for a
-        // query bound to the repo's own namespace — any collaborator's task in
-        // that repo. A pod outside that set simply won't appear here, so we
-        // never read across tenants.
         const visible = await getCoreV1Api(kubeconfig).listNamespacedPod({
           namespace: input.namespace,
           labelSelector: repoViewSelector(
@@ -429,22 +431,34 @@ export const agentsRouter = createTRPCRouter({
             input.repoFullName,
           ),
         });
-        const mayView = visible.items.some(
+        mayView = visible.items.some(
           (p) => p.metadata?.name === input.podName,
         );
-        if (mayView) {
+      } catch {
+        // Listing failed transiently — the pod may still be gone, so fall
+        // through to the owner-scoped transcript fallback below.
+      }
+      if (mayView) {
+        // The pod is present, so its live log is the source of truth — the
+        // transcript only exists once the run has finished. Name the harness
+        // container explicitly (a sidecar would otherwise make the read
+        // ambiguous), and tolerate the container-still-starting / transient-read
+        // window by returning an empty log ("No logs yet.") so an in-progress
+        // run shows its streaming logs on the next poll rather than being
+        // misreported as "Logs not found" by the finished-run fallback.
+        try {
           return await getCoreV1Api(kubeconfig).readNamespacedPodLog({
             name: input.podName,
             namespace: input.namespace,
-            container: input.container,
+            container: input.container ?? AGENT_CONTAINER_NAME,
             tailLines: input.tailLines,
           });
+        } catch {
+          return "";
         }
-        // Pod isn't among the caller's pods — it may be gone after its TTL. Fall
-        // through to the persisted transcript, which is itself owner-scoped.
-      } catch {
-        // Listing/log read failed transiently — try the transcript fallback.
       }
+      // Pod isn't among the caller's pods — it may be gone after its TTL. Fall
+      // through to the persisted transcript, which is itself owner-scoped.
       // Persisted-transcript fallback. Readable by the run's owner, or by any
       // collaborator when the run belongs to the repo this query was authorized
       // for (assertRepoAccess above) — the run row's own repo is what's

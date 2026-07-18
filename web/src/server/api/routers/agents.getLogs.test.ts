@@ -169,6 +169,58 @@ describe("agents.getLogs persisted-transcript fallback", () => {
   });
 });
 
+describe("agents.getLogs live pod read", () => {
+  it("returns the running pod's live log, naming the harness container", async () => {
+    // The pod is present (in-progress run), so its live log is authoritative and
+    // the transcript fallback must not be consulted.
+    listNamespacedPod.mockResolvedValue({
+      items: [{ metadata: { name: "pod-1" } }],
+    });
+    readNamespacedPodLog.mockResolvedValue("live tail\n");
+
+    const out = await caller(fakeDb([])).getLogs({
+      podName: "pod-1",
+      namespace: "ns",
+      jobName: "job-1",
+      repoFullName: "owner/repo",
+      tailLines: 100,
+    });
+
+    expect(out).toBe("live tail\n");
+    // A sidecar can make the pod multi-container, so the container is named.
+    expect(readNamespacedPodLog).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "pod-1", container: "harness" }),
+    );
+    expect(getArtifact).not.toHaveBeenCalled();
+  });
+
+  it("returns an empty log — not NOT_FOUND — when a visible pod's read fails", async () => {
+    // A just-launched pod whose container is still starting (or a transient read
+    // hiccup) must surface as "No logs yet.", recoverable on the next poll —
+    // never masked as the finished-run fallback's "Logs not found", which a
+    // running pod (no transcript yet) would otherwise hit.
+    listNamespacedPod.mockResolvedValue({
+      items: [{ metadata: { name: "pod-1" } }],
+    });
+    readNamespacedPodLog.mockRejectedValue(
+      new Error("container harness in pod pod-1 is waiting to start"),
+    );
+
+    const out = await caller(fakeDb([])).getLogs({
+      podName: "pod-1",
+      namespace: "ns",
+      jobName: "job-1",
+      repoFullName: "owner/repo",
+      tailLines: 100,
+    });
+
+    expect(out).toBe("");
+    // The pod is present, so the finished-run transcript is never consulted.
+    expect(resolveArtifactStore).not.toHaveBeenCalled();
+    expect(getArtifact).not.toHaveBeenCalled();
+  });
+});
+
 describe("agents.acpPull run-row-missing fallback", () => {
   it("falls back to assertOwnsInteractiveJob and rejects a non-owner when the run row is gone", async () => {
     // No run row (pruned or predating spawnedBy) → the live-pod ownership check

@@ -17,7 +17,10 @@ import {
   testCustomProviderCredential,
   validateCustomProviderInput,
 } from "~/server/agents/custom-providers";
-import { getRecentCredentialUsage } from "~/server/agents/credential-usage";
+import {
+  getRecentCredentialUsage,
+  subscriptionUsage,
+} from "~/server/agents/credential-usage";
 import {
   GOLLM_PROVIDERS,
   gollmProviderInfo,
@@ -528,7 +531,13 @@ export const accountRouter = createTRPCRouter({
         label: gollmId
           ? (gollmProviderInfo(gollmId)?.label ?? gollmId)
           : row.provider,
+        authKind: row.authKind,
         lastUsedAt: row.lastUsedAt,
+        // Metered keys show a "used …" timestamp; subscriptions instead report
+        // how close to maxed out their rolling-window allowance is, so only
+        // those carry a meter reading.
+        usage:
+          row.authKind === "subscription" ? subscriptionUsage(row) : null,
       };
     });
   }),

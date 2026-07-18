@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { JobSpec } from "~/server/agents/create-job";
 import { SPAWNED_BY_LABEL, spawnedByLabelValue } from "~/server/agents/labels";
 import type { NetworkPolicyOptions } from "~/server/agents/network-policy";
+import { credentialUsage } from "~/server/db/schema";
 
 // createAgentJob is a manifest builder: mock every external boundary it
 // touches — the Kubernetes APIs, the database, the env, the ingest-token
@@ -170,7 +171,16 @@ interface TaskRunInsertValues {
   parentJobName: string | null;
 }
 const insertValues = vi.fn<(values: TaskRunInsertValues) => Promise<void>>();
-const dbInsert = vi.fn((_table: unknown) => ({ values: insertValues }));
+// The credential-usage upsert (recordCredentialUsage) runs after the run row is
+// recorded; it uses a separate insert().values().onConflictDoUpdate() chain, so
+// the mock routes it away from insertValues to keep the run-row assertions exact.
+const usageOnConflict = vi.fn(() => Promise.resolve());
+const usageValues = vi.fn(() => ({ onConflictDoUpdate: usageOnConflict }));
+const dbInsert = vi.fn((table: unknown) =>
+  table === credentialUsage
+    ? { values: usageValues }
+    : { values: insertValues },
+);
 vi.mock("~/server/db", () => ({
   db: { insert: (table: unknown) => dbInsert(table) },
 }));
@@ -862,7 +872,7 @@ describe("createAgentJob", () => {
   describe("run row", () => {
     it("records the run with optional fields nulled", async () => {
       const jobName = await createAgentJob(baseSpec());
-      expect(dbInsert).toHaveBeenCalledTimes(1);
+      expect(insertValues).toHaveBeenCalledTimes(1);
       expect(insertValues).toHaveBeenCalledWith({
         jobName,
         namespace: "bandolier-agents",
@@ -877,6 +887,55 @@ describe("createAgentJob", () => {
         ciResumeSha: null,
         agentImage: DEFAULT_HARNESS_IMAGE,
       });
+    });
+
+    it("records the run's provider usage for the recently-used footer", async () => {
+      await createAgentJob(baseSpec());
+      // An API key is metered, so the usage is tagged api_key.
+      expect(usageValues).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: "u1",
+          provider: "anthropic",
+          authKind: "api_key",
+        }),
+      );
+      expect(usageOnConflict).toHaveBeenCalledTimes(1);
+    });
+
+    it("tags a subscription OAuth run's usage as a subscription", async () => {
+      await createAgentJob(
+        baseSpec({ anthropicApiKey: undefined, anthropicOauthToken: "oat-1" }),
+      );
+      expect(usageValues).toHaveBeenCalledWith(
+        expect.objectContaining({ provider: "anthropic", authKind: "subscription" }),
+      );
+    });
+
+    it("tags a ChatGPT-subscription run's usage as a subscription", async () => {
+      await createAgentJob(
+        baseSpec({ anthropicApiKey: undefined, codexAuthJson: '{"tokens":{}}' }),
+      );
+      expect(usageValues).toHaveBeenCalledWith(
+        expect.objectContaining({ provider: "openai", authKind: "subscription" }),
+      );
+    });
+
+    it("records a gollm-proxied provider's usage as a metered gollm:<id>", async () => {
+      await createAgentJob(
+        baseSpec({
+          anthropicApiKey: undefined,
+          customProvider: {
+            provider: "openrouter",
+            env: { OPENROUTER_API_KEY: "sk-or" },
+          },
+        }),
+      );
+      expect(usageValues).toHaveBeenCalledWith(
+        expect.objectContaining({
+          provider: "gollm:openrouter",
+          authKind: "api_key",
+        }),
+      );
     });
 
     it("deploys the job, secret, and row into the spec's namespace", async () => {

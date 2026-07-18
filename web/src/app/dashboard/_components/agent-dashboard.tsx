@@ -9,6 +9,7 @@ import { repoToNamespace } from "~/server/agents/namespace";
 import { authClient } from "~/server/better-auth/client";
 import { api } from "~/trpc/react";
 import { isAgentResolved, nextAwaitingTarget } from "./agent-ui";
+import { CredentialUsageIndicators } from "./credential-usage-indicators";
 import { DashboardHeader } from "./dashboard-header";
 import { DeployModal } from "./deploy-modal";
 import { useHideResolved, useOnlyMine } from "./view-prefs";
@@ -372,7 +373,8 @@ export function AgentDashboard({
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-white/10 px-6 py-4">
+      <footer className="space-y-3 border-t border-white/10 px-6 py-4">
+        <CredentialUsageIndicators />
         <div className="flex items-center justify-center gap-6 text-sm text-white/40">
           <a
             href="https://github.com/based64god/bandolier"

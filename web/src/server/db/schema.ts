@@ -5,6 +5,7 @@ import {
   index,
   integer,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   unique,
@@ -506,6 +507,40 @@ export const repoCustomProviderCredentials = pgTable(
       .notNull(),
   },
   (t) => [unique().on(t.repoFullName, t.provider)],
+);
+
+// Records when a user last ran an agent on each model provider, so the
+// dashboard footer can surface the credentials that have been used recently.
+// `provider` is the canonical run-provider name — one of the four first-class
+// providers ("bedrock"/"anthropic"/"openai"/"gemini") or a gollm-proxied one as
+// "gollm:<id>" — so the indicator covers every provider gollm supports. One row
+// per (user, provider); each deploy upserts its row.
+export const credentialUsage = pgTable(
+  "credential_usage",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    lastUsedAt: timestamp("last_used_at")
+      .$defaultFn(() => /* @__PURE__ */ new Date())
+      .notNull(),
+    // Which credential kind the most recent deploy routed through: "api_key"
+    // (metered, pay-per-token) or "subscription" (a fixed rolling-window
+    // allowance). The footer shows a "used …" timestamp for metered keys but a
+    // "how close to maxed out" meter for subscriptions, whose runs are the
+    // limited resource.
+    authKind: text("auth_kind").notNull().default("api_key"),
+    // The rolling usage window a subscription's allowance is counted over. Start
+    // time of the current window; `windowRuns` counts the deploys since it. When
+    // a deploy lands after the window has elapsed, both reset (see
+    // recordCredentialUsage). Unused for metered keys.
+    windowStartedAt: timestamp("window_started_at")
+      .$defaultFn(() => /* @__PURE__ */ new Date())
+      .notNull(),
+    windowRuns: integer("window_runs").notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.provider] })],
 );
 
 // User-provisioned API keys. The full token is shown once at creation and only

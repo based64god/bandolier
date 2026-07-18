@@ -80,9 +80,12 @@ type claudeEventSink interface {
 	onToolUse(id, name, parentID string, input json.RawMessage)
 	onToolResult(id, parentID string, isError bool, content json.RawMessage)
 	onResult(ev claudeEvent)
-	// onBackgroundTasks reports how many background subagent tasks are currently
-	// in flight, from a system/background_tasks_changed event.
-	onBackgroundTasks(active int)
+	// onBackgroundTasks reports the ids of the background subagent tasks currently
+	// in flight, from a system/background_tasks_changed event. The slice is the
+	// authoritative live set (empty once every task has drained); its size is what
+	// the turn-timing logic keys off, and the ids let the ACP driver forward the set
+	// to the dashboard.
+	onBackgroundTasks(taskIDs []string)
 }
 
 // dispatchClaudeEvent parses one stream-json line and drives the sink. Anything
@@ -103,7 +106,11 @@ func dispatchClaudeEvent(raw []byte, sink claudeEventSink) {
 		// subagent tasks; a non-empty set means the agent has yielded to a
 		// background task and will auto-resume when it finishes.
 		if ev.Subtype == "background_tasks_changed" {
-			sink.onBackgroundTasks(len(ev.Tasks))
+			ids := make([]string, 0, len(ev.Tasks))
+			for _, t := range ev.Tasks {
+				ids = append(ids, t.TaskID)
+			}
+			sink.onBackgroundTasks(ids)
 		}
 	case "assistant":
 		for _, c := range ev.Message.Content {
@@ -167,8 +174,9 @@ func (s *claudeLogSink) subagentPrefix(parentID string) string {
 func (*claudeLogSink) onSlashCommands([]string) {}
 
 // onBackgroundTasks is a no-op for the one-shot log path: it drives no ACP turn,
-// so it has no turn to hold open while background subagents run.
-func (*claudeLogSink) onBackgroundTasks(int) {}
+// so it has no turn to hold open while background subagents run, and no live
+// client to forward the set to.
+func (*claudeLogSink) onBackgroundTasks([]string) {}
 
 func (s *claudeLogSink) onText(text, parentID string) {
 	if parentID == "" {

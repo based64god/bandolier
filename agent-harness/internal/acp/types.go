@@ -19,6 +19,16 @@ const (
 	UpdateToolCall          = "tool_call"
 	UpdateToolCallUpdate    = "tool_call_update"
 	UpdateAvailableCommands = "available_commands_update"
+	// UpdateBackgroundTasks is a Bandolier extension (not in the ACP spec): it
+	// reports the live set of background subagent tasks currently in flight, so the
+	// dashboard can show a "running in the background" indicator that the ordinary
+	// tool-call stream can't (a backgrounded spawn's tool call completes the moment
+	// it hands back a task handle, long before the task itself finishes). The set is
+	// authoritative and replaces the previous one; an empty set means every
+	// background task has drained. The `_bandolier/` prefix keeps it from ever
+	// colliding with a real ACP sessionUpdate kind, and any client that doesn't know
+	// it simply ignores the frame.
+	UpdateBackgroundTasks = "_bandolier/background_tasks"
 )
 
 // session/prompt stop reasons.
@@ -214,6 +224,15 @@ type AvailableCommandsUpdate struct {
 type AvailableCommand struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
+}
+
+// BackgroundTasksUpdate is a Bandolier extension (see UpdateBackgroundTasks): it
+// carries the ids of the background subagent tasks currently in flight. The
+// dashboard renders a live indicator from the set's size; TaskIDs is empty (never
+// null — always a non-nil slice) once every background task has drained.
+type BackgroundTasksUpdate struct {
+	SessionUpdate string   `json:"sessionUpdate"` // UpdateBackgroundTasks
+	TaskIDs       []string `json:"taskIds"`
 }
 
 // UpdateKind extracts the sessionUpdate discriminator from a raw update object,

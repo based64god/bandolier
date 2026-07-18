@@ -282,11 +282,22 @@ func (d *claudeDriver) onSlashCommands(names []string) { d.agent.emitAvailableCo
 // from the real end of the user's turn. Any non-empty set also latches bgSeen for
 // the turn, so a later bgActive==0 result is debounced rather than trusted (a
 // drained set is followed by per-task auto-resume results, not just the answer).
-func (d *claudeDriver) onBackgroundTasks(active int) {
+// It also forwards the live set to the dashboard as a background-tasks frame so it
+// can show a "running in the background" indicator — the ordinary tool-call stream
+// can't, because a backgrounded spawn's own tool call completes the instant it
+// hands back a task handle, long before the task itself finishes.
+func (d *claudeDriver) onBackgroundTasks(taskIDs []string) {
+	active := len(taskIDs)
 	d.bgActive.Store(int32(active))
 	if active > 0 {
 		d.bgSeen.Store(true)
 	}
+	// The set is authoritative and replaces the previous one; an empty set (a drain)
+	// tells the client to clear the indicator.
+	d.agent.emit(acp.BackgroundTasksUpdate{
+		SessionUpdate: acp.UpdateBackgroundTasks,
+		TaskIDs:       taskIDs,
+	})
 }
 
 // onText and onThinking carry parentID (the spawning Agent/Task id when the

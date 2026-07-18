@@ -372,6 +372,25 @@ describe("applyFrames", () => {
     ]);
   });
 
+  it("dedupes only this client's namespaced prompts, never another client's colliding counter", () => {
+    // The relay broadcasts every client's session/prompt frame to all viewers.
+    // Prompt ids are namespaced per client (see useAcpSession's newClientToken),
+    // so a client's dedup set matches only its own frames even when two clients'
+    // per-instance counters coincide — without the namespace they'd share an id
+    // space and one client would swallow the other's turn.
+    const { items } = applyFrames(
+      [],
+      [
+        { seq: 1, payload: promptFrame("s", "clientA-0", "my own turn") },
+        { seq: 2, payload: promptFrame("s", "clientB-0", "the other tab's turn") },
+      ],
+      new Set(["clientA-0"]),
+    );
+    expect(items).toEqual([
+      { type: "message", role: "user", id: "u-2", text: "the other tab's turn" },
+    ]);
+  });
+
   it("ignores non-update frames (responses) but still harvests their nothing", () => {
     const { items, sessionId } = applyFrames(
       [],

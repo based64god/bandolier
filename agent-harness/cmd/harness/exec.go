@@ -19,9 +19,29 @@ import (
 // child means only the harness (PID 1) receives that SIGTERM, so it alone
 // decides how and when to stop its children. See main()'s signal handling.
 //
-// It is applied to every exec.Cmd the harness starts; the value is read-only
-// input to the runtime, so a single shared instance is safe.
+// It is applied by harnessCmd, the single constructor every harness subprocess
+// is built through, so every exec.Cmd the harness starts is isolated by
+// construction. The value is read-only input to the runtime, so a single shared
+// instance is safe.
 var ownProcessGroup = &syscall.SysProcAttr{Setpgid: true}
+
+// harnessCmd builds an exec.Cmd for a harness-spawned subprocess with its own
+// process group already set (see ownProcessGroup). Every subprocess the harness
+// starts is constructed here — never with exec.Command/exec.CommandContext
+// directly — so the isolation invariant holds by construction and a new call
+// site cannot silently reintroduce the pod-SIGTERM race. Pass a nil ctx for the
+// spawns the harness stops itself (e.g. the interactive claude driver, ended by
+// closing its stdin) rather than through context cancellation.
+func harnessCmd(ctx context.Context, name string, args ...string) *exec.Cmd {
+	var cmd *exec.Cmd
+	if ctx == nil {
+		cmd = exec.Command(name, args...)
+	} else {
+		cmd = exec.CommandContext(ctx, name, args...)
+	}
+	cmd.SysProcAttr = ownProcessGroup
+	return cmd
+}
 
 // ── Subprocess execution ────────────────────────────────────────────────────
 
@@ -53,12 +73,11 @@ func captureCmd(ctx context.Context, dir, name string, args ...string) (string, 
 // notice on stderr from a real failure).
 func captureCombined(ctx context.Context, dir, name string, args ...string) (string, error) {
 	var buf bytes.Buffer
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := harnessCmd(ctx, name, args...)
 	cmd.Dir = dir
 	cmd.Env = os.Environ()
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
-	cmd.SysProcAttr = ownProcessGroup
 	err := cmd.Run()
 	return buf.String(), err
 }
@@ -68,12 +87,11 @@ func captureCombined(ctx context.Context, dir, name string, args ...string) (str
 func captureCmdEnv(ctx context.Context, dir string, env []string, name string, args ...string) (string, error) {
 	w := &prefixWriter{}
 	var stdout bytes.Buffer
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := harnessCmd(ctx, name, args...)
 	cmd.Dir = dir
 	cmd.Env = env
 	cmd.Stdout = &stdout
 	cmd.Stderr = w
-	cmd.SysProcAttr = ownProcessGroup
 	err := cmd.Run()
 	w.flush()
 	return stdout.String(), err
@@ -111,12 +129,11 @@ func (w *prefixWriter) flush() {
 // when both are the same writer, so lines won't interleave mid-write.
 func runCmd(ctx context.Context, dir string, env []string, name string, args ...string) error {
 	w := &prefixWriter{}
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := harnessCmd(ctx, name, args...)
 	cmd.Dir = dir
 	cmd.Stdout = w
 	cmd.Stderr = w
 	cmd.Env = env
-	cmd.SysProcAttr = ownProcessGroup
 	err := cmd.Run()
 	w.flush()
 	return err

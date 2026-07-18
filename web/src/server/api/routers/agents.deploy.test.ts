@@ -35,10 +35,19 @@ vi.mock("~/server/agents/kubeconfig", () => ({
   resolveKubeconfig: () => Promise.resolve("kubeconfig"),
 }));
 
+const parseComputeInput = vi
+  .fn<
+    (
+      cpu?: string,
+      memory?: string,
+    ) => { cpu: string | null; memory: string | null }
+  >()
+  .mockReturnValue({ cpu: null, memory: null });
 vi.mock("~/server/agents/compute", () => ({
   resolveCompute: () => Promise.resolve({}),
   mergeCompute: (base: unknown) => base,
-  parseComputeInput: () => ({ cpu: null, memory: null }),
+  parseComputeInput: (cpu?: string, memory?: string) =>
+    parseComputeInput(cpu, memory),
 }));
 
 const resolveModelCredentials = vi.fn<() => Promise<ModelCredentials>>();
@@ -71,6 +80,7 @@ function fakeJob(
   env: Record<string, string>,
   annotations: Record<string, string> = {},
   name = "bandolier-agent-1",
+  limits?: { cpu?: string; memory?: string },
 ) {
   return {
     metadata: { name, annotations, labels: {} },
@@ -80,6 +90,7 @@ function fakeJob(
           containers: [
             {
               env: Object.entries(env).map(([k, v]) => ({ name: k, value: v })),
+              ...(limits ? { resources: { limits } } : {}),
             },
           ],
         },
@@ -128,6 +139,7 @@ beforeEach(() => {
   resolveModelCredentials.mockReset().mockResolvedValue(creds());
   runUsesRepoCredentials.mockReset().mockResolvedValue(true);
   getUserRepoPermission.mockReset().mockResolvedValue("read");
+  parseComputeInput.mockReset().mockReturnValue({ cpu: null, memory: null });
   listNamespacedJob.mockReset().mockResolvedValue({ items: [] });
 });
 
@@ -252,5 +264,28 @@ describe("agents.retrigger", () => {
       );
     expect((err as TRPCError).code).toBe("BAD_REQUEST");
     expect((err as TRPCError).message).toContain("review");
+  });
+
+  it("replays the original run's CPU/memory limits for compute parity", async () => {
+    // The pod spec's limits are the compute the run actually used; retrigger
+    // pins them so the re-run lands on the same box instead of re-deriving from
+    // the (possibly since changed) repo/user defaults.
+    listNamespacedJob.mockResolvedValue({
+      items: [
+        fakeJob(
+          {
+            CLAUDE_MODEL: "claude-opus-4-8",
+            CLAUDE_TASK: "do the thing",
+          },
+          {},
+          "bandolier-agent-1",
+          { cpu: "4", memory: "8Gi" },
+        ),
+      ],
+    });
+    await caller()
+      .retrigger({ namespace: "ns", jobName: "bandolier-agent-1" })
+      .catch(() => undefined);
+    expect(parseComputeInput).toHaveBeenCalledWith("4", "8Gi");
   });
 });

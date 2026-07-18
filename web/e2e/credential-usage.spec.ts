@@ -1,7 +1,8 @@
 // Browser smoke test for the footer's credential-usage indicators: the strip
-// renders one badge per recently-used provider (first-class and gollm-proxied),
-// each with a relative "used …" timestamp, and renders nothing when there's no
-// recent usage.
+// renders one badge per recently-used provider. Metered API keys show a
+// relative "used …" timestamp; subscriptions instead show a "how close to maxed
+// out" meter with its percentage and a "Subscription" tag. The strip renders
+// nothing when there's no recent usage.
 //
 // Run against a dev server serving the harness route:
 //   pnpm next dev --port 3137 &
@@ -20,35 +21,52 @@ check(
   (await strip.innerText()).includes("Recently used"),
 );
 
-// ── First-class provider badge ───────────────────────────────────────────────
+// ── Subscription badge: a "how close to maxed out" meter ─────────────────────
 const anthropic = page.getByTestId("credential-usage-anthropic");
-check("a first-class provider badge renders", await anthropic.isVisible());
+check("a subscription badge renders", await anthropic.isVisible());
 check(
-  "the first-class badge shows its own label",
-  (await anthropic.innerText()).includes("Anthropic"),
+  "the subscription badge is tagged Subscription",
+  (await anthropic.innerText()).includes("Subscription"),
 );
 check(
-  "the first-class badge shows a relative timestamp",
-  (await anthropic.innerText()).includes("3m ago"),
+  "the subscription badge shows its usage percentage (20 of 25 runs)",
+  (await anthropic.innerText()).includes("80%"),
+);
+check(
+  "the subscription badge renders a meter, not a timestamp",
+  (await page.getByTestId("credential-meter-anthropic").count()) === 1 &&
+    !(await anthropic.innerText()).includes("ago"),
+);
+check(
+  "the reset time is surfaced in the badge tooltip",
+  ((await anthropic.getAttribute("title")) ?? "").includes("resets in 40m"),
 );
 
-// ── gollm-proxied provider badge (catalog label passthrough) ─────────────────
+// A second, comfortably-under-budget subscription reads a lower percentage.
+const openai = page.getByTestId("credential-usage-openai");
+check(
+  "a second subscription reads its own lower percentage (8 of 25)",
+  (await openai.innerText()).includes("32%"),
+);
+
+// ── Metered API key: a relative "used …" timestamp, no meter ─────────────────
 const groq = page.getByTestId("credential-usage-gollm:groq");
-check("a gollm-proxied provider badge renders", await groq.isVisible());
+check("a metered gollm-proxied badge renders", await groq.isVisible());
 check(
   "the gollm badge uses the catalog label",
   (await groq.innerText()).includes("Groq"),
 );
 check(
-  "the gollm badge shows an hours-ago timestamp",
-  (await groq.innerText()).includes("2h ago"),
+  "the metered badge shows a relative timestamp, not a meter",
+  (await groq.innerText()).includes("2h ago") &&
+    (await page.getByTestId("credential-meter-gollm:groq").count()) === 0,
 );
 
 // ── Day-scale timestamp ──────────────────────────────────────────────────────
-const openai = page.getByTestId("credential-usage-openai");
+const bedrock = page.getByTestId("credential-usage-bedrock");
 check(
-  "an older use reads in days",
-  (await openai.innerText()).includes("3d ago"),
+  "an older metered use reads in days",
+  (await bedrock.innerText()).includes("3d ago"),
 );
 
 // ── Empty state renders nothing ──────────────────────────────────────────────

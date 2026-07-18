@@ -553,7 +553,7 @@ export function collectSubagentCards(
 /** Builds a session/prompt JSON-RPC frame for the frontend client to enqueue. */
 export function promptFrame(
   sessionId: string,
-  id: number,
+  id: number | string,
   text: string,
 ): string {
   return JSON.stringify({

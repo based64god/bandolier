@@ -283,6 +283,49 @@ func TestClassifyPRCreate(t *testing.T) {
 	})
 }
 
+func TestPushRejectedRe(t *testing.T) {
+	nonFastForward := []string{
+		" ! [rejected]        feat -> feat (non-fast-forward)",
+		"error: failed to push some refs to 'https://github.com/o/r.git'\nhint: Updates were rejected because the tip of your current branch is behind",
+		"hint: Updates were rejected because the remote contains work that you do\nhint: not have locally. ... integrate the remote changes (e.g. 'git pull ...') before pushing again.\n ! [rejected] (fetch first)",
+	}
+	for _, out := range nonFastForward {
+		if !pushRejectedRe.MatchString(out) {
+			t.Errorf("expected a non-fast-forward rejection to match: %q", out)
+		}
+	}
+
+	// Failures a rebase can't fix must not trigger the recovery pass.
+	other := []string{
+		"remote: Permission to o/r.git denied to x-access-token.\nfatal: unable to access ... The requested URL returned error: 403",
+		"fatal: could not read Username for 'https://github.com': terminal prompts disabled",
+		"remote: error: GH006: Protected branch update failed for refs/heads/main.",
+	}
+	for _, out := range other {
+		if pushRejectedRe.MatchString(out) {
+			t.Errorf("non-rebasable failure should not match: %q", out)
+		}
+	}
+}
+
+func TestBuildRebaseTask(t *testing.T) {
+	got := buildRebaseTask("bandolier/feat-abc123")
+	for _, want := range []string{
+		"bandolier/feat-abc123",
+		"git fetch origin bandolier/feat-abc123",
+		"git rebase origin/bandolier/feat-abc123",
+		"git rebase --continue",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("rebase task missing %q; got:\n%s", want, got)
+		}
+	}
+	// The agent must leave pushing and PR-opening to the harness.
+	if !strings.Contains(got, "Do NOT force-push") {
+		t.Errorf("rebase task should forbid force-pushing; got:\n%s", got)
+	}
+}
+
 func TestBuildIssuePrompt(t *testing.T) {
 	t.Run("keeps the tail when transcript exceeds the cap", func(t *testing.T) {
 		head := strings.Repeat("H", maxIssueTranscriptBytes)

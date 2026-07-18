@@ -513,7 +513,8 @@
           "name": "window_started_at",
           "type": "timestamp",
           "primaryKey": false,
-          "notNull": true
+          "notNull": true,
+          "default": "now()"
         },
         "window_runs": {
           "name": "window_runs",

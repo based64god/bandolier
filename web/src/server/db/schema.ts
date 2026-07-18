@@ -1,4 +1,4 @@
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import {
   bigserial,
   boolean,
@@ -536,7 +536,7 @@ export const credentialUsage = pgTable(
     // a deploy lands after the window has elapsed, both reset (see
     // recordCredentialUsage). Unused for metered keys.
     windowStartedAt: timestamp("window_started_at")
-      .$defaultFn(() => /* @__PURE__ */ new Date())
+      .default(sql`now()`)
       .notNull(),
     windowRuns: integer("window_runs").notNull().default(0),
   },

@@ -13,6 +13,7 @@ import {
   postIssueCommentWithFallback,
 } from "~/server/agents/github-issues";
 import { buildReviewUserMessage } from "~/lib/review-prompt";
+import { extractOperatorContext } from "~/lib/issue-prompt";
 import {
   assertOwnsInteractiveJob,
   assertRepoAccess,
@@ -1156,10 +1157,17 @@ export const agentsRouter = createTRPCRouter({
 
       // Issue- and review-sourced runs rebuild their prompt from GitHub at
       // deploy time, so replaying the already-expanded CLAUDE_TASK would apply
-      // that context twice; hand them their source instead. Everything else
-      // replays the task prompt verbatim.
-      const task =
-        issueNumber || reviewPrNumber ? "" : (envValue("CLAUDE_TASK") ?? "");
+      // that context twice. A review carries no operator context, so it replays
+      // with an empty task; an issue run embeds the operator's additional
+      // context in CLAUDE_TASK, so recover just that section and hand it back as
+      // the task (deploy re-embeds it alongside the freshly fetched issue).
+      // Everything else replays the task prompt verbatim.
+      const storedTask = envValue("CLAUDE_TASK") ?? "";
+      const task = reviewPrNumber
+        ? ""
+        : issueNumber
+          ? extractOperatorContext(storedTask)
+          : storedTask;
 
       const caller = createCallerFactory(agentsRouter)(ctx);
       return caller.deploy({

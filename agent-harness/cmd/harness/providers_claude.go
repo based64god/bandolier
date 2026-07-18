@@ -312,10 +312,13 @@ func toolSummary(name string, input json.RawMessage) string {
 }
 
 // workflowMetaNameRe extracts the `name` field from a workflow script's mandatory
-// leading `export const meta = { name: '…' }` literal. The meta block is required
-// to be the first thing in the script, so the first name:'…'/"…" match is meta.name.
-// The \b keeps it from matching keys that merely end in "name" (filename:, nickname:).
-var workflowMetaNameRe = regexp.MustCompile(`\bname\s*:\s*['"]([^'"]+)['"]`)
+// leading `export const meta = { name: '…' }` literal. Anchoring the key to a
+// property position — preceded by `{` or `,` (with optional whitespace) — keeps it
+// from matching a `name:"…"` that appears inside an earlier string value (e.g. a
+// description that happens to contain the text "name:") or a key that merely ends
+// in "name" (filename:, nickname:). Best-effort: the first such match is meta.name,
+// which the meta literal (required to be first in the script) supplies.
+var workflowMetaNameRe = regexp.MustCompile(`[{,]\s*name\s*:\s*['"]([^'"]+)['"]`)
 
 // workflowSummary labels a Workflow tool call by the workflow's name, so the
 // summary reads "Workflow: <name>" rather than dumping the (often large) inline

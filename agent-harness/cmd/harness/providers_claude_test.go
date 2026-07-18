@@ -149,6 +149,7 @@ func TestToolSummaryWorkflow(t *testing.T) {
 		{"double-quoted meta.name", `{"script":"export const meta = { name: \"audit\" }"}`, "Workflow: audit"},
 		{"no name falls back", `{"args":{"q":"x"}}`, "Workflow"},
 		{"ignores keys ending in name", `{"script":"const opts = { filename: 'foo.ts' }"}`, "Workflow"},
+		{"ignores a name: inside an earlier string value", `{"script":"export const meta = { description: 'the name: \"victim\" field', name: 'real-workflow' }"}`, "Workflow: real-workflow"},
 	}
 	for _, c := range cases {
 		got := toolSummary("Workflow", json.RawMessage(c.input))

@@ -220,6 +220,20 @@ export function expiresAtLocal(expiresAt: string | null): string {
   return `${date}, ${time}`;
 }
 
+// A compact relative label ("just now", "5m ago", "3h ago", "2d ago") for the
+// footer's credential-usage indicators. Accepts a Date (SuperJSON preserves it
+// over the wire) or an ISO string. Future timestamps read as "just now".
+export function usedAgoLabel(when: Date | string): string {
+  const then = typeof when === "string" ? new Date(when) : when;
+  const mins = Math.floor((Date.now() - then.getTime()) / 60_000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
 // Mirrors the `failure` field podToTask distills from a Failed pod's status.
 export interface TaskFailure {
   reason: string;

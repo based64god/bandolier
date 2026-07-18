@@ -12,6 +12,7 @@ import {
   STATUS_STYLES,
   taskNameLabel,
   taskNameTooltip,
+  usedAgoLabel,
 } from "~/app/dashboard/_components/agent-ui";
 
 const KNOWN_STATUSES = ["Running", "Pending", "Failed", "Succeeded", "Unknown"];
@@ -60,6 +61,44 @@ describe("expiresAtLocal", () => {
       minute: "2-digit",
     });
     expect(expiresAtLocal(iso)).toBe(`${date}, ${time}`);
+  });
+});
+
+describe("usedAgoLabel", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T12:00:00.000Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const agoSeconds = (s: number) => new Date(Date.now() - s * 1000);
+
+  it("reads 'just now' under a minute (and for future timestamps)", () => {
+    expect(usedAgoLabel(agoSeconds(0))).toBe("just now");
+    expect(usedAgoLabel(agoSeconds(59))).toBe("just now");
+    expect(usedAgoLabel(agoSeconds(-30))).toBe("just now");
+  });
+
+  it("counts whole minutes under an hour", () => {
+    expect(usedAgoLabel(agoSeconds(60))).toBe("1m ago");
+    expect(usedAgoLabel(agoSeconds(59 * 60))).toBe("59m ago");
+  });
+
+  it("counts whole hours under a day", () => {
+    expect(usedAgoLabel(agoSeconds(3600))).toBe("1h ago");
+    expect(usedAgoLabel(agoSeconds(23 * 3600))).toBe("23h ago");
+  });
+
+  it("counts whole days beyond that", () => {
+    expect(usedAgoLabel(agoSeconds(86_400))).toBe("1d ago");
+    expect(usedAgoLabel(agoSeconds(3 * 86_400))).toBe("3d ago");
+  });
+
+  it("accepts an ISO string too", () => {
+    expect(usedAgoLabel(agoSeconds(2 * 3600).toISOString())).toBe("2h ago");
   });
 });
 

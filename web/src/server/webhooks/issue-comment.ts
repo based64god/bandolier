@@ -24,6 +24,7 @@ export async function handleIssueComment(
       pullRequestUrl: issue.pull_request?.html_url ?? null,
       repository,
       user: comment.user,
+      commentId: comment.id,
       body: comment.body ?? "",
     },
     config,

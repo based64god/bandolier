@@ -23,6 +23,8 @@ vi.mock("~/server/webhooks/resolve-run", () => ({
 
 vi.mock("~/server/agents/github-issues", () => ({
   getPullRequestRefs: vi.fn(),
+  listIssueComments: vi.fn(() => Promise.resolve([])),
+  listReviewCommentThread: vi.fn(() => Promise.resolve([])),
 }));
 vi.mock("~/server/agents/github-app", () => ({
   getRegistryPullSecret: vi.fn(() => undefined),
@@ -37,7 +39,9 @@ const selectRows: unknown[][] = [];
 const dbSelect = vi.fn(() => ({
   from: () => ({
     where: () => ({
-      orderBy: () => ({ limit: () => Promise.resolve(selectRows.shift() ?? []) }),
+      orderBy: () => ({
+        limit: () => Promise.resolve(selectRows.shift() ?? []),
+      }),
       limit: () => Promise.resolve(selectRows.shift() ?? []),
     }),
   }),
@@ -67,6 +71,7 @@ function reviewCommentResume(reviewId: number | null): CommentResume {
       default_branch: "main",
     },
     user: { id: 42, login: "octocat", type: "User" },
+    commentId: 555,
     body: "nit: rename this",
     reviewId,
   };

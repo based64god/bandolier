@@ -127,6 +127,59 @@ describe("buildResumeUserMessage", () => {
     expect(message).toContain("Please also handle logout.");
   });
 
+  it("folds earlier thread comments in before the triggering comment", () => {
+    const message = buildResumeUserMessage({
+      kind: "issue",
+      number: 42,
+      title: "Add login",
+      commenter: "octocat",
+      comment: "Please also handle logout.",
+      priorComments: [
+        { author: "alice", body: "What about SSO?" },
+        { author: "bob", body: "Agreed, and logout too." },
+      ],
+    });
+    expect(message).toContain("Earlier comments in this thread");
+    expect(message).toContain("@alice commented:");
+    expect(message).toContain("What about SSO?");
+    expect(message).toContain("@bob commented:");
+    // The trigger still renders as the follow-up, after the divider.
+    const dividerIdx = message.indexOf("---");
+    expect(dividerIdx).toBeGreaterThan(message.indexOf("What about SSO?"));
+    expect(message.indexOf("Please also handle logout.")).toBeGreaterThan(
+      dividerIdx,
+    );
+  });
+
+  it("omits the thread block when there are no prior comments", () => {
+    const message = buildResumeUserMessage({
+      kind: "issue",
+      number: 1,
+      title: "Bug",
+      commenter: "octocat",
+      comment: "fix it",
+      priorComments: [],
+    });
+    expect(message).not.toContain("Earlier comments in this thread");
+  });
+
+  it("folds prior comments in ahead of a review comment's anchor", () => {
+    const message = buildResumeUserMessage({
+      kind: "pull request",
+      number: 42,
+      title: "Add login",
+      commenter: "octocat",
+      comment: "Still not handled.",
+      reviewComment: { path: "src/auth.ts", line: 42 },
+      priorComments: [{ author: "bando", body: "This should handle null." }],
+    });
+    expect(message).toContain("Earlier comments in this thread");
+    expect(message).toContain("@bando commented:");
+    expect(message).toContain(
+      "@octocat left a review comment on `src/auth.ts` line 42:",
+    );
+  });
+
   it("uses a placeholder for an empty comment", () => {
     const message = buildResumeUserMessage({
       kind: "issue",

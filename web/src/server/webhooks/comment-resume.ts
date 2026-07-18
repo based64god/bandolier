@@ -3,7 +3,11 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { createAgentJob } from "~/server/agents/create-job";
 import { getRegistryPullSecret } from "~/server/agents/github-app";
 import { githubGitIdentity } from "~/server/agents/github-token";
-import { getPullRequestRefs } from "~/server/agents/github-issues";
+import {
+  getPullRequestRefs,
+  listIssueComments,
+  listReviewCommentThread,
+} from "~/server/agents/github-issues";
 import { repoToNamespace } from "~/server/agents/namespace";
 import { db } from "~/server/db";
 import { taskRun } from "~/server/db/schema";
@@ -25,6 +29,44 @@ function prNumberFromUrl(url: string | null): number | null {
   if (!url) return null;
   const m = /\/pull\/(\d+)$/.exec(url);
   return m ? Number(m[1]) : null;
+}
+
+/**
+ * Fetches the comments that preceded the triggering one so the resumed run sees
+ * the whole thread, not just the comment that fired it: the full issue/PR
+ * conversation for a vanilla comment, or the inline review thread for a PR
+ * review comment. Best-effort — the thread is context, not correctness, so any
+ * API failure degrades to an empty list and the resume proceeds with just the
+ * triggering comment.
+ */
+async function fetchPriorComments(
+  input: CommentResume,
+  token: string,
+): Promise<{ author: string; body: string }[]> {
+  try {
+    const comments = input.reviewComment
+      ? await listReviewCommentThread(
+          token,
+          input.repository.full_name,
+          input.number,
+          input.inReplyToId ?? input.commentId,
+        )
+      : await listIssueComments(
+          token,
+          input.repository.full_name,
+          input.number,
+        );
+    return comments
+      .filter((c) => c.id !== input.commentId)
+      .map((c) => ({ author: c.author, body: c.body }));
+  } catch (err) {
+    console.warn("[bandolier:webhook] failed to fetch comment thread", {
+      repo: input.repository.full_name,
+      number: input.number,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return [];
+  }
 }
 
 /**
@@ -50,8 +92,16 @@ export interface CommentResume {
   repository: GitHubRepository;
   /** The commenting user. */
   user: { id: number; login: string; type?: string };
+  /** The triggering comment's numeric id — excluded when folding in the thread. */
+  commentId: number;
   /** The raw comment body. */
   body: string;
+  /**
+   * For a PR review comment that replies to another, the id of the comment it
+   * replies to — used as the thread root when fetching the inline thread. Absent
+   * for a root review comment and for vanilla comments.
+   */
+  inReplyToId?: number | null;
   /**
    * The file/line a PR review comment is anchored to. Absent for vanilla
    * comments; folded into the resume user message when present.
@@ -233,6 +283,12 @@ export async function resumeFromComment(
     model,
   });
 
+  // Fold the rest of the thread in as context so the resumed run sees the whole
+  // conversation, not just the comment that triggered it.
+  const priorComments = linked.accessToken
+    ? await fetchPriorComments(input, linked.accessToken)
+    : [];
+
   // Attribute commits to the commenter via their GitHub no-reply address, so
   // GitHub links them to that account regardless of email privacy.
   const gitIdentity = githubGitIdentity(user.id, user.login);
@@ -253,6 +309,7 @@ export async function resumeFromComment(
       commenter: user.login,
       comment: commentBody,
       reviewComment: input.reviewComment,
+      priorComments,
     }),
     systemPrompt: buildResumeSystemPrompt(agentBranch, !!resumeBranch),
     agentBranch,

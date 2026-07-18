@@ -39,7 +39,6 @@ export async function listOpenIssues(
     }));
 }
 
-
 /** A pull request, as surfaced by the deploy modal's PR-review picker. */
 export interface GithubPull {
   number: number;
@@ -360,6 +359,69 @@ export async function postIssueCommentWithFallback(
     }
   }
   return null;
+}
+
+/** One comment in an issue/PR conversation or an inline review thread. */
+export interface ThreadComment {
+  id: number;
+  author: string;
+  body: string;
+}
+
+// Only the fields the thread builders read from a comment list response. Issue
+// comments have no `in_reply_to_id`; PR review comments carry it on replies.
+interface RawComment {
+  id: number;
+  user: { login: string } | null;
+  body: string | null;
+  in_reply_to_id?: number;
+}
+
+function toThreadComment(c: RawComment): ThreadComment {
+  return { id: c.id, author: c.user?.login ?? "unknown", body: c.body ?? "" };
+}
+
+/**
+ * Lists an issue's (or PR conversation's) comments in chronological order —
+ * GitHub delivers PR conversation comments through this same issue-comments
+ * endpoint. Capped at 100; longer threads are truncated to the oldest 100, which
+ * is plenty of context for a resume.
+ */
+export async function listIssueComments(
+  token: string,
+  repoFullName: string,
+  issueNumber: number,
+): Promise<ThreadComment[]> {
+  const url = new URL(
+    `https://api.github.com/repos/${repoFullName}/issues/${issueNumber}/comments`,
+  );
+  url.searchParams.set("per_page", "100");
+  const res = await ghFetch(url, token);
+  const raw = (await res.json()) as RawComment[];
+  return raw.map(toThreadComment);
+}
+
+/**
+ * Lists the inline review-comment thread a comment belongs to: the root comment
+ * plus every reply to it, in chronological order. `rootId` is the thread root —
+ * the triggering comment's `in_reply_to_id`, or its own id when it is the root.
+ * Capped at 100 review comments across the PR.
+ */
+export async function listReviewCommentThread(
+  token: string,
+  repoFullName: string,
+  prNumber: number,
+  rootId: number,
+): Promise<ThreadComment[]> {
+  const url = new URL(
+    `https://api.github.com/repos/${repoFullName}/pulls/${prNumber}/comments`,
+  );
+  url.searchParams.set("per_page", "100");
+  const res = await ghFetch(url, token);
+  const raw = (await res.json()) as RawComment[];
+  return raw
+    .filter((c) => c.id === rootId || c.in_reply_to_id === rootId)
+    .map(toThreadComment);
 }
 
 /** Fetches a single issue, or null if not found. */

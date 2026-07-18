@@ -3,7 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { JobSpec } from "~/server/agents/create-job";
 import { taskRun } from "~/server/db/schema";
-import type { PullRequestRefs } from "~/server/agents/github-issues";
+import type {
+  PullRequestRefs,
+  ThreadComment,
+} from "~/server/agents/github-issues";
 import { issuePreviewBranch } from "~/lib/issue-prompt";
 
 import type {
@@ -33,9 +36,30 @@ const getPullRequestRefs =
   vi.fn<
     (token: string, repo: string, pr: number) => Promise<PullRequestRefs | null>
   >();
+const listIssueComments =
+  vi.fn<
+    (token: string, repo: string, num: number) => Promise<ThreadComment[]>
+  >();
+const listReviewCommentThread =
+  vi.fn<
+    (
+      token: string,
+      repo: string,
+      pr: number,
+      rootId: number,
+    ) => Promise<ThreadComment[]>
+  >();
 vi.mock("~/server/agents/github-issues", () => ({
   getPullRequestRefs: (token: string, repo: string, pr: number) =>
     getPullRequestRefs(token, repo, pr),
+  listIssueComments: (token: string, repo: string, num: number) =>
+    listIssueComments(token, repo, num),
+  listReviewCommentThread: (
+    token: string,
+    repo: string,
+    pr: number,
+    rootId: number,
+  ) => listReviewCommentThread(token, repo, pr, rootId),
 }));
 
 const getRegistryPullSecret =
@@ -161,6 +185,8 @@ beforeEach(() => {
   postBotAck.mockResolvedValue("app-installation");
   getPullRequestRefs.mockResolvedValue(refs());
   getRegistryPullSecret.mockReturnValue(undefined);
+  listIssueComments.mockResolvedValue([]);
+  listReviewCommentThread.mockResolvedValue([]);
 });
 
 // ── Bot-loop guard ───────────────────────────────────────────────────────────
@@ -462,6 +488,65 @@ describe("issue / PR spec fields", () => {
     expect(spec.resumeBranch).toBe("acme:issue-fix");
     // Still an issue comment, so the issue fields are set even on the PR branch.
     expect(spec.issueNumber).toBe("7");
+  });
+});
+
+// ── Thread context ───────────────────────────────────────────────────────────
+
+describe("thread context", () => {
+  it("folds the earlier thread comments into the resume task, excluding the trigger", async () => {
+    parentRows = [
+      { jobName: "parent-1", displayName: "d", pullRequestUrl: null },
+    ];
+    listIssueComments.mockResolvedValue([
+      { id: 10, author: "alice", body: "first thought" },
+      { id: 20, author: "bob", body: "second thought" },
+      { id: 1, author: "octocat", body: "please continue" },
+    ]);
+
+    await handleIssueComment(issuePayload({ number: 7 }), CONFIG);
+
+    expect(listIssueComments).toHaveBeenCalledWith(
+      "gh-token",
+      "acme/widgets",
+      7,
+    );
+    const task = jobSpec().task;
+    expect(task).toContain("Earlier comments in this thread");
+    expect(task).toContain("@alice commented:");
+    expect(task).toContain("first thought");
+    expect(task).toContain("@bob commented:");
+    // The triggering comment appears once, as the follow-up — not duplicated in
+    // the earlier-thread block.
+    expect(task.match(/please continue/g)).toHaveLength(1);
+  });
+
+  it("proceeds with just the trigger when the thread fetch fails", async () => {
+    parentRows = [
+      { jobName: "parent-1", displayName: "d", pullRequestUrl: null },
+    ];
+    listIssueComments.mockRejectedValue(new Error("boom"));
+
+    await handleIssueComment(issuePayload({ number: 7 }), CONFIG);
+
+    const task = jobSpec().task;
+    expect(task).not.toContain("Earlier comments in this thread");
+    expect(task).toContain("please continue");
+  });
+
+  it("skips the thread fetch when the sender has no access token", async () => {
+    parentRows = [
+      { jobName: "parent-1", displayName: "d", pullRequestUrl: null },
+    ];
+    resolveWebhookRun.mockResolvedValue({
+      ...RESOLVED,
+      linked: { userId: "u1", accessToken: null },
+    });
+
+    await handleIssueComment(issuePayload({ number: 7 }), CONFIG);
+
+    expect(listIssueComments).not.toHaveBeenCalled();
+    expect(createAgentJob).toHaveBeenCalledTimes(1);
   });
 });
 

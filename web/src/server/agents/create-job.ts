@@ -29,6 +29,7 @@ import {
 import {
   providerForCredentials,
   type AuthKind,
+  type RunProviderName,
 } from "~/server/agents/resolve-credentials";
 import { db } from "~/server/db";
 import { taskRun } from "~/server/db/schema";
@@ -184,6 +185,15 @@ export interface JobSpec {
   repoUrl?: string;
   branch: string;
   model: string;
+  /**
+   * The provider (and, for the two-kind providers, the auth kind) the run's
+   * credentials resolved to. Recorded as annotations on the Job so a retrigger
+   * can pin the re-run to the same provider + credential kind instead of
+   * re-deriving from the current precedence. Unset for programmatic callers
+   * that never resolved a concrete provider.
+   */
+  modelProvider?: RunProviderName;
+  modelAuth?: AuthKind;
   /**
    * Reasoning-effort level for the run (low|medium|high|xhigh|max), passed to
    * the `claude` CLI as --effort. Applies to every provider — non-Anthropic
@@ -758,6 +768,13 @@ export function buildJobManifest(
     ...((spec.outputType === "issue" || spec.outputType === "review") && {
       "bandolier.io/output-type": spec.outputType,
     }),
+    // The provider + credential kind this run resolved to, so a retrigger can
+    // replay it on the same credentials rather than re-deriving from the (since
+    // possibly changed) precedence.
+    ...(spec.modelProvider && {
+      "bandolier.io/model-provider": spec.modelProvider,
+    }),
+    ...(spec.modelAuth && { "bandolier.io/model-auth": spec.modelAuth }),
     ...(spec.createdBy && { "bandolier.io/created-by": spec.createdBy }),
     // Lineage of a resumed run, read by the dashboard to show what it continues.
     ...(spec.parentJobName && {

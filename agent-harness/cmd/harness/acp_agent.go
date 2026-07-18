@@ -6,7 +6,6 @@ import (
 	"io"
 	"log"
 	"os"
-	"os/exec"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -224,7 +223,11 @@ func claudeDriverArgs(a *acpAgent) []string {
 }
 
 func startClaudeDriver(a *acpAgent) (*claudeDriver, error) {
-	cmd := exec.Command("claude", claudeDriverArgs(a)...)
+	// harnessCmd puts claude in its own process group (nil ctx: this driver isn't
+	// context-bound — on shutdown the harness closes its stdin so claude ends the
+	// turn and exits cleanly). Isolating it keeps a group-wide SIGTERM from killing
+	// it with 143 before that graceful close lands.
+	cmd := harnessCmd(nil, "claude", claudeDriverArgs(a)...)
 	cmd.Dir = a.workDir
 	cmd.Env = buildEnv(a.provider)
 	cmd.Stderr = os.Stderr

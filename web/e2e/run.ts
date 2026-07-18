@@ -28,6 +28,7 @@ const base = externalBase ?? `http://localhost:${port}`;
 // Routes the specs depend on. We block on these so a spec never races a
 // still-compiling route and reports a spurious failure.
 const ROUTES = [
+  "/dev/background-tasks",
   "/dev/cluster-deploy",
   "/dev/composer",
   "/dev/conversation",

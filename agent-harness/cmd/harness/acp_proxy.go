@@ -77,8 +77,11 @@ func runACPProxy(ctx context.Context, cfg config) error {
 	cmd.Env = agentEnv
 	cmd.Stderr = &prefixWriter{} // agent diagnostics → [harness] (and transcript)
 	// Own process group so a pod-termination SIGTERM to the harness's group can't
-	// kill the agent (and its claude child, which exits 143 on SIGTERM) before the
-	// harness closes its stdin for a clean shutdown.
+	// kill the agent (and its claude child, which exits 143 on SIGTERM) directly.
+	// Only the harness receives that signal, so it alone drives shutdown: on a
+	// normal session end the stdin close below lets the agent exit cleanly, and on
+	// ctx cancellation CommandContext tears it down with SIGKILL — either way the
+	// harness decides, rather than the runtime killing the agent mid-run.
 	cmd.SysProcAttr = ownProcessGroup
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

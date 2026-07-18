@@ -38,6 +38,7 @@ const ROUTES = [
   "/dev/effort-picker",
   "/dev/interactive-scroll",
   "/dev/log",
+  "/dev/log-modal",
   "/dev/modal",
   "/dev/searchable-select",
   "/dev/settings-shell",

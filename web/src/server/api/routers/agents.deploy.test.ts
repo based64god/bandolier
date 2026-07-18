@@ -59,6 +59,35 @@ vi.mock("~/server/agents/repo-permissions", () => ({
   isMaintainerOrHigher: (p: string) => p === "maintain" || p === "admin",
 }));
 
+// retrigger reads the original Job back to recover the run's parameters; stub
+// the batch client so it can be handed a canned Job (or none).
+const listNamespacedJob = vi.fn<() => Promise<{ items: unknown[] }>>();
+vi.mock("~/server/k8s/client", () => ({
+  getBatchV1Api: () => ({ listNamespacedJob: () => listNamespacedJob() }),
+  getCoreV1Api: () => ({}),
+}));
+
+function fakeJob(
+  env: Record<string, string>,
+  annotations: Record<string, string> = {},
+  name = "bandolier-agent-1",
+) {
+  return {
+    metadata: { name, annotations, labels: {} },
+    spec: {
+      template: {
+        spec: {
+          containers: [
+            {
+              env: Object.entries(env).map(([k, v]) => ({ name: k, value: v })),
+            },
+          ],
+        },
+      },
+    },
+  };
+}
+
 const { agentsRouter } = await import("~/server/api/routers/agents");
 const { createCallerFactory } = await import("~/server/api/trpc");
 
@@ -99,6 +128,7 @@ beforeEach(() => {
   resolveModelCredentials.mockReset().mockResolvedValue(creds());
   runUsesRepoCredentials.mockReset().mockResolvedValue(true);
   getUserRepoPermission.mockReset().mockResolvedValue("read");
+  listNamespacedJob.mockReset().mockResolvedValue({ items: [] });
 });
 
 describe("agents.deploy error propagation", () => {
@@ -164,5 +194,63 @@ describe("agents.deploy review validation", () => {
       );
     // Zod refine rejects before the handler runs.
     expect((err as TRPCError).code).toBe("BAD_REQUEST");
+  });
+});
+
+describe("agents.retrigger", () => {
+  it("404s when the original job is no longer present", async () => {
+    listNamespacedJob.mockResolvedValue({ items: [] });
+    const err = await caller()
+      .retrigger({ namespace: "ns", jobName: "gone" })
+      .then(
+        () => {
+          throw new Error("expected retrigger to reject");
+        },
+        (e: unknown) => e,
+      );
+    expect((err as TRPCError).code).toBe("NOT_FOUND");
+    expect((err as TRPCError).message).toContain("cleaned up");
+  });
+
+  it("rejects when the job carries no model to replay", async () => {
+    listNamespacedJob.mockResolvedValue({
+      items: [fakeJob({ CLAUDE_TASK: "do it" })],
+    });
+    const err = await caller()
+      .retrigger({ namespace: "ns", jobName: "bandolier-agent-1" })
+      .then(
+        () => {
+          throw new Error("expected retrigger to reject");
+        },
+        (e: unknown) => e,
+      );
+    expect((err as TRPCError).code).toBe("BAD_REQUEST");
+    expect((err as TRPCError).message).toContain("model");
+  });
+
+  it("recovers the review parameters from the job's env and replays them", async () => {
+    // A review job with no repository recorded: the recovered outputType/PR
+    // number carry into `deploy`, which then rejects the missing repo — proving
+    // the review params (not the pre-expanded CLAUDE_TASK) were threaded back.
+    listNamespacedJob.mockResolvedValue({
+      items: [
+        fakeJob({
+          CLAUDE_MODEL: "claude-opus-4-8",
+          CLAUDE_TASK: "already-expanded review context",
+          OUTPUT_TYPE: "review",
+          REVIEW_PR_NUMBER: "7",
+        }),
+      ],
+    });
+    const err = await caller()
+      .retrigger({ namespace: "ns", jobName: "bandolier-agent-1" })
+      .then(
+        () => {
+          throw new Error("expected retrigger to reject");
+        },
+        (e: unknown) => e,
+      );
+    expect((err as TRPCError).code).toBe("BAD_REQUEST");
+    expect((err as TRPCError).message).toContain("review");
   });
 });

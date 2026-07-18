@@ -8,7 +8,20 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"syscall"
 )
+
+// ownProcessGroup makes a spawned command start its own process group rather
+// than inheriting the harness's. On pod termination the container runtime
+// delivers SIGTERM to the harness's process group; without this the signal
+// reaches the child directly — killing the claude CLI mid-run (it exits 143 on
+// SIGTERM) and racing the harness's own clean-shutdown handling. Isolating every
+// child means only the harness (PID 1) receives that SIGTERM, so it alone
+// decides how and when to stop its children. See main()'s signal handling.
+//
+// It is applied to every exec.Cmd the harness starts; the value is read-only
+// input to the runtime, so a single shared instance is safe.
+var ownProcessGroup = &syscall.SysProcAttr{Setpgid: true}
 
 // ── Subprocess execution ────────────────────────────────────────────────────
 
@@ -45,6 +58,7 @@ func captureCombined(ctx context.Context, dir, name string, args ...string) (str
 	cmd.Env = os.Environ()
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
+	cmd.SysProcAttr = ownProcessGroup
 	err := cmd.Run()
 	return buf.String(), err
 }
@@ -59,6 +73,7 @@ func captureCmdEnv(ctx context.Context, dir string, env []string, name string, a
 	cmd.Env = env
 	cmd.Stdout = &stdout
 	cmd.Stderr = w
+	cmd.SysProcAttr = ownProcessGroup
 	err := cmd.Run()
 	w.flush()
 	return stdout.String(), err
@@ -101,6 +116,7 @@ func runCmd(ctx context.Context, dir string, env []string, name string, args ...
 	cmd.Stdout = w
 	cmd.Stderr = w
 	cmd.Env = env
+	cmd.SysProcAttr = ownProcessGroup
 	err := cmd.Run()
 	w.flush()
 	return err

@@ -368,6 +368,10 @@ func runClaudeStreaming(ctx context.Context, dir string, env []string, args ...s
 	cmd.Dir = dir
 	cmd.Env = env
 	cmd.Stderr = stderr
+	// Isolate claude in its own process group so a pod-termination SIGTERM
+	// (delivered to the harness's group) can't kill it mid-run out from under the
+	// harness — claude exits 143 on SIGTERM. The harness alone drives shutdown.
+	cmd.SysProcAttr = ownProcessGroup
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

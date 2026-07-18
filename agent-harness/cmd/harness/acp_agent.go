@@ -228,6 +228,10 @@ func startClaudeDriver(a *acpAgent) (*claudeDriver, error) {
 	cmd.Dir = a.workDir
 	cmd.Env = buildEnv(a.provider)
 	cmd.Stderr = os.Stderr
+	// Own process group: on shutdown the harness closes this driver's stdin so
+	// claude ends the turn and exits cleanly; isolating it keeps a group-wide
+	// SIGTERM from killing it with 143 before that graceful close lands.
+	cmd.SysProcAttr = ownProcessGroup
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err

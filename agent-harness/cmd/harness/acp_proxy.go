@@ -76,6 +76,10 @@ func runACPProxy(ctx context.Context, cfg config) error {
 	cmd.Dir = cfg.workDir
 	cmd.Env = agentEnv
 	cmd.Stderr = &prefixWriter{} // agent diagnostics → [harness] (and transcript)
+	// Own process group so a pod-termination SIGTERM to the harness's group can't
+	// kill the agent (and its claude child, which exits 143 on SIGTERM) before the
+	// harness closes its stdin for a clean shutdown.
+	cmd.SysProcAttr = ownProcessGroup
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return err

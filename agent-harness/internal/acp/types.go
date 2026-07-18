@@ -46,6 +46,13 @@ const (
 	// tool calls nested beneath. The spec has no subagent concept, so the
 	// dashboard is the only consumer.
 	ToolKindSubagent = "subagent"
+	// ToolKindWorkflow is a Bandolier extension (not in the ACP spec's kind enum):
+	// it marks the tool call that runs a Workflow (Claude's multi-agent
+	// orchestration tool) so the client can render it with its own glyph and a clean
+	// title instead of the generic "other" row. Like ToolKindSubagent, the dashboard
+	// is the only consumer; the agents a workflow spawns nest beneath it by
+	// parentToolCallId, exactly as an ordinary subagent's calls do.
+	ToolKindWorkflow = "workflow"
 )
 
 // Implementation identifies the agent or client software.

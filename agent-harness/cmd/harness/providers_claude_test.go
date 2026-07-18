@@ -128,6 +128,31 @@ func TestToolSummaryAgent(t *testing.T) {
 	}
 }
 
+// toolSummary must label a Workflow by its name — the `name` arg for a saved
+// workflow, or the meta.name of an inline script — and never dump the whole
+// script, which the default branch would.
+func TestToolSummaryWorkflow(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"saved workflow by name", `{"name":"find-flaky-tests"}`, "Workflow: find-flaky-tests"},
+		{"inline script meta.name", `{"script":"export const meta = { name: 'review-changes', description: 'x' }; phase('Scan')"}`, "Workflow: review-changes"},
+		{"double-quoted meta.name", `{"script":"export const meta = { name: \"audit\" }"}`, "Workflow: audit"},
+		{"no name falls back", `{"args":{"q":"x"}}`, "Workflow"},
+	}
+	for _, c := range cases {
+		got := toolSummary("Workflow", json.RawMessage(c.input))
+		if got != c.want {
+			t.Errorf("%s: toolSummary(Workflow, %s) = %q, want %q", c.name, c.input, got, c.want)
+		}
+		if strings.Contains(got, "phase(") || strings.Contains(got, "export const") {
+			t.Errorf("%s: leaked the script body: %q", c.name, got)
+		}
+	}
+}
+
 // The stateful log sink must attribute a subagent's events: remember the spawn's
 // label and tag the subagent's later lines with the subagent marker + label,
 // while a subagent's assistant text is folded into [harness] rather than surfaced

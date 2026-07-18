@@ -525,6 +525,8 @@ func toolKind(name string) string {
 		return acp.ToolKindFetch
 	case "Agent", "Task":
 		return acp.ToolKindSubagent
+	case "Workflow":
+		return acp.ToolKindWorkflow
 	default:
 		return acp.ToolKindOther
 	}

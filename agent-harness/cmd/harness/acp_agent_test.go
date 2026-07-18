@@ -164,6 +164,26 @@ func TestClaudeDriverToolCallTranslation(t *testing.T) {
 	}
 }
 
+// A Workflow tool call must render as kind "workflow" with a clean
+// "Workflow: <name>" title, not the generic "other" row with a dumped script.
+func TestClaudeDriverWorkflowToolCall(t *testing.T) {
+	var buf bytes.Buffer
+	a := captureEmits(&buf)
+	d := &claudeDriver{agent: a}
+	d.handle([]byte(`{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_wf","name":"Workflow","input":{"name":"review-changes"}}]}}`))
+
+	calls := collectUpdates(t, &buf)
+	if len(calls) != 1 {
+		t.Fatalf("got %d tool calls, want 1", len(calls))
+	}
+	if calls[0].Kind != acp.ToolKindWorkflow {
+		t.Errorf("kind = %q, want %q", calls[0].Kind, acp.ToolKindWorkflow)
+	}
+	if calls[0].Title != "Workflow: review-changes" {
+		t.Errorf("title = %q, want %q", calls[0].Title, "Workflow: review-changes")
+	}
+}
+
 // A subagent's tool calls must carry parentToolCallId = the spawning Agent
 // call's id, and the Agent spawn itself must render as kind "subagent" with no
 // parent — the linkage the dashboard nests on.

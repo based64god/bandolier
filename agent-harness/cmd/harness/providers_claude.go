@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"regexp"
 	"strings"
 )
 
@@ -279,6 +280,8 @@ func toolSummary(name string, input json.RawMessage) string {
 			return fmt.Sprintf("%s(%s): %s", name, kind, d)
 		}
 		return fmt.Sprintf("%s(%s)", name, kind)
+	case name == "Workflow": // Workflow — Claude's multi-agent orchestration tool
+		return workflowSummary(m)
 	case str("command") != "": // Bash
 		return fmt.Sprintf("%s: %s", name, str("command"))
 	case str("file_path") != "": // Read / Write / Edit / NotebookEdit
@@ -298,6 +301,29 @@ func toolSummary(name string, input json.RawMessage) string {
 		b, _ := json.Marshal(m)
 		return fmt.Sprintf("%s: %s", name, string(b))
 	}
+}
+
+// workflowMetaNameRe extracts the `name` field from a workflow script's mandatory
+// leading `export const meta = { name: '…' }` literal. The meta block is required
+// to be the first thing in the script, so the first name:'…'/"…" match is meta.name.
+var workflowMetaNameRe = regexp.MustCompile(`name\s*:\s*['"]([^'"]+)['"]`)
+
+// workflowSummary labels a Workflow tool call by the workflow's name, so the
+// summary reads "Workflow: <name>" rather than dumping the (often large) inline
+// script the default branch would. The name is the `name` arg for a saved
+// workflow, else the meta.name declared at the top of an inline `script`.
+func workflowSummary(m map[string]any) string {
+	name, _ := m["name"].(string)
+	if name == "" {
+		script, _ := m["script"].(string)
+		if mm := workflowMetaNameRe.FindStringSubmatch(script); mm != nil {
+			name = mm[1]
+		}
+	}
+	if name == "" {
+		return "Workflow"
+	}
+	return "Workflow: " + name
 }
 
 // toolResultText renders a Claude tool_result's `content` — which is either a

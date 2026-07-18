@@ -805,6 +805,22 @@ describe("collectBackgroundTasks", () => {
     ]);
   });
 
+  it("omits an empty-title spawn so the label stays undefined", () => {
+    const items: TimelineItem[] = [
+      {
+        type: "tool",
+        id: "t",
+        toolCallId: "task1",
+        kind: "subagent",
+        title: "",
+        status: "pending",
+      },
+    ];
+    expect(collectBackgroundTasks(["task1"], items)).toEqual([
+      { id: "task1", label: undefined },
+    ]);
+  });
+
   it("returns an empty list for an empty set", () => {
     expect(collectBackgroundTasks([], [])).toEqual([]);
   });

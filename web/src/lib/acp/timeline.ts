@@ -603,7 +603,10 @@ export function collectBackgroundTasks(
 ): BackgroundTask[] {
   const labels = new Map<string, string>();
   for (const it of items) {
-    if (it.type === "tool" && it.kind === "subagent" && it.toolCallId) {
+    // Skip empty titles so a labelless spawn leaves the task's label undefined and
+    // the panel's `?? "Background task N"` fallback applies, rather than rendering
+    // a blank row.
+    if (it.type === "tool" && it.kind === "subagent" && it.toolCallId && it.title) {
       labels.set(it.toolCallId, it.title);
     }
   }

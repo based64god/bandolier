@@ -46,6 +46,14 @@ check(
   (await page.getByTestId("panel-empty").getByRole("button").count()) === 0,
 );
 
+// A finished (non-running) session suppresses the indicator even with a stale,
+// never-drained set — an abnormally-ended session must not show phantom work.
+check(
+  "finished-session panel suppresses the indicator",
+  (await page.getByTestId("panel-not-running").getByRole("button").count()) ===
+    0,
+);
+
 // Opening the popout lists every task — the labelled one and the generic fallbacks.
 await running.getByRole("button").first().click();
 const dialog = page.getByRole("dialog");

@@ -21,22 +21,30 @@ import { Modal } from "./modal";
 export function BackgroundTasksPanel({
   taskIds,
   items,
+  running,
 }: {
   taskIds: string[];
   items: TimelineItem[];
+  // Whether the session is still live. A background task only runs while the
+  // session does, and an abnormally-ended session (pod killed / expired / OOM)
+  // never emits a drain frame — so its last non-empty set would otherwise linger in
+  // the durable log and show phantom "running" work on every replay. Gate on this.
+  running: boolean;
 }) {
-  // Recompute only when the set or timeline changes, not on every parent poll
-  // re-render (the interactive row re-renders on each frame pull and on
-  // scroll/focus bumps); correlating ids to spawn labels is O(n) over the timeline.
+  // Recompute only when the set or timeline actually changes — not on the
+  // scroll/focus re-renders the interactive row also does, where taskIds/items keep
+  // their identity; correlating ids to spawn labels is O(n) over the timeline.
   const tasks = useMemo(
     () => collectBackgroundTasks(taskIds, items),
     [taskIds, items],
   );
   const [open, setOpen] = useState(false);
 
-  // A live indicator: nothing to show once the background set has drained. Hooks
-  // stay above this early return so render order is stable.
-  if (tasks.length === 0) return null;
+  // A live indicator: nothing to show once the set has drained, or once the session
+  // is no longer running (a terminal session has no live background work and may
+  // never have emitted a drain). Hooks stay above this early return so render order
+  // is stable.
+  if (!running || tasks.length === 0) return null;
 
   // Preview the newest task's label when one is known, else stay generic.
   const preview = taskLabel(tasks[tasks.length - 1]!, tasks.length - 1);
@@ -70,6 +78,7 @@ export function BackgroundTasksPanel({
 // may be outside the fetched window), else a positional fallback so an
 // uncorrelated task still reads as a task.
 function taskLabel(task: BackgroundTask, index: number): string {
+  // collectBackgroundTasks omits empty labels, so `??` reliably falls back here.
   return task.label ?? `Background task ${index + 1}`;
 }
 

@@ -31,16 +31,25 @@ export default function BackgroundTasksHarness() {
       testid: "panel-running",
       label: "Running — two generic, one labelled (labelled last, so it previews)",
       taskIds: ["task-2", "task-3", "task-1"],
+      running: true,
     },
     {
       testid: "panel-one",
       label: "Running — a single task",
       taskIds: ["task-9"],
+      running: true,
     },
     {
       testid: "panel-empty",
       label: "Drained — indicator pruned (renders nothing)",
       taskIds: [] as string[],
+      running: true,
+    },
+    {
+      testid: "panel-not-running",
+      label: "Finished session — indicator suppressed even with a stale set",
+      taskIds: ["task-1"],
+      running: false,
     },
   ];
 
@@ -51,7 +60,11 @@ export default function BackgroundTasksHarness() {
         <section key={sc.testid} data-testid={sc.testid}>
           <h2 className="mb-1 text-sm text-white/50">{sc.label}</h2>
           <div className="max-w-2xl border border-white/10">
-            <BackgroundTasksPanel taskIds={sc.taskIds} items={items} />
+            <BackgroundTasksPanel
+              taskIds={sc.taskIds}
+              items={items}
+              running={sc.running}
+            />
             <div className="p-4 text-sm text-white/40">…conversation below…</div>
           </div>
         </section>

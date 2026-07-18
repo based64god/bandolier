@@ -589,6 +589,7 @@ export function InteractiveRow({
                   <BackgroundTasksPanel
                     taskIds={session.backgroundTasks}
                     items={session.items}
+                    running={running}
                   />
                 </div>
                 <Conversation

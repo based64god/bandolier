@@ -12,6 +12,8 @@ import {
   type ComputeSpec,
 } from "~/lib/compute";
 import { ingestToken } from "~/lib/ingest";
+import { recordCredentialUsage } from "~/server/agents/credential-usage";
+import { gollmProviderName } from "~/server/agents/gollm-catalog";
 import {
   AGENT_CONTAINER_NAME,
   SPAWNED_BY_LABEL,
@@ -992,6 +994,22 @@ export async function createAgentJob(spec: JobSpec): Promise<string> {
   await createSecrets(spec, jobName, ns, provider, jobOwnerRef);
 
   await recordRun(spec, jobName, ns);
+
+  // Track which provider credential this run used, so the dashboard footer can
+  // surface recently-used credentials. Best-effort — usage telemetry must never
+  // fail a deploy that has already created the Job.
+  try {
+    const usedProvider =
+      provider.type === "custom" && spec.customProvider
+        ? gollmProviderName(spec.customProvider.provider)
+        : provider.type;
+    await recordCredentialUsage(db, spec.userId, usedProvider);
+  } catch (error) {
+    console.warn("[bandolier:deploy] failed to record credential usage", {
+      job: jobName,
+      error,
+    });
+  }
 
   console.log("[bandolier:deploy] job created", {
     job: jobName,

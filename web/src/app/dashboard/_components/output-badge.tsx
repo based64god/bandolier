@@ -201,9 +201,40 @@ export function OutputBadge({
 }
 
 /**
+ * Scrolls the task row whose run `jobName` names into view and briefly flashes
+ * it, so the resumed-lineage chip doubles as a jump-to-parent control — and,
+ * because a parent may itself be a resumed run, a chain the user can follow up.
+ * Rows tag themselves with `data-job-name` (see TaskRow / InteractiveRow / the
+ * overview panel). The parent may not be present (a different repo, or aged out
+ * of the list) — we no-op then rather than jumping nowhere.
+ */
+function scrollToTaskRow(jobName: string) {
+  if (typeof document === "undefined") return;
+  const selector =
+    typeof CSS !== "undefined" && CSS.escape
+      ? `[data-job-name="${CSS.escape(jobName)}"]`
+      : `[data-job-name="${jobName}"]`;
+  const target = document.querySelector<HTMLElement>(selector);
+  if (!target) return;
+  target.scrollIntoView({ behavior: "smooth", block: "center" });
+  // A short amber flash (matching the chip) draws the eye to the row the scroll
+  // landed on — otherwise a jump within a dense table is easy to lose.
+  target.animate?.(
+    [
+      { backgroundColor: "rgba(251, 191, 36, 0.18)" },
+      { backgroundColor: "rgba(251, 191, 36, 0.18)", offset: 0.6 },
+      { backgroundColor: "transparent" },
+    ],
+    { duration: 1600, easing: "ease-out" },
+  );
+}
+
+/**
  * Lineage chip for a resumed run ("↻ resumed", amber): a follow-up comment on
  * the parent run's issue or PR spawned this task with the parent's transcript
- * as context. Hovering names the parent run. Renders nothing for normal runs.
+ * as context. Clicking it scrolls to (and flashes) the parent run's row when
+ * that row is on screen — following the lineage a step up. Hovering names the
+ * parent run. Renders nothing for normal runs.
  */
 export function ResumedBadge({
   parentJobName,
@@ -213,13 +244,22 @@ export function ResumedBadge({
   parentDisplayName: string | null;
 }) {
   if (!parentJobName) return null;
+  const parentName = parentDisplayName ?? parentJobName;
   return (
-    <span
-      title={`Resumes ${parentDisplayName ?? parentJobName}`}
-      className="inline-flex shrink-0 items-center rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] whitespace-nowrap text-amber-300"
+    <button
+      type="button"
+      // stopPropagation: the chip sits inside a clickable row (opens logs / opens
+      // the repo); a click here should scroll to the parent, not trigger the row.
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        scrollToTaskRow(parentJobName);
+      }}
+      title={`Resumes ${parentName} — click to scroll to it`}
+      className="inline-flex shrink-0 items-center rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] whitespace-nowrap text-amber-300 transition hover:bg-amber-500/20 hover:text-amber-200"
     >
       ↻ resumed
-    </span>
+    </button>
   );
 }
 

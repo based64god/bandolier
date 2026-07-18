@@ -35,6 +35,7 @@ export default function TaskRowHarness() {
     "fix the confirmation button height on mobile so the row keeps a constant height when the confirm and cancel pair replaces the terminate glyph";
   const agent = {
     name: "task-abc123",
+    jobName: "task-abc123",
     displayName: `${prompt.slice(0, 60)}…`,
     prompt,
     status: "Running",
@@ -53,6 +54,7 @@ export default function TaskRowHarness() {
   // realistic count (5 chars); the badge is at its full "↻ resumed" width.
   const resumedAgent = {
     name: "task-resumed",
+    jobName: "task-resumed",
     displayName: "a resumed follow-up task",
     status: "Running",
     ownedByViewer: true,
@@ -65,6 +67,20 @@ export default function TaskRowHarness() {
       cacheCreationInputTokens: 0,
     },
     currently: "editing task-row.tsx",
+    source: "manual",
+  } as unknown as Task;
+
+  // The run `resumedAgent` continues — the target of its "↻ resumed" chip. It
+  // sits below the resumed row so clicking the chip has somewhere to scroll to
+  // (its row tags itself with data-job-name="task-parent-xyz").
+  const parentAgent = {
+    name: "task-parent-xyz",
+    jobName: "task-parent-xyz",
+    displayName: "the parent run this task resumed from",
+    status: "Succeeded",
+    ownedByViewer: true,
+    tokens: null,
+    currently: "opened a pull request",
     source: "manual",
   } as unknown as Task;
 
@@ -178,6 +194,12 @@ export default function TaskRowHarness() {
                 onOpenLogs={(name) => setLastOpened(name)}
               />
             ))}
+            {/* The row the resumed chip above scrolls to. */}
+            <TaskRow
+              agent={parentAgent}
+              namespace="default"
+              onOpenLogs={(name) => setLastOpened(name)}
+            />
             {/* A just-deployed placeholder row. Its name is short enough to sit
                 well within a wide Task column, letting the task-row spec assert
                 the description fills the column — pinning the trailing

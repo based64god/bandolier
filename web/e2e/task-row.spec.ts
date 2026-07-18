@@ -105,4 +105,36 @@ check(
 );
 await phone.close();
 
+// Feature: the "↻ resumed" chip is a jump-to-parent control — clicking it
+// scrolls the row of the run this task resumed from into view, so the lineage is
+// followable a step at a time. The harness renders that parent row (jobName
+// "task-parent-xyz") below the resumed row; on a short viewport it starts below
+// the fold and must be on screen after the click.
+const scroll = await browser.newPage({
+  viewport: { width: 1200, height: 300 },
+});
+await scroll.goto(`${BASE}/dev/task-row`);
+const parentRow = scroll.locator('[data-job-name="task-parent-xyz"]');
+const parentTop = () =>
+  parentRow.evaluate((el) => el.getBoundingClientRect().top);
+const beforeTop = await parentTop();
+check(
+  `parent row starts below the fold (top ${beforeTop.toFixed(0)}px)`,
+  beforeTop > 300,
+);
+
+await scroll
+  .locator("[data-testid='rows'] tr", { hasText: "resumed" })
+  .first()
+  .getByRole("button", { name: /resumed/ })
+  .click();
+// Let the smooth scroll settle.
+await scroll.waitForTimeout(800);
+const afterTop = await parentTop();
+check(
+  `clicking the resumed chip scrolls the parent row into view (top ${beforeTop.toFixed(0)}px → ${afterTop.toFixed(0)}px)`,
+  afterTop >= 0 && afterTop < 300,
+);
+await scroll.close();
+
 await finish(browser);

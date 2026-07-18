@@ -49,6 +49,8 @@ import {
   providerForCredentials,
   resolveModelCredentials,
   selectRunCredentials,
+  type AuthKind,
+  type RunProviderName,
 } from "~/server/agents/resolve-credentials";
 import {
   assertMayUseRepoCredentials,
@@ -995,6 +997,10 @@ export const agentsRouter = createTRPCRouter({
           repoFullName: input.repoFullName,
           branch: input.branch,
           model: input.model,
+          // Record the resolved provider + auth kind so a retrigger can pin
+          // the re-run to the same credentials.
+          modelProvider: provider ?? undefined,
+          modelAuth: authKind ?? undefined,
           // Effort applies wherever the provider has a reasoning knob;
           // providerSupportsEffort is the single opt-out point.
           effort:
@@ -1156,11 +1162,22 @@ export const agentsRouter = createTRPCRouter({
       const reviewRaw = envValue("REVIEW_PR_NUMBER");
       const reviewPrNumber = reviewRaw ? Number(reviewRaw) : undefined;
 
-      // The provider/auth kind the run resolved to isn't stored on the Job, so
-      // credentials are re-resolved by `deploy`. Compute is on the pod spec,
-      // though: replay the exact CPU/memory limits the run used so a retrigger
-      // lands on the same box, rather than re-deriving from the (possibly since
-      // changed) repo/user defaults.
+      // Pin the re-run to the same provider + credential kind the original
+      // resolved to (recorded as annotations at deploy time) instead of letting
+      // `deploy` re-derive from the current precedence — a retrigger must land
+      // on the same keys, not whatever is primary now. `deploy` still resolves
+      // the secret material freshly; only the *selection* is replayed. The
+      // secrets themselves are never recoverable from the Job.
+      const modelProvider = annotations["bandolier.io/model-provider"] as
+        | RunProviderName
+        | undefined;
+      const modelAuth = annotations["bandolier.io/model-auth"] as
+        | AuthKind
+        | undefined;
+
+      // Compute is on the pod spec: replay the exact CPU/memory limits the run
+      // used so a retrigger lands on the same box, rather than re-deriving from
+      // the (possibly since changed) repo/user defaults.
       const limits = container?.resources?.limits;
       const cpu = limits?.cpu;
       const memory = limits?.memory;
@@ -1188,6 +1205,8 @@ export const agentsRouter = createTRPCRouter({
           input.repoFullName ?? annotations["bandolier.io/repo"] ?? undefined,
         branch: envValue("BRANCH") ?? "main",
         model,
+        modelProvider,
+        modelAuth,
         effort,
         maxTurns,
         cpu,

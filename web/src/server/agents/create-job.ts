@@ -12,7 +12,11 @@ import {
   type ComputeSpec,
 } from "~/lib/compute";
 import { ingestToken } from "~/lib/ingest";
-import { SPAWNED_BY_LABEL, spawnedByLabelValue } from "~/server/agents/labels";
+import {
+  AGENT_CONTAINER_NAME,
+  SPAWNED_BY_LABEL,
+  spawnedByLabelValue,
+} from "~/server/agents/labels";
 import {
   agentEgressBlockedCidrs,
   buildCustomNetworkPolicyBody,
@@ -802,7 +806,7 @@ export function buildJobManifest(
           },
           containers: [
             {
-              name: "harness",
+              name: AGENT_CONTAINER_NAME,
               image: spec.agentImage ?? DEFAULT_HARNESS_IMAGE,
               imagePullPolicy: "Always",
               env: envVars,

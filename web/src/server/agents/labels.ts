@@ -12,6 +12,16 @@ const LABEL_SAFE = /^[a-zA-Z0-9]([a-zA-Z0-9._-]{0,61}[a-zA-Z0-9])?$/;
 export const SPAWNED_BY_LABEL = "bandolier.io/spawned-by";
 
 /**
+ * Name of the harness container in every agent pod (see create-job's pod spec).
+ * Reads of a running pod's logs must name it explicitly: a cluster that injects
+ * a sidecar (e.g. a service mesh) makes the pod multi-container, and then a
+ * container-unspecified `readNamespacedPodLog` errors ("a container name must be
+ * specified") instead of returning the harness's logs. Kept here — a dependency-
+ * free module — so the creator and the log readers share one source of truth.
+ */
+export const AGENT_CONTAINER_NAME = "harness";
+
+/**
  * Encodes a user id as a Kubernetes-label-safe value, stable across calls so the
  * same id always yields the same selector. Used to tag agent pods with the user
  * who spawned them and to query only that user's pods.

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"os/exec"
 	"strings"
 )
 
@@ -364,16 +363,16 @@ func logToolResult(prefix, text string) {
 // event as it arrives so progress shows up incrementally instead of all at once.
 func runClaudeStreaming(ctx context.Context, dir string, env []string, args ...string) error {
 	stderr := &prefixWriter{}
-	cmd := exec.CommandContext(ctx, "claude", args...)
+	// harnessCmd isolates claude in its own process group so a pod-termination
+	// SIGTERM (delivered to the harness's group) can't kill it mid-run out from
+	// under the harness — claude exits 143 on SIGTERM. Only the harness receives
+	// that signal; it stops claude via context cancellation, which CommandContext
+	// delivers as SIGKILL — a deterministic teardown the harness owns, not a stray
+	// group signal.
+	cmd := harnessCmd(ctx, "claude", args...)
 	cmd.Dir = dir
 	cmd.Env = env
 	cmd.Stderr = stderr
-	// Isolate claude in its own process group so a pod-termination SIGTERM
-	// (delivered to the harness's group) can't kill it mid-run out from under the
-	// harness — claude exits 143 on SIGTERM. Only the harness receives that signal;
-	// it stops claude via context cancellation, which CommandContext delivers as
-	// SIGKILL — a deterministic teardown the harness owns, not a stray group signal.
-	cmd.SysProcAttr = ownProcessGroup
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

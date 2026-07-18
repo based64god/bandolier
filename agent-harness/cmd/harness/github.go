@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -23,10 +22,9 @@ type githubIssue struct {
 }
 
 func fetchIssue(ctx context.Context, workDir, issueNumber string) (*githubIssue, error) {
-	cmd := exec.CommandContext(ctx, "gh", "issue", "view", issueNumber, "--json", "number,title,body")
+	cmd := harnessCmd(ctx, "gh", "issue", "view", issueNumber, "--json", "number,title,body")
 	cmd.Dir = workDir
 	cmd.Env = os.Environ()
-	cmd.SysProcAttr = ownProcessGroup
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("gh issue view: %w", err)
@@ -141,11 +139,10 @@ func ensureDiffBase(ctx context.Context, cfg config) error {
 // beyond the PR base, or (on a resume) beyond what the branch had already
 // pushed — i.e. whether Claude actually committed anything worth publishing.
 func hasCommits(ctx context.Context, cfg config, branchName string) bool {
-	cmd := exec.CommandContext(ctx, "git", "rev-list", "--count",
+	cmd := harnessCmd(ctx, "git", "rev-list", "--count",
 		fmt.Sprintf("%s..%s", cfg.diffBase(), branchName))
 	cmd.Dir = cfg.workDir
 	cmd.Env = os.Environ()
-	cmd.SysProcAttr = ownProcessGroup
 	out, err := cmd.Output()
 	if err != nil {
 		// If we can't tell, assume there's something to push.
@@ -157,10 +154,9 @@ func hasCommits(ctx context.Context, cfg config, branchName string) bool {
 // latestCommitSubject returns the subject line of the most recent commit on
 // branchName — used as a PR title that summarizes what Claude actually changed.
 func latestCommitSubject(ctx context.Context, cfg config, branchName string) string {
-	cmd := exec.CommandContext(ctx, "git", "log", "-1", "--format=%s", branchName)
+	cmd := harnessCmd(ctx, "git", "log", "-1", "--format=%s", branchName)
 	cmd.Dir = cfg.workDir
 	cmd.Env = os.Environ()
-	cmd.SysProcAttr = ownProcessGroup
 	out, err := cmd.Output()
 	if err != nil {
 		return ""

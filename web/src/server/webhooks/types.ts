@@ -123,8 +123,16 @@ export interface PullRequestPayload {
     // A draft PR isn't ready for review; a later `ready_for_review` clears this.
     draft?: boolean;
     user: { id: number; login: string; type?: string };
+    // The branch the PR merges into. `synchronize` compares the PR's diff against
+    // this ref to tell new work apart from a rebase/merge of the base.
+    base: { ref: string };
   };
   repository: GitHubRepository;
+  // The head SHAs before and after the push that fired a `synchronize`. Comparing
+  // each against the base ref reveals whether the update changed the PR's own
+  // diff (new commits) or only pulled the base in (rebase/merge — no re-review).
+  before?: string;
+  after?: string;
   // Who triggered the event: the opener for `opened`, the pusher for
   // `synchronize`. The run is owned by (and spends the credentials of) this user.
   sender: { id: number; login: string };

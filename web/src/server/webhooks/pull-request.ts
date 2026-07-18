@@ -1,7 +1,11 @@
 import { and, desc, eq } from "drizzle-orm";
 
 import { createAgentJob, type JobSpec } from "~/server/agents/create-job";
-import { getRegistryPullSecret } from "~/server/agents/github-app";
+import {
+  getRegistryPullSecret,
+  getRepoBotToken,
+} from "~/server/agents/github-app";
+import { ghFetch } from "~/server/agents/github-api";
 import { repoToNamespace } from "~/server/agents/namespace";
 import { db } from "~/server/db";
 import { taskRun } from "~/server/db/schema";
@@ -40,12 +44,73 @@ export async function handlePullRequestOpened(
 }
 
 /**
+ * A PR's own contribution — the three-dot diff of `headSha` against `baseRef`,
+ * i.e. the change relative to their merge base — as a stable, order-independent
+ * signature of `{filename, patch}` per changed file. This is invariant under
+ * rebasing or merging the base in (both only move the merge base), so comparing
+ * the signature before and after a push tells a base update apart from new work.
+ *
+ * Returns null when the comparison can't be read (GitHub error, truncated diff),
+ * so the caller can fall back to re-reviewing rather than silently skip.
+ */
+async function prContributionSignature(
+  token: string,
+  repoFullName: string,
+  baseRef: string,
+  headSha: string,
+): Promise<string | null> {
+  try {
+    const res = await ghFetch(
+      `https://api.github.com/repos/${repoFullName}/compare/${encodeURIComponent(
+        baseRef,
+      )}...${headSha}`,
+      token,
+    );
+    const data = (await res.json()) as {
+      files?: { filename: string; status: string; patch?: string }[];
+    };
+    if (!data.files) return null;
+    return data.files
+      .map((f) => `${f.status} ${f.filename}\n${f.patch ?? ""}`)
+      .sort()
+      .join("\n<<<file>>>\n");
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * True when a `synchronize` push only rebased or merged the base branch into the
+ * PR, leaving the PR's own diff unchanged — so there's no new work to re-review.
+ * Determined by comparing the PR's contribution signature at the pre- and
+ * post-push head. Fails open (returns false → re-review) whenever the signatures
+ * can't be established: no bot token, a missing before/after SHA, or an
+ * unreadable/truncated compare. Those cases keep the prior always-re-review
+ * behaviour rather than risk dropping a review for real changes.
+ */
+async function isBaseOnlyUpdate(payload: PullRequestPayload): Promise<boolean> {
+  const { pull_request: pr, repository, before, after } = payload;
+  if (!before || !after) return false;
+
+  const token = await getRepoBotToken(db, repository.full_name, Date.now());
+  if (!token) return false;
+
+  const [beforeSig, afterSig] = await Promise.all([
+    prContributionSignature(token, repository.full_name, pr.base.ref, before),
+    prContributionSignature(token, repository.full_name, pr.base.ref, after),
+  ]);
+  return beforeSig !== null && afterSig !== null && beforeSig === afterSig;
+}
+
+/**
  * A push to a reviewed PR's branch (`pull_request` synchronize) re-reviews it by
  * resuming the PR's most recent review run — seeded with that run's persisted
  * transcript so the re-review builds on the earlier one rather than starting
  * cold. Requires the repo's artifact store (no store ⇒ no transcript to resume
- * from) and a prior review to resume; with neither the push is ignored. Comments
- * on the review resume the *coding* run instead (see resumeFromComment).
+ * from) and a prior review to resume; with neither the push is ignored. A push
+ * that only rebased or merged the base branch in (no change to the PR's own diff)
+ * is ignored too — re-review is for new work. Comments on the review resume the
+ * *coding* run instead (see resumeFromComment).
  */
 export async function handlePullRequestSynchronize(
   payload: PullRequestPayload,
@@ -89,11 +154,25 @@ export async function handlePullRequestSynchronize(
     return;
   }
 
+  // Rebasing or merging the base branch into the PR fires `synchronize` but adds
+  // no new work — the PR's own diff is unchanged. Re-reviewing then would repeat
+  // the last review, so skip it and re-review only when the head diff changed.
+  if (await isBaseOnlyUpdate(payload)) {
+    console.log(
+      "[bandolier:webhook] re-review skipped — base-only update (rebase/merge)",
+      logCtx,
+    );
+    return;
+  }
+
   await launchReview({
     payload,
     config,
     logCtx,
-    resume: { parentJobName: parent.jobName, parentDisplayName: parent.displayName },
+    resume: {
+      parentJobName: parent.jobName,
+      parentDisplayName: parent.displayName,
+    },
   });
 }
 

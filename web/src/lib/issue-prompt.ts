@@ -122,6 +122,27 @@ export interface ReviewCommentLocation {
   diffHunk?: string | null;
 }
 
+/** A prior comment in the thread, folded in as context before the trigger. */
+export interface PriorComment {
+  author: string;
+  body: string;
+}
+
+/**
+ * Renders the comments that preceded the triggering one as a context block,
+ * ending with a divider so the triggering comment reads distinctly after it.
+ * Empty string when there are no prior comments.
+ */
+function renderThreadContext(prior: PriorComment[] | undefined): string {
+  if (!prior || prior.length === 0) return "";
+  const rendered = prior
+    .map(
+      (c) => `@${c.author} commented:\n\n${c.body.trim() || "(empty comment)"}`,
+    )
+    .join("\n\n");
+  return `Earlier comments in this thread, oldest first:\n\n${rendered}\n\n---\n\n`;
+}
+
 /** "`path` lines A–B" / "`path` line A" / "`path`" for a review comment. */
 function reviewCommentAnchor(loc: ReviewCommentLocation): string {
   const lineRef =
@@ -136,9 +157,11 @@ function reviewCommentAnchor(loc: ReviewCommentLocation): string {
 /**
  * Builds the user message for a resumed run: the follow-up comment in its
  * issue/PR context. The harness prepends the parent run's transcript, so this
- * only needs to carry what's new. A PR review comment additionally carries the
- * file/line it's anchored to (`reviewComment`), rendered so the agent knows
- * which code the reviewer is referring to.
+ * only needs to carry what's new. The comments that preceded the trigger
+ * (`priorComments`) are folded in as context so the agent sees the whole thread,
+ * not just the one comment that fired the resume. A PR review comment
+ * additionally carries the file/line it's anchored to (`reviewComment`),
+ * rendered so the agent knows which code the reviewer is referring to.
  */
 export function buildResumeUserMessage(opts: {
   kind: "issue" | "pull request";
@@ -147,15 +170,17 @@ export function buildResumeUserMessage(opts: {
   commenter: string;
   comment: string;
   reviewComment?: ReviewCommentLocation;
+  priorComments?: PriorComment[];
 }): string {
   const body = opts.comment.trim() || "(empty comment)";
   const header = `## Follow-up on ${opts.kind} #${opts.number}: ${opts.title}`;
+  const thread = renderThreadContext(opts.priorComments);
 
   if (opts.reviewComment) {
     const loc = opts.reviewComment;
     let message = `${header}
 
-@${opts.commenter} left a review comment on ${reviewCommentAnchor(loc)}:
+${thread}@${opts.commenter} left a review comment on ${reviewCommentAnchor(loc)}:
 
 ${body}`;
     const hunk = loc.diffHunk?.trim();
@@ -173,7 +198,7 @@ ${hunk}
 
   return `${header}
 
-@${opts.commenter} commented:
+${thread}@${opts.commenter} commented:
 
 ${body}`;
 }

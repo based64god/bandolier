@@ -47,11 +47,13 @@ export interface CredentialUsageRow {
  * `authKind` records whether the deploy routed through a metered API key or a
  * subscription, driving which indicator the footer shows.
  *
- * Upserts the (user, provider) row so each provider keeps a single record. For
- * subscriptions the row also counts runs within the current rolling window: a
- * deploy that lands after the window has elapsed starts a fresh window (count
- * 1); one within it increments the count. The window bookkeeping runs for every
- * kind but is only surfaced for subscriptions.
+ * Upserts the (user, provider) row so each provider keeps a single record. Only
+ * a subscription deploy touches the rolling window: a subscription and an API
+ * key for the same provider share one (user, provider) row, so counting every
+ * deploy would let metered API-key runs inflate the subscription's meter. A
+ * subscription deploy that lands after the window has elapsed starts a fresh
+ * window (count 1); one within it increments the count. Non-subscription
+ * deploys leave the window bookkeeping untouched.
  */
 export async function recordCredentialUsage(
   database: typeof db,
@@ -60,11 +62,18 @@ export async function recordCredentialUsage(
   authKind: AuthKind,
 ): Promise<void> {
   const now = new Date();
+  const isSubscription = authKind === "subscription";
   const windowFloor = new Date(now.getTime() - SUBSCRIPTION_WINDOW_MS);
   // Reset the window in the same statement the count increments in, so
   // concurrent deploys can't race a read-then-write: the started-at and count
   // both branch on whether the stored window has elapsed.
   const windowExpired = sql`${credentialUsage.windowStartedAt} < ${windowFloor}`;
+  const windowUpdate = isSubscription
+    ? {
+        windowStartedAt: sql`CASE WHEN ${windowExpired} THEN ${now} ELSE ${credentialUsage.windowStartedAt} END`,
+        windowRuns: sql`CASE WHEN ${windowExpired} THEN 1 ELSE ${credentialUsage.windowRuns} + 1 END`,
+      }
+    : {};
   await database
     .insert(credentialUsage)
     .values({
@@ -73,15 +82,14 @@ export async function recordCredentialUsage(
       authKind,
       lastUsedAt: now,
       windowStartedAt: now,
-      windowRuns: 1,
+      windowRuns: isSubscription ? 1 : 0,
     })
     .onConflictDoUpdate({
       target: [credentialUsage.userId, credentialUsage.provider],
       set: {
         authKind,
         lastUsedAt: now,
-        windowStartedAt: sql`CASE WHEN ${windowExpired} THEN ${now} ELSE ${credentialUsage.windowStartedAt} END`,
-        windowRuns: sql`CASE WHEN ${windowExpired} THEN 1 ELSE ${credentialUsage.windowRuns} + 1 END`,
+        ...windowUpdate,
       },
     });
 }

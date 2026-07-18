@@ -41,21 +41,30 @@ describe("getRecentCredentialUsage", () => {
 });
 
 describe("recordCredentialUsage", () => {
-  it("upserts the (user, provider) row with the auth kind and a fresh window", async () => {
-    const onConflictDoUpdate = vi.fn<(arg: { target: unknown[] }) => unknown>();
-    const values =
-      vi.fn<
-        (arg: {
-          userId: string;
-          provider: string;
-          authKind: string;
-          lastUsedAt: Date;
-          windowStartedAt: Date;
-          windowRuns: number;
-        }) => { onConflictDoUpdate: typeof onConflictDoUpdate }
-      >(() => ({ onConflictDoUpdate }));
+  interface InsertedValues {
+    userId: string;
+    provider: string;
+    authKind: string;
+    lastUsedAt: Date;
+    windowStartedAt: Date;
+    windowRuns: number;
+  }
+  interface ConflictArg {
+    target: unknown[];
+    set: Record<string, unknown>;
+  }
+
+  function fakeWriteDb() {
+    const onConflictDoUpdate = vi.fn<(arg: ConflictArg) => unknown>();
+    const values = vi.fn<(arg: InsertedValues) => { onConflictDoUpdate: typeof onConflictDoUpdate }>(
+      () => ({ onConflictDoUpdate }),
+    );
     const insert = vi.fn(() => ({ values }));
-    const database = { insert } as never;
+    return { database: { insert } as never, insert, values, onConflictDoUpdate };
+  }
+
+  it("upserts the (user, provider) row with the auth kind and a fresh window", async () => {
+    const { database, insert, values, onConflictDoUpdate } = fakeWriteDb();
 
     await recordCredentialUsage(database, "u1", "anthropic", "subscription");
 
@@ -71,6 +80,25 @@ describe("recordCredentialUsage", () => {
 
     const conflict = onConflictDoUpdate.mock.calls[0]![0];
     expect(conflict.target).toHaveLength(2);
+    // The subscription's rolling window is advanced on conflict.
+    expect(conflict.set.windowStartedAt).toBeDefined();
+    expect(conflict.set.windowRuns).toBeDefined();
+  });
+
+  it("leaves the rolling window untouched for a metered API-key deploy", async () => {
+    const { database, values, onConflictDoUpdate } = fakeWriteDb();
+
+    await recordCredentialUsage(database, "u1", "anthropic", "api_key");
+
+    // A subscription and an API key for the same provider share one row, so an
+    // API-key deploy must not spend the subscription's window budget.
+    const inserted = values.mock.calls[0]![0];
+    expect(inserted.authKind).toBe("api_key");
+    expect(inserted.windowRuns).toBe(0);
+
+    const conflict = onConflictDoUpdate.mock.calls[0]![0];
+    expect(conflict.set.windowStartedAt).toBeUndefined();
+    expect(conflict.set.windowRuns).toBeUndefined();
   });
 });
 

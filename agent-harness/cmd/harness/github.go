@@ -26,6 +26,7 @@ func fetchIssue(ctx context.Context, workDir, issueNumber string) (*githubIssue,
 	cmd := exec.CommandContext(ctx, "gh", "issue", "view", issueNumber, "--json", "number,title,body")
 	cmd.Dir = workDir
 	cmd.Env = os.Environ()
+	cmd.SysProcAttr = ownProcessGroup
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("gh issue view: %w", err)
@@ -144,6 +145,7 @@ func hasCommits(ctx context.Context, cfg config, branchName string) bool {
 		fmt.Sprintf("%s..%s", cfg.diffBase(), branchName))
 	cmd.Dir = cfg.workDir
 	cmd.Env = os.Environ()
+	cmd.SysProcAttr = ownProcessGroup
 	out, err := cmd.Output()
 	if err != nil {
 		// If we can't tell, assume there's something to push.
@@ -158,6 +160,7 @@ func latestCommitSubject(ctx context.Context, cfg config, branchName string) str
 	cmd := exec.CommandContext(ctx, "git", "log", "-1", "--format=%s", branchName)
 	cmd.Dir = cfg.workDir
 	cmd.Env = os.Environ()
+	cmd.SysProcAttr = ownProcessGroup
 	out, err := cmd.Output()
 	if err != nil {
 		return ""

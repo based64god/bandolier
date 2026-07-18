@@ -61,6 +61,38 @@ export default function ConversationHarness() {
     },
   );
 
+  // A Workflow (multi-agent orchestration) with agents nested beneath it, so the
+  // workflow glyph and its nesting can be exercised in a browser.
+  items.push(
+    {
+      type: "tool",
+      id: "t-wf",
+      toolCallId: "wf1",
+      kind: "workflow",
+      title: "Workflow: review-changes",
+      status: "completed",
+    },
+    {
+      type: "tool",
+      id: "t-wf-c1",
+      toolCallId: "wfsub1",
+      parentToolCallId: "wf1",
+      kind: "subagent",
+      title: "Agent(review): bugs",
+      status: "completed",
+    },
+    {
+      type: "tool",
+      id: "t-wf-c2",
+      toolCallId: "wfsub2",
+      parentToolCallId: "wf1",
+      kind: "edit",
+      title: "Edit: src/foo.ts",
+      status: "completed",
+      output: "applied 1 change",
+    },
+  );
+
   return (
     <div className="min-h-screen bg-[#06140c] p-8 text-white">
       <h1 className="mb-4 text-lg">Conversation harness</h1>

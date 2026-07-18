@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"regexp"
 	"strings"
 )
 
@@ -79,9 +80,12 @@ type claudeEventSink interface {
 	onToolUse(id, name, parentID string, input json.RawMessage)
 	onToolResult(id, parentID string, isError bool, content json.RawMessage)
 	onResult(ev claudeEvent)
-	// onBackgroundTasks reports how many background subagent tasks are currently
-	// in flight, from a system/background_tasks_changed event.
-	onBackgroundTasks(active int)
+	// onBackgroundTasks reports the ids of the background subagent tasks currently
+	// in flight, from a system/background_tasks_changed event. The slice is the
+	// authoritative live set (empty once every task has drained); its size is what
+	// the turn-timing logic keys off, and the ids let the ACP driver forward the set
+	// to the dashboard.
+	onBackgroundTasks(taskIDs []string)
 }
 
 // dispatchClaudeEvent parses one stream-json line and drives the sink. Anything
@@ -102,7 +106,11 @@ func dispatchClaudeEvent(raw []byte, sink claudeEventSink) {
 		// subagent tasks; a non-empty set means the agent has yielded to a
 		// background task and will auto-resume when it finishes.
 		if ev.Subtype == "background_tasks_changed" {
-			sink.onBackgroundTasks(len(ev.Tasks))
+			ids := make([]string, 0, len(ev.Tasks))
+			for _, t := range ev.Tasks {
+				ids = append(ids, t.TaskID)
+			}
+			sink.onBackgroundTasks(ids)
 		}
 	case "assistant":
 		for _, c := range ev.Message.Content {
@@ -166,8 +174,9 @@ func (s *claudeLogSink) subagentPrefix(parentID string) string {
 func (*claudeLogSink) onSlashCommands([]string) {}
 
 // onBackgroundTasks is a no-op for the one-shot log path: it drives no ACP turn,
-// so it has no turn to hold open while background subagents run.
-func (*claudeLogSink) onBackgroundTasks(int) {}
+// so it has no turn to hold open while background subagents run, and no live
+// client to forward the set to.
+func (*claudeLogSink) onBackgroundTasks([]string) {}
 
 func (s *claudeLogSink) onText(text, parentID string) {
 	if parentID == "" {
@@ -279,6 +288,8 @@ func toolSummary(name string, input json.RawMessage) string {
 			return fmt.Sprintf("%s(%s): %s", name, kind, d)
 		}
 		return fmt.Sprintf("%s(%s)", name, kind)
+	case name == "Workflow": // Workflow — Claude's multi-agent orchestration tool
+		return workflowSummary(m)
 	case str("command") != "": // Bash
 		return fmt.Sprintf("%s: %s", name, str("command"))
 	case str("file_path") != "": // Read / Write / Edit / NotebookEdit
@@ -298,6 +309,33 @@ func toolSummary(name string, input json.RawMessage) string {
 		b, _ := json.Marshal(m)
 		return fmt.Sprintf("%s: %s", name, string(b))
 	}
+}
+
+// workflowMetaNameRe extracts the `name` field from a workflow script's mandatory
+// leading `export const meta = { name: '…' }` literal. Anchoring the key to a
+// property position — preceded by `{` or `,` (with optional whitespace) — keeps it
+// from matching a `name:"…"` that appears inside an earlier string value (e.g. a
+// description that happens to contain the text "name:") or a key that merely ends
+// in "name" (filename:, nickname:). Best-effort: the first such match is meta.name,
+// which the meta literal (required to be first in the script) supplies.
+var workflowMetaNameRe = regexp.MustCompile(`[{,]\s*name\s*:\s*['"]([^'"]+)['"]`)
+
+// workflowSummary labels a Workflow tool call by the workflow's name, so the
+// summary reads "Workflow: <name>" rather than dumping the (often large) inline
+// script the default branch would. The name is the `name` arg for a saved
+// workflow, else the meta.name declared at the top of an inline `script`.
+func workflowSummary(m map[string]any) string {
+	name, _ := m["name"].(string)
+	if name == "" {
+		script, _ := m["script"].(string)
+		if mm := workflowMetaNameRe.FindStringSubmatch(script); mm != nil {
+			name = mm[1]
+		}
+	}
+	if name == "" {
+		return "Workflow"
+	}
+	return "Workflow: " + name
 }
 
 // toolResultText renders a Claude tool_result's `content` — which is either a

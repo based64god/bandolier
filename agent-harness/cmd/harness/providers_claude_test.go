@@ -60,7 +60,7 @@ type capturingSink struct {
 	toolUses    []struct{ id, name, parentID string }
 	toolResults []struct{ id, parentID string }
 	texts       []struct{ text, parentID string }
-	bgTasks     []int
+	bgTasks     [][]string
 }
 
 func (s *capturingSink) onSlashCommands([]string) {}
@@ -75,8 +75,8 @@ func (s *capturingSink) onToolResult(id, parentID string, _ bool, _ json.RawMess
 	s.toolResults = append(s.toolResults, struct{ id, parentID string }{id, parentID})
 }
 func (s *capturingSink) onResult(claudeEvent) {}
-func (s *capturingSink) onBackgroundTasks(active int) {
-	s.bgTasks = append(s.bgTasks, active)
+func (s *capturingSink) onBackgroundTasks(taskIDs []string) {
+	s.bgTasks = append(s.bgTasks, taskIDs)
 }
 
 // The parser must thread the top-level parent_tool_use_id to the sink: empty for
@@ -102,15 +102,22 @@ func TestDispatchThreadsParentToolUseID(t *testing.T) {
 	}
 }
 
-// The parser must surface the count of in-flight background subagent tasks from
+// The parser must surface the ids of the in-flight background subagent tasks from
 // system/background_tasks_changed events, so the driver can tell a mid-turn yield
-// (the agent will auto-resume when a task finishes) from a real user-input await.
+// (the agent will auto-resume when a task finishes) from a real user-input await,
+// and forward the live set to the dashboard.
 func TestDispatchRoutesBackgroundTasks(t *testing.T) {
 	s := &capturingSink{}
 	dispatchClaudeEvent([]byte(`{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"a"},{"task_id":"b"}]}`), s)
 	dispatchClaudeEvent([]byte(`{"type":"system","subtype":"background_tasks_changed","tasks":[]}`), s)
-	if len(s.bgTasks) != 2 || s.bgTasks[0] != 2 || s.bgTasks[1] != 0 {
-		t.Fatalf("bgTasks = %v, want [2 0]", s.bgTasks)
+	if len(s.bgTasks) != 2 {
+		t.Fatalf("got %d background-task events, want 2: %v", len(s.bgTasks), s.bgTasks)
+	}
+	if got := s.bgTasks[0]; len(got) != 2 || got[0] != "a" || got[1] != "b" {
+		t.Errorf("first set = %v, want [a b]", got)
+	}
+	if len(s.bgTasks[1]) != 0 {
+		t.Errorf("drained set = %v, want empty", s.bgTasks[1])
 	}
 }
 
@@ -124,6 +131,33 @@ func TestToolSummaryAgent(t *testing.T) {
 		}
 		if strings.Contains(got, "long prompt") {
 			t.Errorf("toolSummary(%s) leaked the prompt: %q", name, got)
+		}
+	}
+}
+
+// toolSummary must label a Workflow by its name — the `name` arg for a saved
+// workflow, or the meta.name of an inline script — and never dump the whole
+// script, which the default branch would.
+func TestToolSummaryWorkflow(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"saved workflow by name", `{"name":"find-flaky-tests"}`, "Workflow: find-flaky-tests"},
+		{"inline script meta.name", `{"script":"export const meta = { name: 'review-changes', description: 'x' }; phase('Scan')"}`, "Workflow: review-changes"},
+		{"double-quoted meta.name", `{"script":"export const meta = { name: \"audit\" }"}`, "Workflow: audit"},
+		{"no name falls back", `{"args":{"q":"x"}}`, "Workflow"},
+		{"ignores keys ending in name", `{"script":"const opts = { filename: 'foo.ts' }"}`, "Workflow"},
+		{"ignores a name: inside an earlier string value", `{"script":"export const meta = { description: 'the name: \"victim\" field', name: 'real-workflow' }"}`, "Workflow: real-workflow"},
+	}
+	for _, c := range cases {
+		got := toolSummary("Workflow", json.RawMessage(c.input))
+		if got != c.want {
+			t.Errorf("%s: toolSummary(Workflow, %s) = %q, want %q", c.name, c.input, got, c.want)
+		}
+		if strings.Contains(got, "phase(") || strings.Contains(got, "export const") {
+			t.Errorf("%s: leaked the script body: %q", c.name, got)
 		}
 	}
 }

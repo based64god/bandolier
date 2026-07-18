@@ -164,6 +164,26 @@ func TestClaudeDriverToolCallTranslation(t *testing.T) {
 	}
 }
 
+// A Workflow tool call must render as kind "workflow" with a clean
+// "Workflow: <name>" title, not the generic "other" row with a dumped script.
+func TestClaudeDriverWorkflowToolCall(t *testing.T) {
+	var buf bytes.Buffer
+	a := captureEmits(&buf)
+	d := &claudeDriver{agent: a}
+	d.handle([]byte(`{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_wf","name":"Workflow","input":{"name":"review-changes"}}]}}`))
+
+	calls := collectUpdates(t, &buf)
+	if len(calls) != 1 {
+		t.Fatalf("got %d tool calls, want 1", len(calls))
+	}
+	if calls[0].Kind != acp.ToolKindWorkflow {
+		t.Errorf("kind = %q, want %q", calls[0].Kind, acp.ToolKindWorkflow)
+	}
+	if calls[0].Title != "Workflow: review-changes" {
+		t.Errorf("title = %q, want %q", calls[0].Title, "Workflow: review-changes")
+	}
+}
+
 // A subagent's tool calls must carry parentToolCallId = the spawning Agent
 // call's id, and the Agent spawn itself must render as kind "subagent" with no
 // parent — the linkage the dashboard nests on.
@@ -449,6 +469,55 @@ func TestACPAgentClaudeTurn(t *testing.T) {
 	}
 }
 
+// collectBackgroundTasks parses the _bandolier/background_tasks frames in buf,
+// returning each frame's task-id set in order.
+func collectBackgroundTasks(t *testing.T, buf interface{ String() string }) [][]string {
+	t.Helper()
+	var sets [][]string
+	for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+		if line == "" {
+			continue
+		}
+		var f struct {
+			Params struct {
+				Update json.RawMessage `json:"update"`
+			} `json:"params"`
+		}
+		if json.Unmarshal([]byte(line), &f) != nil {
+			continue
+		}
+		if acp.UpdateKind(f.Params.Update) != acp.UpdateBackgroundTasks {
+			continue
+		}
+		var u acp.BackgroundTasksUpdate
+		_ = json.Unmarshal(f.Params.Update, &u)
+		sets = append(sets, u.TaskIDs)
+	}
+	return sets
+}
+
+// A background_tasks_changed event must be forwarded to the client as a
+// _bandolier/background_tasks frame carrying the live set of task ids, so the
+// dashboard can show a "running in the background" indicator and clear it on drain.
+func TestClaudeDriverEmitsBackgroundTasks(t *testing.T) {
+	var buf bytes.Buffer
+	a := captureEmits(&buf)
+	d := &claudeDriver{agent: a}
+	d.handle([]byte(`{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"t1"},{"task_id":"t2"}]}`))
+	d.handle([]byte(`{"type":"system","subtype":"background_tasks_changed","tasks":[]}`))
+
+	sets := collectBackgroundTasks(t, &buf)
+	if len(sets) != 2 {
+		t.Fatalf("got %d background-task frames, want 2: %v", len(sets), sets)
+	}
+	if got := sets[0]; len(got) != 2 || got[0] != "t1" || got[1] != "t2" {
+		t.Errorf("first set = %v, want [t1 t2]", got)
+	}
+	if len(sets[1]) != 0 {
+		t.Errorf("drained set = %v, want empty", sets[1])
+	}
+}
+
 // A result that arrives while a background subagent task is still in flight is a
 // mid-turn yield — the CLI auto-resumes the agent (no user message) when the task
 // finishes — not the end of the user's turn. The driver must hold the ACP turn
@@ -458,7 +527,10 @@ func TestACPAgentClaudeTurn(t *testing.T) {
 // result field marks it final — see below), so it lands after the quiet window
 // rather than synchronously.
 func TestClaudeDriverHoldsTurnForBackgroundTasks(t *testing.T) {
-	d := &claudeDriver{turnDone: make(chan acp.PromptResult, 1), agent: &acpAgent{}, quietWindow: 20 * time.Millisecond}
+	// A real conn (via captureEmits): onBackgroundTasks now forwards the set to the
+	// client, so the driver's agent must be able to emit.
+	var buf bytes.Buffer
+	d := &claudeDriver{turnDone: make(chan acp.PromptResult, 1), agent: captureEmits(&buf), quietWindow: 20 * time.Millisecond}
 
 	// A background subagent spawns: one task now in flight.
 	d.handle([]byte(`{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"t1"}]}`))

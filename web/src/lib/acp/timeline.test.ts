@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   applyFrames,
+  BACKGROUND_TASKS_UPDATE,
   batchAwaitsInput,
   buildToolTree,
+  collectBackgroundTasks,
   collectSubagentCards,
   collectSubagentNarration,
   collectSubagentStatuses,
@@ -305,6 +307,56 @@ describe("applyFrames", () => {
       ],
     );
     expect(commands).toBeUndefined();
+  });
+
+  it("surfaces a background-tasks update as the live set, not a timeline item", () => {
+    const { items, backgroundTasks } = applyFrames(
+      [],
+      [
+        update(1, "sess-1", {
+          sessionUpdate: BACKGROUND_TASKS_UPDATE,
+          taskIds: ["t1", "t2"],
+        }),
+      ],
+    );
+    expect(items).toEqual([]);
+    expect(backgroundTasks).toEqual(["t1", "t2"]);
+  });
+
+  it("lets the latest background-tasks update replace the set, including a drain", () => {
+    const { backgroundTasks } = applyFrames(
+      [],
+      [
+        update(1, "s", {
+          sessionUpdate: BACKGROUND_TASKS_UPDATE,
+          taskIds: ["t1"],
+        }),
+        update(2, "s", { sessionUpdate: BACKGROUND_TASKS_UPDATE, taskIds: [] }),
+      ],
+    );
+    expect(backgroundTasks).toEqual([]);
+  });
+
+  it("treats a background-tasks update with no taskIds as an empty set", () => {
+    const { backgroundTasks } = applyFrames(
+      [],
+      [update(1, "s", { sessionUpdate: BACKGROUND_TASKS_UPDATE })],
+    );
+    expect(backgroundTasks).toEqual([]);
+  });
+
+  it("leaves backgroundTasks undefined when no update was seen", () => {
+    const { backgroundTasks } = applyFrames(
+      [],
+      [
+        update(1, "s", {
+          sessionUpdate: "agent_message_chunk",
+          messageId: "m",
+          content: { text: "hi" },
+        }),
+      ],
+    );
+    expect(backgroundTasks).toBeUndefined();
   });
 
   it("renders a replayed session/prompt frame as a user bubble", () => {
@@ -725,6 +777,52 @@ describe("groupTimeline", () => {
     expect(byId.get("agentB")!.children.map((c) => c.item.toolCallId)).toEqual([
       "b1",
     ]);
+  });
+});
+
+describe("collectBackgroundTasks", () => {
+  it("pairs each task id with its subagent spawn's label when present", () => {
+    const items: TimelineItem[] = [
+      {
+        type: "tool",
+        id: "t-a",
+        toolCallId: "task1",
+        kind: "subagent",
+        title: "Agent(Explore): find auth",
+        status: "completed",
+      },
+    ];
+    expect(collectBackgroundTasks(["task1", "task2"], items)).toEqual([
+      { id: "task1", label: "Agent(Explore): find auth" },
+      { id: "task2", label: undefined },
+    ]);
+  });
+
+  it("deduplicates ids, preserving first-seen order", () => {
+    expect(collectBackgroundTasks(["a", "b", "a"], [])).toEqual([
+      { id: "a", label: undefined },
+      { id: "b", label: undefined },
+    ]);
+  });
+
+  it("omits an empty-title spawn so the label stays undefined", () => {
+    const items: TimelineItem[] = [
+      {
+        type: "tool",
+        id: "t",
+        toolCallId: "task1",
+        kind: "subagent",
+        title: "",
+        status: "pending",
+      },
+    ];
+    expect(collectBackgroundTasks(["task1"], items)).toEqual([
+      { id: "task1", label: undefined },
+    ]);
+  });
+
+  it("returns an empty list for an empty set", () => {
+    expect(collectBackgroundTasks([], [])).toEqual([]);
   });
 });
 

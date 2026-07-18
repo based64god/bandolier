@@ -276,6 +276,7 @@ export function InteractiveRow({
           anywhere (outside links/buttons) to expand the live session. */}
       <tr
         ref={rowRef}
+        data-job-name={agent.jobName}
         onClick={() => setCollapsed((c) => !c)}
         className={`cursor-pointer scroll-mt-[var(--safe-area-inset-top)] select-none ${rowTint}`}
       >

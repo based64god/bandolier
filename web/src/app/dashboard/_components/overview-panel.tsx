@@ -142,6 +142,7 @@ export function OverviewPanel({ notify }: { notify: boolean }) {
               return (
                 <tr
                   key={`${agent.namespace}/${agent.name}`}
+                  data-job-name={agent.jobName}
                   onClick={
                     repo ? () => router.push(`/repo/${repo}`) : undefined
                   }

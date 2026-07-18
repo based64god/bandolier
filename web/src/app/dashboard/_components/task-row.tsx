@@ -151,6 +151,7 @@ export function TaskRow({
 
   return (
     <tr
+      data-job-name={agent.jobName}
       onClick={() => onOpenLogs(agent.name)}
       aria-busy={terminating}
       className={`cursor-pointer hover:bg-white/[0.04] ${

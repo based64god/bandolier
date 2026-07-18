@@ -13,6 +13,7 @@ import {
   postIssueCommentWithFallback,
 } from "~/server/agents/github-issues";
 import { buildReviewUserMessage } from "~/lib/review-prompt";
+import { extractOperatorContext } from "~/lib/issue-prompt";
 import {
   assertOwnsInteractiveJob,
   assertRepoAccess,
@@ -48,6 +49,8 @@ import {
   providerForCredentials,
   resolveModelCredentials,
   selectRunCredentials,
+  type AuthKind,
+  type RunProviderName,
 } from "~/server/agents/resolve-credentials";
 import {
   assertMayUseRepoCredentials,
@@ -57,7 +60,11 @@ import {
 } from "~/server/agents/deploy-steps";
 import { acpFrame, agentInput, taskRun } from "~/server/db/schema";
 import { getBatchV1Api, getCoreV1Api } from "~/server/k8s/client";
-import { createTRPCRouter, protectedProcedure } from "../trpc";
+import {
+  createCallerFactory,
+  createTRPCRouter,
+  protectedProcedure,
+} from "../trpc";
 
 /**
  * Sentinel input message that tells the harness to end an interactive session
@@ -990,6 +997,10 @@ export const agentsRouter = createTRPCRouter({
           repoFullName: input.repoFullName,
           branch: input.branch,
           model: input.model,
+          // Record the resolved provider + auth kind so a retrigger can pin
+          // the re-run to the same credentials.
+          modelProvider: provider ?? undefined,
+          modelAuth: authKind ?? undefined,
           // Effort applies wherever the provider has a reasoning knob;
           // providerSupportsEffort is the single opt-out point.
           effort:
@@ -1074,5 +1085,137 @@ export const agentsRouter = createTRPCRouter({
           "[bandolier:deploy] failed",
         );
       }
+    }),
+
+  // Re-run a finished task (typically one that Failed or was cancelled) as a
+  // brand-new run. Re-running means re-creating the Job from scratch under
+  // freshly resolved credentials — so we recover only the run's *parameters*
+  // (never the secrets baked into the old Job) from the original Job's pod
+  // template and replay them through `deploy`. Owner-scoped: a shared repo
+  // namespace still only lets you retrigger the tasks you spawned.
+  retrigger: protectedProcedure
+    .input(
+      z.object({
+        namespace: z.string().min(1),
+        jobName: z.string().min(1),
+        repoFullName: z.string().optional(),
+      }),
+    )
+    .mutation(async ({ input, ctx }): Promise<{ jobName: string }> => {
+      const userId = ctx.session.user.id;
+      await assertRepoAccess(ctx.db, userId, input.repoFullName);
+      const kubeconfig = await requireKubeconfig(
+        ctx.db,
+        userId,
+        input.repoFullName,
+      );
+
+      // Owner-scoped label selector, then match the job by name — mirrors how
+      // `terminate` refuses to act on a pod the caller doesn't own.
+      const jobs = await getBatchV1Api(kubeconfig)
+        .listNamespacedJob({
+          namespace: input.namespace,
+          labelSelector: ownedSelector(userId),
+        })
+        .catch((err) => rethrowAsInternal(err, "Failed to read task"));
+      const job = jobs.items.find((j) => j.metadata?.name === input.jobName);
+      if (!job) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message:
+            "This task can no longer be retriggered — its job has been cleaned up. Deploy it again from the composer.",
+        });
+      }
+
+      const container = job.spec?.template?.spec?.containers?.[0];
+      const containerEnv = container?.env ?? [];
+      const envValue = (name: string) =>
+        containerEnv.find((e) => e.name === name)?.value ?? undefined;
+      const annotations = job.metadata?.annotations ?? {};
+
+      const model = envValue("CLAUDE_MODEL");
+      if (!model) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message:
+            "Could not determine which model to retrigger this task with.",
+        });
+      }
+
+      const effort = EFFORT_LEVELS.find(
+        (level) => level === envValue("CLAUDE_EFFORT"),
+      );
+      const maxTurnsRaw = envValue("MAX_TURNS");
+      const maxTurns =
+        maxTurnsRaw && Number.isFinite(Number(maxTurnsRaw))
+          ? Number(maxTurnsRaw)
+          : undefined;
+      const outputTypeRaw = envValue("OUTPUT_TYPE");
+      const outputType =
+        outputTypeRaw === "issue"
+          ? ("issue" as const)
+          : outputTypeRaw === "review"
+            ? ("review" as const)
+            : ("pr" as const);
+      const issueRaw = envValue("GITHUB_ISSUE_NUMBER");
+      const issueNumber = issueRaw ? Number(issueRaw) : undefined;
+      const reviewRaw = envValue("REVIEW_PR_NUMBER");
+      const reviewPrNumber = reviewRaw ? Number(reviewRaw) : undefined;
+
+      // Pin the re-run to the same provider + credential kind the original
+      // resolved to (recorded as annotations at deploy time) instead of letting
+      // `deploy` re-derive from the current precedence — a retrigger must land
+      // on the same keys, not whatever is primary now. `deploy` still resolves
+      // the secret material freshly; only the *selection* is replayed. The
+      // secrets themselves are never recoverable from the Job.
+      const modelProvider = annotations["bandolier.io/model-provider"] as
+        | RunProviderName
+        | undefined;
+      const modelAuth = annotations["bandolier.io/model-auth"] as
+        | AuthKind
+        | undefined;
+
+      // Compute is on the pod spec: replay the exact CPU/memory limits the run
+      // used so a retrigger lands on the same box, rather than re-deriving from
+      // the (possibly since changed) repo/user defaults.
+      const limits = container?.resources?.limits;
+      const cpu = limits?.cpu;
+      const memory = limits?.memory;
+
+      // Issue- and review-sourced runs rebuild their prompt from GitHub at
+      // deploy time, so replaying the already-expanded CLAUDE_TASK would apply
+      // that context twice. A review carries no operator context, so it replays
+      // with an empty task; an issue run embeds the operator's additional
+      // context in CLAUDE_TASK, so recover just that section and hand it back as
+      // the task (deploy re-embeds it alongside the freshly fetched issue).
+      // Everything else replays the task prompt verbatim.
+      const storedTask = envValue("CLAUDE_TASK") ?? "";
+      const task = reviewPrNumber
+        ? ""
+        : issueNumber
+          ? extractOperatorContext(storedTask)
+          : storedTask;
+
+      const caller = createCallerFactory(agentsRouter)(ctx);
+      return caller.deploy({
+        namespace: input.namespace,
+        task,
+        repoUrl: envValue("REPO_URL"),
+        repoFullName:
+          input.repoFullName ?? annotations["bandolier.io/repo"] ?? undefined,
+        branch: envValue("BRANCH") ?? "main",
+        model,
+        modelProvider,
+        modelAuth,
+        effort,
+        maxTurns,
+        cpu,
+        memory,
+        interactive:
+          containerEnv.some((e) => e.name === "INTERACTIVE") || undefined,
+        outputType,
+        issueNumber,
+        reviewPrNumber,
+      });
     }),
 });

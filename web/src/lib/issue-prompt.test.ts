@@ -6,6 +6,7 @@ import {
   buildIssueUserMessage,
   buildResumeSystemPrompt,
   buildResumeUserMessage,
+  extractOperatorContext,
   issuePreviewBranch,
   makeIssueBranch,
 } from "~/lib/issue-prompt";
@@ -94,6 +95,26 @@ describe("buildIssueUserMessage", () => {
   it("omits the operator-context section when context is blank", () => {
     const message = buildIssueUserMessage(issue, "   ");
     expect(message).not.toContain("Additional context from the operator");
+  });
+});
+
+describe("extractOperatorContext", () => {
+  const issue = { number: 5, title: "Crash on startup", body: "It crashes." };
+
+  it("recovers the operator context from a built message", () => {
+    const message = buildIssueUserMessage(issue, "Focus on the parser.");
+    expect(extractOperatorContext(message)).toBe("Focus on the parser.");
+  });
+
+  it("preserves multi-paragraph operator context verbatim", () => {
+    const ctx = "First point.\n\n## A heading they wrote\n\nSecond point.";
+    const message = buildIssueUserMessage(issue, ctx);
+    expect(extractOperatorContext(message)).toBe(ctx);
+  });
+
+  it("returns an empty string when no operator context was appended", () => {
+    const message = buildIssueUserMessage(issue, "");
+    expect(extractOperatorContext(message)).toBe("");
   });
 });
 

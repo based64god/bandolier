@@ -664,6 +664,23 @@ describe("createAgentJob", () => {
       );
     });
 
+    it("records the resolved provider and auth kind so a retrigger can replay them", async () => {
+      await createAgentJob(
+        baseSpec({ modelProvider: "anthropic", modelAuth: "subscription" }),
+      );
+      const body = jobCall().body;
+      expect(body.metadata.annotations["bandolier.io/model-provider"]).toBe(
+        "anthropic",
+      );
+      expect(body.metadata.annotations["bandolier.io/model-auth"]).toBe(
+        "subscription",
+      );
+      // Carried on the pod too (the retrigger reads it back off the pod/Job).
+      expect(
+        body.spec.template.metadata.annotations["bandolier.io/model-provider"],
+      ).toBe("anthropic");
+    });
+
     it("labels the job with a label-safe user id verbatim", async () => {
       await createAgentJob(baseSpec());
       const body = jobCall().body;
@@ -907,16 +924,25 @@ describe("createAgentJob", () => {
         baseSpec({ anthropicApiKey: undefined, anthropicOauthToken: "oat-1" }),
       );
       expect(usageValues).toHaveBeenCalledWith(
-        expect.objectContaining({ provider: "anthropic", authKind: "subscription" }),
+        expect.objectContaining({
+          provider: "anthropic",
+          authKind: "subscription",
+        }),
       );
     });
 
     it("tags a ChatGPT-subscription run's usage as a subscription", async () => {
       await createAgentJob(
-        baseSpec({ anthropicApiKey: undefined, codexAuthJson: '{"tokens":{}}' }),
+        baseSpec({
+          anthropicApiKey: undefined,
+          codexAuthJson: '{"tokens":{}}',
+        }),
       );
       expect(usageValues).toHaveBeenCalledWith(
-        expect.objectContaining({ provider: "openai", authKind: "subscription" }),
+        expect.objectContaining({
+          provider: "openai",
+          authKind: "subscription",
+        }),
       );
     });
 

@@ -223,6 +223,8 @@ The **${opts.workflowName}** pipeline failed on this pull request's latest commi
 Investigate why it failed and push a fix so the pipeline passes. Read the failing run's logs (e.g. via \`gh run view\`) to see what broke, reproduce the failure locally where you can, and address the root cause rather than papering over it. If the failure is unrelated to the changes on this branch, say so instead of forcing a fix.`;
 }
 
+const OPERATOR_CONTEXT_HEADING = "## Additional context from the operator";
+
 /**
  * Builds the user message for a GitHub issue task: the issue context itself
  * (number, title, body) plus any operator-supplied context from the dashboard
@@ -241,7 +243,21 @@ ${body}`;
 
   const ctx = extraContext.trim();
   if (ctx) {
-    message += `\n\n## Additional context from the operator\n\n${ctx}`;
+    message += `\n\n${OPERATOR_CONTEXT_HEADING}\n\n${ctx}`;
   }
   return message;
+}
+
+/**
+ * Recovers the operator-supplied context from a message built by
+ * buildIssueUserMessage — the inverse used when replaying an issue run, whose
+ * stored prompt has the issue body baked in (rebuilt from GitHub at deploy
+ * time) but the operator's additional context only as this trailing section.
+ * Returns "" when no such section is present.
+ */
+export function extractOperatorContext(issueUserMessage: string): string {
+  const marker = `\n\n${OPERATOR_CONTEXT_HEADING}\n\n`;
+  const at = issueUserMessage.indexOf(marker);
+  if (at === -1) return "";
+  return issueUserMessage.slice(at + marker.length).trim();
 }

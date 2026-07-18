@@ -203,19 +203,33 @@ export function LogModal({
   namespace,
   jobName,
   repoFullName,
+  status,
   prompt,
   tokens,
   onClose,
+  onRetriggered,
 }: {
   podName: string;
   namespace: string;
   jobName?: string;
   repoFullName?: string;
+  // Pod phase of the task, used to offer a re-run for a Failed/cancelled one.
+  status?: string;
   prompt: string | null;
   tokens?: TokenUsage | null;
   onClose: () => void;
+  // Called with the new run's job name once a retrigger succeeds, so the
+  // dashboard can surface the fresh task and close this (now stale) log view.
+  onRetriggered?: (jobName: string) => void;
 }) {
   const [copied, setCopied] = useState(false);
+
+  // A finished-but-unsuccessful task can be re-run from here (needs its job
+  // name to look the original up server-side).
+  const canRetrigger = status === "Failed" && !!jobName;
+  const retrigger = api.agents.retrigger.useMutation({
+    onSuccess: (result) => onRetriggered?.(result.jobName),
+  });
   // How many trailing lines to fetch; grows as the user scrolls up.
   const [limit, setLimit] = useState(INITIAL_LINES);
   // Whether we're stuck to the newest line (live-follow).
@@ -321,6 +335,30 @@ export function LogModal({
             />
             {pinned ? "Live" : "Paused"}
           </span>
+          {canRetrigger && (
+            <button
+              type="button"
+              onClick={() => {
+                if (jobName)
+                  retrigger.mutate({ namespace, jobName, repoFullName });
+              }}
+              disabled={retrigger.isPending}
+              title={
+                retrigger.error?.message ?? "Run this task again as a new task"
+              }
+              className="flex items-center gap-1 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-300 hover:bg-amber-500/20 hover:text-amber-200 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <svg
+                viewBox="0 0 16 16"
+                fill="currentColor"
+                aria-hidden="true"
+                className={`h-3.5 w-3.5 ${retrigger.isPending ? "animate-spin" : ""}`}
+              >
+                <path d="M13.65 2.35a.75.75 0 0 0-1.28.53v1.2A6 6 0 1 0 14 8a.75.75 0 0 0-1.5 0A4.5 4.5 0 1 1 11.2 4.8h-1.32a.75.75 0 0 0 0 1.5h2.9a.75.75 0 0 0 .75-.75v-2.9a.75.75 0 0 0-.22-.53Z" />
+              </svg>
+              {retrigger.isPending ? "Retriggering…" : "Retrigger"}
+            </button>
+          )}
         </>
       }
     >

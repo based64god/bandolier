@@ -402,9 +402,15 @@ export function AgentDashboard({
           namespace={namespace}
           jobName={logAgent?.jobName}
           repoFullName={repoSlug ?? undefined}
+          status={logAgent?.status}
           prompt={logAgent?.prompt ?? null}
           tokens={logAgent?.tokens ?? null}
           onClose={() => setLogPod(null)}
+          onRetriggered={(jobName) => {
+            if (logAgent)
+              handleDeployed({ jobName, displayName: logAgent.displayName });
+            setLogPod(null);
+          }}
         />
       )}
       {showDeploy && namespace && selectedRepo && (

@@ -13,6 +13,23 @@ import { api } from "~/trpc/react";
 
 const POLL_INTERVAL_MS = 1500;
 
+// A collision-proof token identifying one hook instance's prompts. The relay
+// broadcasts every session/prompt frame to *all* connected clients, and each
+// client dedupes its own optimistically-rendered prompts by id — so an id space
+// shared between clients would let one client swallow another's turn. Prefixing
+// every id with a fresh random token per instance keeps a client's ids unique
+// across both concurrent clients and page reloads. Uses crypto.randomUUID where
+// available (all modern browsers), with a Math.random fallback for older or
+// non-secure contexts.
+function newClientToken(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return (
+    Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2)
+  );
+}
+
 /**
  * Drives the frontend's side of an interactive ACP session over the HTTP relay.
  * It polls agents.acpPull for the session's frames, folds them into a chat
@@ -49,16 +66,22 @@ export function useAcpSession({
 
   const itemsRef = useRef<TimelineItem[]>([]);
   const cursorRef = useRef(0);
-  // JSON-RPC ids for the prompts this instance sends. Seeded with the epoch
-  // (lazily, in sendPrompt — render must stay pure) rather than 1 so ids never
-  // collide across page reloads: replayed session/prompt frames are deduped
-  // against `sentPromptIds` by id, and a reload that reused ids 1, 2, … would
-  // wrongly swallow an earlier visit's replayed turns.
+  // Per-instance namespace + counter for the JSON-RPC ids of the prompts this
+  // client sends. The relay broadcasts every session/prompt frame to *all*
+  // connected clients (multiple tabs, the same user on two devices), and each
+  // client dedupes its own optimistically-rendered prompts against
+  // `sentPromptIds` by id. A global id space let two clients pick the same id,
+  // so one would wrongly swallow the other's prompt — the session dropped turns
+  // whenever more than one client was connected. The random per-instance token
+  // (minted lazily in sendPrompt so render stays pure) makes a client's ids
+  // unique across concurrent clients *and* page reloads, so its dedup set can
+  // never match another client's — or an earlier visit's replayed — frames.
+  const clientTokenRef = useRef("");
   const nextIdRef = useRef(0);
   // Ids of prompts sent by this instance, whose bubbles were already rendered
   // optimistically — applyFrames skips these when their frames come back
   // around on the next pull.
-  const sentPromptIdsRef = useRef(new Set<number>());
+  const sentPromptIdsRef = useRef(new Set<string>());
 
   // Poll for agent→client frames while the session is live. A manual loop (vs.
   // a useQuery keyed by the cursor) keeps the advancing cursor from churning
@@ -126,8 +149,8 @@ export function useAcpSession({
     (text: string) => {
       const trimmed = text.trim();
       if (!trimmed || !sessionId) return;
-      if (nextIdRef.current === 0) nextIdRef.current = Date.now();
-      const id = nextIdRef.current++;
+      if (!clientTokenRef.current) clientTokenRef.current = newClientToken();
+      const id = `${clientTokenRef.current}-${nextIdRef.current++}`;
       const frame = promptFrame(sessionId, id, trimmed);
       // Optimistically show the user's turn; recording the id lets applyFrames
       // skip this prompt's frame when the pull loop sees it, so the bubble

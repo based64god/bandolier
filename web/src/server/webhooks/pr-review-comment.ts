@@ -26,8 +26,10 @@ export async function handlePrReviewComment(
       pullRequestUrl: pr.html_url,
       repository,
       user: comment.user,
+      commentId: comment.id,
       body: comment.body ?? "",
       reviewId: comment.pull_request_review_id,
+      inReplyToId: comment.in_reply_to_id ?? null,
       reviewComment: {
         path: comment.path,
         line: comment.line,

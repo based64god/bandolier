@@ -92,6 +92,9 @@ export interface PullRequestReviewCommentPayload {
     side: string | null;
     // The unified-diff hunk the comment was left on.
     diff_hunk: string | null;
+    // Set on a reply to another review comment: the id of the comment it
+    // replies to, which is the inline thread's root. Absent on a root comment.
+    in_reply_to_id?: number;
   };
   pull_request: {
     number: number;

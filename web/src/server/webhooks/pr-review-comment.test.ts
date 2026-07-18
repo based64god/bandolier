@@ -38,6 +38,7 @@ function payload(
     diff_hunk?: string | null;
     user?: { id: number; login: string; type?: string };
     pull_request_review_id?: number | null;
+    in_reply_to_id?: number;
   } = {},
 ): PullRequestReviewCommentPayload {
   return {
@@ -52,6 +53,7 @@ function payload(
       start_line: overrides.start_line ?? null,
       side: "RIGHT",
       diff_hunk: overrides.diff_hunk ?? "@@ -40,3 +40,4 @@\n+  return u;",
+      in_reply_to_id: overrides.in_reply_to_id,
     },
     pull_request: {
       number: 7,
@@ -92,8 +94,19 @@ describe("handlePrReviewComment", () => {
     // The review id is forwarded so a Bandolier review's own comments can be
     // recognized and skipped downstream.
     expect(input.reviewId).toBe(900);
+    // The comment id is forwarded so it can be excluded from the folded thread.
+    expect(input.commentId).toBe(5);
     // Config is forwarded untouched.
     expect(resumeFromComment.mock.calls[0]![1]).toBe(CONFIG);
+  });
+
+  it("forwards a reply's in_reply_to_id as the thread root, null for a root comment", async () => {
+    await handlePrReviewComment(payload({ in_reply_to_id: 3 }), CONFIG);
+    expect(resumeInput().inReplyToId).toBe(3);
+
+    resumeFromComment.mockClear();
+    await handlePrReviewComment(payload(), CONFIG);
+    expect(resumeInput().inReplyToId).toBeNull();
   });
 
   it("carries the file/line/hunk metadata for the resume message", async () => {

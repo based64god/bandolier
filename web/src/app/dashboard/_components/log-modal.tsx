@@ -255,13 +255,31 @@ export function LogModal({
     const el = scrollRef.current;
     if (!el || !logs) return;
     if (limit !== prevLimit.current) {
-      el.scrollTop += el.scrollHeight - prevScrollHeight.current;
       prevLimit.current = limit;
       loadingMore.current = false;
+      // Older lines just prepended: keep the bottom pinned while live-following,
+      // otherwise hold the viewport on the content the user was reading.
+      if (pinned) el.scrollTop = el.scrollHeight;
+      else el.scrollTop += el.scrollHeight - prevScrollHeight.current;
     } else if (pinned) {
       el.scrollTop = el.scrollHeight;
     }
-  }, [logs, limit, pinned]);
+    // An in-flight pod's tail often collapses (folded tool output, subagent
+    // blocks) into content too short to overflow the viewport — leaving no
+    // scrollbar, so handleScroll's load-more never fires and the rest of the
+    // log is never fetched. Keep pulling older pages until the viewport can
+    // scroll (or the log is exhausted / capped), so history fills in without a
+    // manual scroll the user has no room to perform.
+    if (
+      !loadingMore.current &&
+      hasMore &&
+      el.scrollHeight - el.clientHeight < 40
+    ) {
+      loadingMore.current = true;
+      prevScrollHeight.current = el.scrollHeight;
+      setLimit((l) => Math.min(l + PAGE_LINES, MAX_LINES));
+    }
+  }, [logs, limit, pinned, hasMore]);
 
   function handleScroll() {
     const el = scrollRef.current;

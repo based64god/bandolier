@@ -1121,7 +1121,8 @@ export const agentsRouter = createTRPCRouter({
         });
       }
 
-      const containerEnv = job.spec?.template?.spec?.containers?.[0]?.env ?? [];
+      const container = job.spec?.template?.spec?.containers?.[0];
+      const containerEnv = container?.env ?? [];
       const envValue = (name: string) =>
         containerEnv.find((e) => e.name === name)?.value ?? undefined;
       const annotations = job.metadata?.annotations ?? {};
@@ -1155,6 +1156,15 @@ export const agentsRouter = createTRPCRouter({
       const reviewRaw = envValue("REVIEW_PR_NUMBER");
       const reviewPrNumber = reviewRaw ? Number(reviewRaw) : undefined;
 
+      // The provider/auth kind the run resolved to isn't stored on the Job, so
+      // credentials are re-resolved by `deploy`. Compute is on the pod spec,
+      // though: replay the exact CPU/memory limits the run used so a retrigger
+      // lands on the same box, rather than re-deriving from the (possibly since
+      // changed) repo/user defaults.
+      const limits = container?.resources?.limits;
+      const cpu = limits?.cpu;
+      const memory = limits?.memory;
+
       // Issue- and review-sourced runs rebuild their prompt from GitHub at
       // deploy time, so replaying the already-expanded CLAUDE_TASK would apply
       // that context twice. A review carries no operator context, so it replays
@@ -1180,6 +1190,8 @@ export const agentsRouter = createTRPCRouter({
         model,
         effort,
         maxTurns,
+        cpu,
+        memory,
         interactive:
           containerEnv.some((e) => e.name === "INTERACTIVE") || undefined,
         outputType,

@@ -267,6 +267,13 @@
       "when": 1784284205639,
       "tag": "0037_quick_tyger_tiger",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1784335940975,
+      "tag": "0038_rich_maginty",
+      "breakpoints": true
     }
   ]
 }

@@ -5,6 +5,7 @@ import {
   index,
   integer,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   unique,
@@ -506,6 +507,26 @@ export const repoCustomProviderCredentials = pgTable(
       .notNull(),
   },
   (t) => [unique().on(t.repoFullName, t.provider)],
+);
+
+// Records when a user last ran an agent on each model provider, so the
+// dashboard footer can surface the credentials that have been used recently.
+// `provider` is the canonical run-provider name — one of the four first-class
+// providers ("bedrock"/"anthropic"/"openai"/"gemini") or a gollm-proxied one as
+// "gollm:<id>" — so the indicator covers every provider gollm supports. One row
+// per (user, provider); each deploy upserts its row's lastUsedAt.
+export const credentialUsage = pgTable(
+  "credential_usage",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    lastUsedAt: timestamp("last_used_at")
+      .$defaultFn(() => /* @__PURE__ */ new Date())
+      .notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.provider] })],
 );
 
 // User-provisioned API keys. The full token is shown once at creation and only

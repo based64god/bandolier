@@ -234,6 +234,30 @@ export function usedAgoLabel(when: Date | string): string {
   return `${days}d ago`;
 }
 
+// The subscription-usage meter reading the footer renders: how full the
+// rolling-window allowance is (0–100), and a tone that shades the bar as it
+// nears the cap. Pure so it's unit-tested and shared by the dev harness.
+export function usageMeter(
+  runs: number,
+  budget: number,
+): { pct: number; tone: "ok" | "warn" | "max" } {
+  const pct = budget <= 0 ? 0 : Math.min(100, Math.round((runs / budget) * 100));
+  const tone = pct >= 90 ? "max" : pct >= 70 ? "warn" : "ok";
+  return { pct, tone };
+}
+
+// A compact "resets in …" label for a subscription window's reset time. Accepts
+// a Date (SuperJSON preserves it) or an ISO string; a window already past due
+// reads as "resetting…".
+export function resetsInLabel(when: Date | string): string {
+  const then = typeof when === "string" ? new Date(when) : when;
+  const mins = Math.round((then.getTime() - Date.now()) / 60_000);
+  if (mins <= 0) return "resetting…";
+  if (mins < 60) return `resets in ${mins}m`;
+  const hours = Math.round(mins / 60);
+  return `resets in ${hours}h`;
+}
+
 // Mirrors the `failure` field podToTask distills from a Failed pod's status.
 export interface TaskFailure {
   reason: string;

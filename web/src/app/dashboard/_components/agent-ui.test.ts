@@ -10,8 +10,10 @@ import {
   SPINNER_STATUSES,
   STATUS_ICON_PATHS,
   STATUS_STYLES,
+  resetsInLabel,
   taskNameLabel,
   taskNameTooltip,
+  usageMeter,
   usedAgoLabel,
 } from "~/app/dashboard/_components/agent-ui";
 
@@ -99,6 +101,59 @@ describe("usedAgoLabel", () => {
 
   it("accepts an ISO string too", () => {
     expect(usedAgoLabel(agoSeconds(2 * 3600).toISOString())).toBe("2h ago");
+  });
+});
+
+describe("usageMeter", () => {
+  it("returns the run/budget percentage, clamped and rounded", () => {
+    expect(usageMeter(0, 25).pct).toBe(0);
+    expect(usageMeter(5, 25).pct).toBe(20);
+    // Rounds to the nearest whole percent.
+    expect(usageMeter(1, 3).pct).toBe(33);
+    // An over-budget window can't exceed a full bar.
+    expect(usageMeter(40, 25).pct).toBe(100);
+  });
+
+  it("is empty (not NaN) when the budget is zero", () => {
+    expect(usageMeter(3, 0).pct).toBe(0);
+  });
+
+  it("escalates tone as the window fills", () => {
+    expect(usageMeter(5, 25).tone).toBe("ok"); // 20%
+    expect(usageMeter(18, 25).tone).toBe("warn"); // 72%
+    expect(usageMeter(24, 25).tone).toBe("max"); // 96%
+  });
+});
+
+describe("resetsInLabel", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T12:00:00.000Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const inSeconds = (s: number) => new Date(Date.now() + s * 1000);
+
+  it("reads 'resetting…' once the window is due", () => {
+    expect(resetsInLabel(inSeconds(0))).toBe("resetting…");
+    expect(resetsInLabel(inSeconds(-120))).toBe("resetting…");
+  });
+
+  it("counts minutes under an hour", () => {
+    expect(resetsInLabel(inSeconds(40 * 60))).toBe("resets in 40m");
+  });
+
+  it("counts hours beyond that", () => {
+    expect(resetsInLabel(inSeconds(2 * 3600))).toBe("resets in 2h");
+  });
+
+  it("accepts an ISO string too", () => {
+    expect(resetsInLabel(inSeconds(3 * 3600).toISOString())).toBe(
+      "resets in 3h",
+    );
   });
 });
 
